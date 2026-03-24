@@ -17,9 +17,10 @@ This repository uses Dev Containers so the environment works the same way for al
 
 What is automated during container initialization:
 
+- Docker Compose stack startup (`app` + `db`)
 - Python dependencies from `requirements.txt`
-- PostgreSQL readiness check
-- Initial DB migration (`0_initial_crawldb.sql`) if crawldb is not initialized yet
+- `pip` upgrade
+- Initial DB migration from `db/migrations` on first PostgreSQL volume initialization
 - Report output directory creation (`pa1/report/.out`)
 
 ### Non-VS Code setup
@@ -30,7 +31,10 @@ Run one command from repository root:
 bash scripts/bootstrap.sh
 ```
 
-This runs the same pre-create and post-create automation used by Dev Containers.
+This runs:
+- `docker compose up -d --build`
+- Python/pip setup inside the `app` container
+- DB migration inside the `db` container (if schema is not initialized)
 
 ## Maintenance commands
 
