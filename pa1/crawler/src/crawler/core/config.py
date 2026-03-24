@@ -14,6 +14,9 @@ class CrawlerConfig:
     workers: int = 4
     min_request_interval_seconds: float = 5.0
     robots_timeout_seconds: float = 15.0
+    download_timeout_seconds: float = 20.0
+    render_timeout_seconds: float = 25.0
+    download_pdf_content: bool = False
 
 
 def load_crawler_config() -> CrawlerConfig:
@@ -25,4 +28,14 @@ def load_crawler_config() -> CrawlerConfig:
             os.getenv("CRAWLER_MIN_DELAY", "5")),
         robots_timeout_seconds=float(
             os.getenv("CRAWLER_ROBOTS_TIMEOUT", "15")),
+        download_timeout_seconds=float(
+            os.getenv("CRAWLER_DOWNLOAD_TIMEOUT", "20")),
+        render_timeout_seconds=float(
+            os.getenv("CRAWLER_RENDER_TIMEOUT", "25")),
+        download_pdf_content=_parse_bool(
+            os.getenv("CRAWLER_DOWNLOAD_PDF_CONTENT", "false")),
     )
+
+
+def _parse_bool(raw_value: str) -> bool:
+    return raw_value.strip().lower() in {"1", "true", "yes", "y", "on"}
