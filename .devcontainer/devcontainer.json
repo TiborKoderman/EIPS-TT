@@ -1,27 +1,39 @@
-// For format details, see https://aka.ms/devcontainer.json. For config options, see the
-// README at: https://github.com/devcontainers/templates/tree/main/src/postgres
 {
-	"name": "Python 3 & PostgreSQL",
-	"dockerComposeFile": "docker-compose.yml",
-	"service": "app",
-	"workspaceFolder": "/workspaces/${localWorkspaceFolderBasename}",
-	"features": {
-		"ghcr.io/devcontainer-config/features/dot-config:4": {}
-	}
-
-	// Features to add to the dev container. More info: https://containers.dev/features.
-	// "features": {},
-
-	// Use 'forwardPorts' to make a list of ports inside the container available locally.
-	// This can be used to network with other containers or the host.
-	// "forwardPorts": [5000, 5432],
-
-	// Use 'postCreateCommand' to run commands after the container is created.
-	// "postCreateCommand": "pip install --user -r requirements.txt",
-
-	// Configure tool-specific properties.
-	// "customizations": {},
-
-	// Uncomment to connect as root instead. More info: https://aka.ms/dev-containers-non-root.
-	// "remoteUser": "root"
+    "name": "EIPS-TT (Python + PostgreSQL + LaTeX)",
+    "dockerComposeFile": "docker-compose.yml",
+    "service": "app",
+    "workspaceFolder": "/workspaces/${localWorkspaceFolderBasename}",
+    "shutdownAction": "stopCompose",
+    "runServices": ["app", "db"],
+    "forwardPorts": [5432],
+    "portsAttributes": {
+        "5432": {
+            "label": "PostgreSQL",
+            "onAutoForward": "notify"
+        }
+    },
+    "initializeCommand": "bash .devcontainer/pre-create.sh",
+    "postCreateCommand": "bash .devcontainer/post-create.sh",
+    "customizations": {
+        "vscode": {
+            "settings": {
+                "python.defaultInterpreterPath": "/usr/local/bin/python",
+                "python.terminal.activateEnvironment": true,
+                "jupyter.askForKernelRestart": false,
+                "latex-workshop.latex.autoBuild.run": "onSave",
+                "latex-workshop.latex.outDir": "%DIR%/.out",
+                "latex-workshop.view.pdf.viewer": "tab"
+            },
+            "extensions": [
+                "ms-python.python",
+                "ms-python.vscode-pylance",
+                "ms-toolsai.jupyter",
+                "ms-vscode-remote.remote-containers",
+                "james-yu.latex-workshop",
+                "ms-ossdata.vscode-postgresql",
+                "ms-azuretools.vscode-docker"
+            ]
+        }
+    },
+    "remoteUser": "vscode"
 }

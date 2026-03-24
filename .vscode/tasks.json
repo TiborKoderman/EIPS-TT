@@ -1,0 +1,21 @@
+{
+    "version": "2.0.0",
+    "tasks": [
+        {
+            "label": "environment: bootstrap",
+            "type": "shell",
+            "command": "bash scripts/bootstrap.sh"
+        },
+        {
+            "label": "db: reset",
+            "type": "shell",
+            "command": "bash scripts/reset-db.sh"
+        },
+        {
+            "label": "pa1: prepare submission artifacts",
+            "type": "shell",
+            "command": "bash scripts/prepare-submission.sh",
+            "group": "build"
+        }
+    ]
+}
