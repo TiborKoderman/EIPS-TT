@@ -12,7 +12,8 @@
             "onAutoForward": "notify"
         }
     },
-    "postCreateCommand": "bash .devcontainer/post-create.sh",
+    "postCreateCommand": "mkdir -p pa1/report/.out",
+    "postAttachCommand": "python --version && which python",
     "customizations": {
         "vscode": {
             "settings": {

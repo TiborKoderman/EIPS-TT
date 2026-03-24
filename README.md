@@ -14,6 +14,7 @@ This repository uses Dev Containers so the environment works the same way for al
 1. Open the repository in VS Code.
 2. Run `Dev Containers: Reopen in Container`.
 3. Wait for initialization to finish.
+4. Use interpreter `/usr/local/bin/python` (auto-selected by workspace/devcontainer settings).
 
 ### Non-VS Code setup
 
@@ -44,5 +45,10 @@ Quick check from inside container:
 ```bash
 test -f /.dockerenv && echo "inside container" || echo "on host"
 ```
+
+If you run Python and see paths like `/home/...` and `/usr/bin/python`, you are on the host, not inside the devcontainer.
+Inside the devcontainer you should see paths like `/workspaces/...` and Python at `/usr/local/bin/python`.
+
+Use VS Code launch config `Python: Current File (Devcontainer)` or task `python: run current file in container` to force container execution.
 
 No local Python, PostgreSQL, or LaTeX installation is required on the host.

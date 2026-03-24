@@ -21,6 +21,11 @@
             "label": "containers: logs db",
             "type": "shell",
             "command": "docker compose -f .devcontainer/docker-compose.yml logs --tail=1000 -f db"
+        },
+        {
+            "label": "python: run current file in container",
+            "type": "shell",
+            "command": "docker compose -f .devcontainer/docker-compose.yml exec -T --user vscode app bash -lc \"cd /workspaces/${workspaceFolderBasename} && /usr/local/bin/python ${relativeFile}\""
         }
     ]
 }
