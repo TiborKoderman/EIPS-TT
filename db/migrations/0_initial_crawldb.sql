@@ -82,15 +82,23 @@ ALTER TABLE crawldb.page_data ADD CONSTRAINT fk_page_data_page FOREIGN KEY ( pag
 
 ALTER TABLE crawldb.page_data ADD CONSTRAINT fk_page_data_data_type FOREIGN KEY ( data_type_code ) REFERENCES crawldb.data_type( code ) ON DELETE RESTRICT;
 
+ALTER TABLE crawldb.page
+	ADD COLUMN IF NOT EXISTS content_hash varchar(64),
+	ADD COLUMN IF NOT EXISTS duplicate_of integer NULL REFERENCES crawldb.page(id);
+
+CREATE INDEX IF NOT EXISTS idx_page_content_hash ON crawldb.page (content_hash);
+
 INSERT INTO crawldb.data_type VALUES 
 	('PDF'),
 	('DOC'),
 	('DOCX'),
 	('PPT'),
-	('PPTX');
+	('PPTX')
+ON CONFLICT (code) DO NOTHING;
 
 INSERT INTO crawldb.page_type VALUES 
 	('HTML'),
 	('BINARY'),
 	('DUPLICATE'),
-	('FRONTIER');
+	('FRONTIER')
+ON CONFLICT (code) DO NOTHING;
