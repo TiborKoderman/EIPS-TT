@@ -25,16 +25,42 @@ What is automated during container initialization:
 
 ### Non-VS Code setup
 
-Run one command from repository root:
+Run these Docker Compose commands from repository root:
+
+```bash
+docker compose -f .devcontainer/docker-compose.yml up -d --build
+docker compose -f .devcontainer/docker-compose.yml exec -T --user vscode app bash -lc "cd /workspaces/EIPS-TT && python -m pip install --upgrade pip && python -m pip install -r requirements.txt && mkdir -p pa1/report/.out"
+docker compose -f .devcontainer/docker-compose.yml exec -T db bash -lc "if psql -U postgres -d postgres -tAc \"SELECT to_regclass('crawldb.page');\" | grep -q \"crawldb.page\"; then echo \"Crawldb schema already initialized.\"; else psql -v ON_ERROR_STOP=1 -U postgres -d postgres -f /docker-entrypoint-initdb.d/0_initial_crawldb.sql; fi"
+```
+
+Or use the provided bootstrap script:
 
 ```bash
 bash scripts/bootstrap.sh
 ```
 
-This runs:
-- `docker compose up -d --build`
-- Python/pip setup inside the `app` container
-- DB migration inside the `db` container (if schema is not initialized)
+## Environment & Credentials
+
+- PostgreSQL runs in the local Docker stack (container `db`), not on your host machine.
+- Current credentials are defined in `.devcontainer/docker-compose.yml`:
+  - user: `postgres`
+  - password: `postgres`
+  - database: `postgres`
+- Inside the `app` container, `localhost:5432` points to the shared DB network namespace.
+
+## Useful checks
+
+- Confirm container status:
+
+```bash
+docker compose -f .devcontainer/docker-compose.yml ps
+```
+
+- Confirm you are inside a container shell:
+
+```bash
+test -f /.dockerenv && echo "inside container" || echo "on host"
+```
 
 ## Maintenance commands
 
