@@ -51,7 +51,7 @@ docker compose --profile devcontainer up -d app
 
 Use this from DB tools:
 
-`postgresql://postgres:postgres@localhost:5432/postgres`
+`postgresql://postgres:postgres@localhost:5432/crawldb`
 
 Credentials are local to your compose stack.
 
