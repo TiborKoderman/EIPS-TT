@@ -1,0 +1,68 @@
+@namespace ManagerApp.Components.Shared
+
+@using System.Text.Json
+@using ManagerApp.Models
+@inject IJSRuntime Js
+@implements IAsyncDisposable
+
+<div class="graph-shell">
+    <div class="graph-toolbar">
+        <input type="search" placeholder="Search URL/domain..." @bind="SearchTerm" @bind:event="oninput" />
+        <button class="btn" @onclick="FocusSearch"><span class="mdi mdi-crosshairs-gps"></span> Focus</button>
+        <button class="btn" @onclick="ExportSvg"><span class="mdi mdi-file-image"></span> Export SVG</button>
+    </div>
+    <div id="@GraphId" class="graph-canvas" style="height:@HeightPx;"></div>
+</div>
+
+@code {
+    [Parameter] public GraphDataDto Data { get; set; } = new();
+    [Parameter] public int Height { get; set; } = 600;
+
+    private readonly string GraphId = $"graph_{Guid.NewGuid():N}";
+    private string? SearchTerm;
+    private IJSObjectReference? _module;
+
+    private string HeightPx => $"{Height}px";
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (firstRender)
+        {
+            _module = await Js.InvokeAsync<IJSObjectReference>("import", "./js/graph.js");
+        }
+
+        if (_module != null)
+        {
+            var payload = JsonSerializer.Serialize(Data);
+            await _module.InvokeVoidAsync("renderGraph", GraphId, payload);
+        }
+    }
+
+    private async Task FocusSearch()
+    {
+        if (_module == null || string.IsNullOrWhiteSpace(SearchTerm))
+        {
+            return;
+        }
+
+        await _module.InvokeVoidAsync("focusNode", GraphId, SearchTerm.Trim());
+    }
+
+    private async Task ExportSvg()
+    {
+        if (_module == null)
+        {
+            return;
+        }
+
+        await _module.InvokeVoidAsync("exportSvg", GraphId, $"crawler-graph-{DateTime.UtcNow:yyyyMMdd-HHmmss}.svg");
+    }
+
+    public async ValueTask DisposeAsync()
+    {
+        if (_module != null)
+        {
+            await _module.DisposeAsync();
+        }
+    }
+}

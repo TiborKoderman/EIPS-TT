@@ -1,0 +1,147 @@
+@page "/graph"
+@using System.Text.Json
+@using ManagerApp.Models
+@using ManagerApp.Services
+@inject IGraphService GraphService
+@inject IJSRuntime Js
+@implements IAsyncDisposable
+
+<div class="page-header">
+    <h1 class="page-title">Node Graph</h1>
+    <p class="page-subtitle">Interactive page-link topology powered by D3</p>
+</div>
+
+<div class="page-body">
+    <div class="card mb-lg">
+        <div class="flex items-center gap-md">
+            <label class="text-small text-muted">Node limit</label>
+            <select @bind="SelectedLimit">
+                <option value="250">250</option>
+                <option value="500">500</option>
+                <option value="1000">1000</option>
+                <option value="2000">2000</option>
+            </select>
+            <button class="btn btn-primary" @onclick="ReloadGraph">
+                <span class="mdi mdi-refresh"></span> Reload
+            </button>
+        </div>
+    </div>
+
+    @if (IsLoading)
+    {
+        <div class="card"><p>Loading graph data...</p></div>
+    }
+    else if (!string.IsNullOrWhiteSpace(Error))
+    {
+        <div class="card"><p class="text-muted">@Error</p></div>
+    }
+    else
+    {
+        <div class="card mb-lg graph-card">
+            <div class="graph-shell">
+                <div class="graph-toolbar">
+                    <input type="search" placeholder="Search URL/domain..." @bind="SearchTerm" @bind:event="oninput" />
+                    <button class="btn" @onclick="FocusSearch"><span class="mdi mdi-crosshairs-gps"></span> Focus</button>
+                    <button class="btn" @onclick="ExportSvg"><span class="mdi mdi-file-image"></span> Export SVG</button>
+                </div>
+                <div id="@GraphHostId" class="graph-canvas" style="height:640px;"></div>
+            </div>
+        </div>
+    }
+
+    <div class="placeholder-note">
+        <div class="placeholder-note-title">
+            <span class="mdi mdi-tools"></span> Pending crawler capabilities for full live graph
+        </div>
+        <ul class="placeholder-note-list">
+            @foreach (var item in GraphPending)
+            {
+                <li>@item</li>
+            }
+        </ul>
+    </div>
+</div>
+
+@code {
+    private GraphDataDto GraphData = new();
+    private int SelectedLimit = 500;
+    private bool IsLoading = true;
+    private string? Error;
+    private string? SearchTerm;
+    private readonly string GraphHostId = $"graph_{Guid.NewGuid():N}";
+    private IJSObjectReference? _graphModule;
+
+    private IReadOnlyList<string> GraphPending =>
+    [
+        "Worker stream should publish live edge discoveries to keep graph continuously updated.",
+        "Replay mode requires timestamped worker navigation events with stable worker IDs.",
+        "Cluster/zoom-level grouping needs either precomputed communities or similarity metadata.",
+        "Graph export to PDF can be added once SVG export is accepted in assignment rubric."
+    ];
+
+    protected override async Task OnInitializedAsync()
+    {
+        await ReloadGraph();
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (firstRender)
+        {
+            _graphModule = await Js.InvokeAsync<IJSObjectReference>("import", "./js/graph.js");
+        }
+
+        if (_graphModule != null && !IsLoading && string.IsNullOrWhiteSpace(Error) && GraphData.Nodes.Count > 0)
+        {
+            var payload = JsonSerializer.Serialize(GraphData);
+            await _graphModule.InvokeVoidAsync("renderGraph", GraphHostId, payload);
+        }
+    }
+
+    private async Task ReloadGraph()
+    {
+        IsLoading = true;
+        Error = null;
+
+        try
+        {
+            GraphData = await GraphService.GetGraphDataAsync(SelectedLimit);
+        }
+        catch (Exception ex)
+        {
+            Error = $"Unable to load graph data: {ex.Message}";
+        }
+        finally
+        {
+            IsLoading = false;
+        }
+    }
+
+    private async Task FocusSearch()
+    {
+        if (_graphModule == null || string.IsNullOrWhiteSpace(SearchTerm))
+        {
+            return;
+        }
+
+        await _graphModule.InvokeVoidAsync("focusNode", GraphHostId, SearchTerm.Trim());
+    }
+
+    private async Task ExportSvg()
+    {
+        if (_graphModule == null)
+        {
+            return;
+        }
+
+        await _graphModule.InvokeVoidAsync("exportSvg", GraphHostId, $"crawler-graph-{DateTime.UtcNow:yyyyMMdd-HHmmss}.svg");
+    }
+
+    public async ValueTask DisposeAsync()
+    {
+        if (_graphModule != null)
+        {
+            await _graphModule.DisposeAsync();
+        }
+    }
+}

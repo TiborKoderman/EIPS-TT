@@ -1,0 +1,189 @@
+﻿@page "/"
+@using ManagerApp.Services
+@using ManagerApp.Models
+@inject IStatisticsService StatisticsService
+@inject IWorkerService WorkerService
+
+<div class="page-header">
+    <h1 class="page-title">Dashboard</h1>
+    <p class="page-subtitle">Overview of crawler statistics and worker status</p>
+</div>
+
+<div class="page-body">
+    @if (isLoading)
+    {
+        <div class="text-center mt-lg">
+            <p>Loading statistics...</p>
+        </div>
+    }
+    else if (stats != null)
+    {
+        <div class="grid grid-cols-4 mb-lg">
+            <StatCard Label="Total Sites" Value="@stats.TotalSites.ToString()" Footnote="Crawled domains" />
+            <StatCard Label="Total Pages" Value="@stats.TotalPages.ToString()" Footnote="@($"{stats.HtmlPages} HTML pages")" />
+            <StatCard Label="Duplicates" Value="@stats.DuplicatePages.ToString()" Footnote="Duplicate detections" />
+            <StatCard Label="Images" Value="@stats.TotalImages.ToString()" Footnote="@($"Avg: {stats.AverageImagesPerPage} per page")" />
+        </div>
+
+        @if (stats.BinaryFileCounts.Any())
+        {
+            <div class="card mb-lg">
+                <h2 class="card-title">Binary Files</h2>
+                <div class="grid grid-cols-4">
+                    @foreach (var (type, count) in stats.BinaryFileCounts)
+                    {
+                        <div>
+                            <div class="text-small text-muted">@type</div>
+                            <div style="font-size: 20px; font-weight: 600;">@count</div>
+                        </div>
+                    }
+                </div>
+            </div>
+        }
+
+        <div class="grid grid-cols-2 mb-lg">
+            <div class="card">
+                <h2 class="card-title">Worker Status</h2>
+                @if (workerStatusCounts != null && workerStatusCounts.Any())
+                {
+                    <div class="dashboard-worker-status">
+                        <WorkerStatusPieChart StatusCounts="workerStatusCounts"
+                                              SelectedStatus="selectedWorkerStatus"
+                                              OnSliceClick="OnWorkerSliceClick" />
+                        <div class="dashboard-worker-status-list">
+                            @foreach (var (status, count) in workerStatusCounts.OrderBy(kv => kv.Key))
+                            {
+                                <button class="status-row @(selectedWorkerStatus == status ? "active" : "")"
+                                        @onclick="() => ToggleWorkerStatus(status)">
+                                    <span class="badge @GetStatusBadgeClass(status)">@status</span>
+                                    <span>@count</span>
+                                </button>
+                            }
+                        </div>
+                    </div>
+
+                    <div class="mt-md">
+                        <a href="/workers" class="btn btn-primary">View All Workers</a>
+                    </div>
+                }
+                else
+                {
+                    <p class="text-muted">No workers currently running</p>
+                }
+            </div>
+
+            <div class="card">
+                <h2 class="card-title">Workers Snapshot</h2>
+                @if (visibleWorkers.Count == 0)
+                {
+                    <p class="text-muted">No workers available.</p>
+                }
+                else
+                {
+                    <ul class="list dashboard-worker-list">
+                        @foreach (var worker in visibleWorkers.Take(6))
+                        {
+                            <li class="list-item">
+                                <div class="flex items-center justify-between gap-sm">
+                                    <strong>@worker.Name</strong>
+                                    <span class="badge @GetStatusBadgeClass(worker.Status)">@worker.Status</span>
+                                </div>
+                                <div class="text-small text-muted">@worker.CurrentUrl</div>
+                            </li>
+                        }
+                    </ul>
+                }
+            </div>
+        </div>
+
+        <div class="card">
+            <h2 class="card-title">Quick Actions</h2>
+            <div class="flex gap-md">
+                <a href="/pages" class="btn">
+                    <span class="mdi mdi-file-search"></span>
+                    Search Pages
+                </a>
+                <a href="/graph" class="btn">
+                    <span class="mdi mdi-graph"></span>
+                    View Graph
+                </a>
+                <a href="/graph" class="btn">
+                    <span class="mdi mdi-open-in-new"></span>
+                    Open Full Graph
+                </a>
+                <a href="/workers" class="btn">
+                    <span class="mdi mdi-robot"></span>
+                    Manage Workers
+                </a>
+            </div>
+        </div>
+
+        <div class="text-small text-muted mt-md text-center">
+            Last updated: @stats.LastUpdated.ToString("yyyy-MM-dd HH:mm:ss UTC")
+        </div>
+    }
+    else
+    {
+        <div class="card">
+            <p class="text-muted">Failed to load statistics. Please ensure the database is running.</p>
+        </div>
+    }
+</div>
+
+@code {
+    private StatisticsViewModel? stats;
+    private Dictionary<string, int>? workerStatusCounts;
+    private List<WorkerViewModel> workers = new();
+    private string? selectedWorkerStatus;
+    private bool isLoading = true;
+
+    private List<WorkerViewModel> visibleWorkers => workers
+        .Where(w => selectedWorkerStatus == null || string.Equals(w.Status, selectedWorkerStatus, StringComparison.OrdinalIgnoreCase))
+        .OrderBy(w => w.Name)
+        .ToList();
+
+    protected override async Task OnInitializedAsync()
+    {
+        try
+        {
+            stats = await StatisticsService.GetStatisticsAsync();
+            workerStatusCounts = await WorkerService.GetWorkerStatusCountsAsync();
+            workers = await WorkerService.GetAllWorkersAsync();
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"Error loading dashboard data: {ex.Message}");
+            stats = null;
+        }
+        finally
+        {
+            isLoading = false;
+        }
+    }
+
+    private Task OnWorkerSliceClick(string status)
+    {
+        ToggleWorkerStatus(status);
+        return Task.CompletedTask;
+    }
+
+    private void ToggleWorkerStatus(string status)
+    {
+        selectedWorkerStatus = string.Equals(selectedWorkerStatus, status, StringComparison.OrdinalIgnoreCase)
+            ? null
+            : status;
+    }
+
+    private string GetStatusBadgeClass(string status)
+    {
+        return status.ToLowerInvariant() switch
+        {
+            "active" => "badge-success",
+            "error" => "badge-error",
+            "idle" => "badge-info",
+            "paused" => "badge-warning",
+            _ => "badge-info"
+        };
+    }
+}
+

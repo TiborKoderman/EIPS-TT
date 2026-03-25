@@ -1,0 +1,28 @@
+﻿@namespace ManagerApp.Components.Layout
+
+<nav class="sidebar-nav">
+    <NavLink class="nav-item" href="/" Match="NavLinkMatch.All">
+        <span class="mdi mdi-view-dashboard nav-item-icon"></span>
+        <span>Dashboard</span>
+    </NavLink>
+
+    <NavLink class="nav-item" href="/workers">
+        <span class="mdi mdi-robot nav-item-icon"></span>
+        <span>Workers</span>
+    </NavLink>
+
+    <NavLink class="nav-item" href="/graph">
+        <span class="mdi mdi-graph nav-item-icon"></span>
+        <span>Node Graph</span>
+    </NavLink>
+
+    <NavLink class="nav-item" href="/pages">
+        <span class="mdi mdi-file-document-multiple nav-item-icon"></span>
+        <span>Collected Pages</span>
+    </NavLink>
+</nav>
+
+@code {
+    // NavLink automatically adds "active" class when the current route matches
+}
+

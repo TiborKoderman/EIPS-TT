@@ -95,3 +95,107 @@ since blazor uses websockets or singnalr or whatever, use this as an advantage t
 For now setup gui layout, components, elements, etc., the database connection, and whatever is possible with our current implementation, but mark the elements that need to be implemented on the python side here as well, and document the parts that need to be implemented/finished/changed to implement the feature, although try to plan the gui in a way that it will work with placeholders, so it will not have to change later much
 
 create a coherant step by step implementation plan to follow when implementing this module, to be copilot optimized. reference the code, the instructions and this file whenever needed, document implemented steps, and requirements for the ones that cannot be done (what crawler code needs to have implemented and how), prioritize the parts that are listed in instructions.md and the ones that the worker implementation already supports, but plan ahead for the missing parts and implement the parts you can.
+
+---
+
+## Manager GUI Implementation Tracker (copilot optimized)
+
+### 1. Foundation and architecture
+- [x] Create isolated `manager/ManagerApp` Blazor Server project.
+- [x] Wire EF Core with PostgreSQL via `CrawldbContext` (DB-first model classes).
+- [x] Keep DB migration ownership in `db/migrations` (manager reads schema only).
+- [x] Read connection source-of-truth from repo docker defaults (`localhost:5432`, `crawldb`, `postgres/postgres`).
+- [x] Register service layer abstractions (`IStatisticsService`, `IGraphService`, `IPageService`, `IWorkerService`).
+- [x] Add SignalR hub endpoint (`/crawlerhub`) for live updates.
+
+### 2. Core UI shell and style system
+- [x] Implement admin shell layout (sidebar + content area).
+- [x] Centralize design tokens in `wwwroot/css/theme.css` (GitLab-light inspired variables).
+- [x] Add global app styles in `wwwroot/css/app.css`.
+- [x] Load MDI icon library and apply icon-first nav/actions.
+- [x] Add reusable components:
+  - [x] `IconButton`
+  - [x] `StatCard`
+  - [x] `WorkerStatusPieChart`
+  - [x] `PlaceholderNotice`
+  - [x] `ForceGraph`
+
+### 3. Dashboard page (`/`)
+- [x] Statistics cards (sites, pages, duplicates, images).
+- [x] Binary type breakdown widget.
+- [x] Worker status pie chart with click-to-filter behavior.
+- [x] Scrollable worker quick list with status badges.
+- [x] Quick actions to workers/graph/pages views.
+- [ ] Live server resource metrics (CPU/RAM/IO) once manager host telemetry source is defined.
+
+### 4. Workers page (`/workers`)
+- [x] Worker list with status badges and quick actions (start/pause/stop).
+- [x] Search + status filtering.
+- [x] Add-worker UI stub for local worker spawning phase.
+- [x] Explicit UI note for Python API work needed.
+- [ ] Dedicated worker setup form with strategy/proxy/seed parameter editor.
+- [ ] Bulk operations and grouping model.
+- [ ] Full logs/events timeline panel.
+
+### 5. Graph page (`/graph`)
+- [x] D3 force graph with:
+  - [x] pan/zoom
+  - [x] drag nodes
+  - [x] tooltips
+  - [x] node sizing from incoming edges
+  - [x] search + focus highlight
+  - [x] SVG export
+- [x] Node limit controls for performance.
+- [x] Live-ready placeholders documented.
+- [ ] Rich side panel (connected-only view, type filters, node details pinning).
+- [ ] Replay timeline based on worker navigation events.
+
+### 6. Collected pages page (`/pages`)
+- [x] Search UI (URL/content contains, page type filter).
+- [x] Results list + details panel.
+- [x] "Show on graph" navigation entry.
+- [ ] True fuzzy ranking and faceted filtering.
+- [ ] Deep detail diff/duplicate-cluster view.
+
+### 7. Worker API contract required from Python side
+These are required so current placeholders become fully functional without structural GUI rewrite.
+
+#### 7.1 Minimum endpoints/events
+- [ ] `GET /api/workers` -> worker list + health/status.
+- [ ] `POST /api/workers/{id}/start`
+- [ ] `POST /api/workers/{id}/pause`
+- [ ] `POST /api/workers/{id}/stop`
+- [ ] `POST /api/workers/spawn` (local or remote mode)
+- [ ] `GET /api/workers/{id}/logs`
+- [ ] SignalR or websocket stream for:
+  - [ ] worker status changes
+  - [ ] page crawled events
+  - [ ] link discovered events
+  - [ ] errors/dead-links/spider-trap events
+
+#### 7.2 Synchronization and strategy controls
+- [ ] Domain ownership coordination API so workers avoid duplicate same-domain traversal.
+- [ ] Runtime strategy update endpoint (global and per-worker).
+- [ ] Seed domain mutation endpoint during run.
+- [ ] Shared queue/priority telemetry endpoint for manager visualization.
+
+#### 7.3 Worker bootstrap/auth
+- [ ] Token issuance endpoint for worker registration.
+- [ ] Token validation and expiry policy.
+- [ ] Optional generated startup snippet (docker command/env block).
+
+### 8. Security/auth extension hooks (future)
+- [x] Keep manager architecture ready for auth insertion (service boundaries + API shape).
+- [ ] Add ASP.NET auth middleware and role policy once user model is approved.
+
+### 9. Implementation sequence (next iterations)
+1. Stabilize and test current pages against realistic DB data volume.
+2. Implement Python worker API (minimum contract above) and replace mock `WorkerService`.
+3. Switch dashboard and workers page to live SignalR-driven updates.
+4. Add graph side panel and replay timeline.
+5. Add batch worker operations and setup wizard.
+6. Add optional auth and audit logging.
+
+### 10. Current completion summary
+- GUI skeleton, modular components, DB-backed stats/search, and D3 interactive graph are implemented.
+- Worker orchestration, replay/live crawler coordination, and remote onboarding remain pending Python API support.

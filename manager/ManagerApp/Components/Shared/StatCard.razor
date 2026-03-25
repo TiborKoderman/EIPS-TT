@@ -1,0 +1,16 @@
+@namespace ManagerApp.Components.Shared
+
+<div class="card stat-card">
+    <div class="stat-label">@Label</div>
+    <div class="stat-value">@Value</div>
+    @if (!string.IsNullOrWhiteSpace(Footnote))
+    {
+        <div class="text-small text-muted">@Footnote</div>
+    }
+</div>
+
+@code {
+    [Parameter] public string Label { get; set; } = "";
+    [Parameter] public string Value { get; set; } = "0";
+    [Parameter] public string? Footnote { get; set; }
+}

@@ -1,0 +1,33 @@
+﻿@inherits LayoutComponentBase
+<div class="app-container">
+    <aside class="sidebar">
+        <div class="sidebar-header">
+            <span class="mdi mdi-spider"></span> Crawler Manager
+        </div>
+        <nav class="sidebar-nav">
+            <a class="nav-item" href="/">
+                <span class="mdi mdi-view-dashboard nav-item-icon"></span>
+                <span>Dashboard</span>
+            </a>
+
+            <a class="nav-item" href="/workers">
+                <span class="mdi mdi-robot nav-item-icon"></span>
+                <span>Workers</span>
+            </a>
+
+            <a class="nav-item" href="/graph">
+                <span class="mdi mdi-graph nav-item-icon"></span>
+                <span>Node Graph</span>
+            </a>
+
+            <a class="nav-item" href="/pages">
+                <span class="mdi mdi-file-document-multiple nav-item-icon"></span>
+                <span>Collected Pages</span>
+            </a>
+        </nav>
+    </aside>
+
+    <main class="main-content">
+        @Body
+    </main>
+</div>

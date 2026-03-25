@@ -1,0 +1,18 @@
+@namespace ManagerApp.Components.Shared
+
+<div class="placeholder-note">
+    <div class="placeholder-note-title">
+        <span class="mdi mdi-tools"></span> @Title
+    </div>
+    <ul class="placeholder-note-list">
+        @foreach (var item in Items)
+        {
+            <li>@item</li>
+        }
+    </ul>
+</div>
+
+@code {
+    [Parameter] public string Title { get; set; } = "Pending Python-side work";
+    [Parameter] public IReadOnlyList<string> Items { get; set; } = Array.Empty<string>();
+}

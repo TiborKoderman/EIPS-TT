@@ -1,0 +1,161 @@
+@page "/workers"
+@using ManagerApp.Models
+@using ManagerApp.Services
+@inject IWorkerService WorkerService
+
+<div class="page-header">
+    <h1 class="page-title">Workers</h1>
+    <p class="page-subtitle">Manage crawler workers and inspect runtime state</p>
+</div>
+
+<div class="page-body">
+    <div class="card mb-lg">
+        <div class="flex items-center justify-between gap-md">
+            <div class="flex items-center gap-md">
+                <input type="search" placeholder="Filter workers by name or URL..." @bind="SearchTerm" @bind:event="oninput" />
+                <select @bind="StatusFilter">
+                    <option value="ALL">All statuses</option>
+                    @foreach (var status in Statuses)
+                    {
+                        <option value="@status">@status</option>
+                    }
+                </select>
+            </div>
+            <div class="flex items-center gap-sm">
+                <button class="btn btn-primary" @onclick="AddMockWorker">
+                    <span class="mdi mdi-plus"></span> Add Worker
+                </button>
+                <button class="btn" disabled title="Planned: spawn via Python API tokenized setup">
+                    <span class="mdi mdi-server-plus"></span> Add Remote
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <div class="card mb-lg">
+        <h2 class="card-title">Worker Fleet</h2>
+        @if (FilteredWorkers.Count == 0)
+        {
+            <p class="text-muted">No workers match current filters.</p>
+        }
+        else
+        {
+            <ul class="list">
+                @foreach (var worker in FilteredWorkers)
+                {
+                    <li class="list-item worker-row">
+                        <div class="worker-row-main">
+                            <div class="worker-title">@worker.Name</div>
+                            <div class="text-small text-muted">@worker.CurrentUrl</div>
+                            <div class="text-small">Processed: @worker.PagesProcessed | Errors: @worker.ErrorCount</div>
+                        </div>
+                        <div class="worker-row-actions">
+                            <span class="badge @GetStatusBadgeClass(worker.Status)">@worker.Status</span>
+                            <button class="btn btn-icon" title="Start" aria-label="Start" @onclick="() => Start(worker.Id)" type="button">
+                                <span class="mdi mdi-play"></span>
+                            </button>
+                            <button class="btn btn-icon" title="Pause" aria-label="Pause" @onclick="() => Pause(worker.Id)" type="button">
+                                <span class="mdi mdi-pause"></span>
+                            </button>
+                            <button class="btn btn-icon" title="Stop" aria-label="Stop" @onclick="() => Stop(worker.Id)" type="button">
+                                <span class="mdi mdi-stop"></span>
+                            </button>
+                        </div>
+                    </li>
+                }
+            </ul>
+        }
+    </div>
+
+    <div class="placeholder-note">
+        <div class="placeholder-note-title">
+            <span class="mdi mdi-tools"></span> Python Worker API required for full worker management
+        </div>
+        <ul class="placeholder-note-list">
+            @foreach (var item in WorkerApiPending)
+            {
+                <li>@item</li>
+            }
+        </ul>
+    </div>
+</div>
+
+@code {
+    private List<WorkerViewModel> workerItems = new();
+    private string SearchTerm { get; set; } = "";
+    private string StatusFilter { get; set; } = "ALL";
+
+    private IReadOnlyList<string> WorkerApiPending =>
+    [
+        "Expose REST or SignalR endpoints for start, stop, pause, and status updates.",
+        "Publish worker stack/progress snapshots to enable live route visualization.",
+        "Provide signed bootstrap payload (token + manager endpoint) for remote worker onboarding.",
+        "Emit structured runtime events (dead links, traps, retry/failure reasons)."
+    ];
+
+    private IReadOnlyList<string> Statuses => workerItems
+        .Select(w => w.Status)
+        .Distinct(StringComparer.OrdinalIgnoreCase)
+        .OrderBy(s => s)
+        .ToList();
+
+    private List<WorkerViewModel> FilteredWorkers => workerItems
+        .Where(w => StatusFilter == "ALL" || string.Equals(w.Status, StatusFilter, StringComparison.OrdinalIgnoreCase))
+        .Where(w => string.IsNullOrWhiteSpace(SearchTerm)
+            || w.Name.Contains(SearchTerm, StringComparison.OrdinalIgnoreCase)
+            || (w.CurrentUrl?.Contains(SearchTerm, StringComparison.OrdinalIgnoreCase) ?? false))
+        .OrderBy(w => w.Name)
+        .ToList();
+
+    protected override async Task OnInitializedAsync()
+    {
+        workerItems = await WorkerService.GetAllWorkersAsync();
+    }
+
+    private async Task Start(int id)
+    {
+        await WorkerService.StartWorkerAsync(id);
+        workerItems = await WorkerService.GetAllWorkersAsync();
+    }
+
+    private async Task Pause(int id)
+    {
+        await WorkerService.PauseWorkerAsync(id);
+        workerItems = await WorkerService.GetAllWorkersAsync();
+    }
+
+    private async Task Stop(int id)
+    {
+        await WorkerService.StopWorkerAsync(id);
+        workerItems = await WorkerService.GetAllWorkersAsync();
+    }
+
+    private Task AddMockWorker()
+    {
+        var maxId = workerItems.Count == 0 ? 0 : workerItems.Max(w => w.Id);
+        workerItems.Add(new WorkerViewModel
+        {
+            Id = maxId + 1,
+            Name = $"Worker-{maxId + 1}",
+            Status = "Idle",
+            CurrentUrl = null,
+            PagesProcessed = 0,
+            ErrorCount = 0,
+            StartedAt = DateTime.UtcNow
+        });
+
+        return Task.CompletedTask;
+    }
+
+    private string GetStatusBadgeClass(string status)
+    {
+        return status.ToLowerInvariant() switch
+        {
+            "active" => "badge-success",
+            "error" => "badge-error",
+            "idle" => "badge-info",
+            "paused" => "badge-warning",
+            _ => "badge-info"
+        };
+    }
+}

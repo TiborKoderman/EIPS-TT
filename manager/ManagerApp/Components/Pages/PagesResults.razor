@@ -1,0 +1,115 @@
+@page "/pages"
+@using ManagerApp.Data
+@using ManagerApp.Models
+@using ManagerApp.Services
+@inject IPageService PageService
+
+<div class="page-header">
+    <h1 class="page-title">Collected Pages</h1>
+    <p class="page-subtitle">Search indexed pages and inspect crawl metadata</p>
+</div>
+
+<div class="page-body">
+    <div class="card mb-lg">
+        <div class="grid grid-cols-3 gap-md">
+            <input type="search" placeholder="Search URL or content..." @bind="SearchTerm" @bind:event="oninput" />
+            <select @bind="PageTypeFilter">
+                <option value="ALL">All page types</option>
+                <option value="HTML">HTML</option>
+                <option value="BINARY">BINARY</option>
+                <option value="DUPLICATE">DUPLICATE</option>
+                <option value="FRONTIER">FRONTIER</option>
+            </select>
+            <button class="btn btn-primary" @onclick="Reload">
+                <span class="mdi mdi-magnify"></span> Search
+            </button>
+        </div>
+    </div>
+
+    <div class="grid grid-cols-2">
+        <div class="card">
+            <h2 class="card-title">Results (@Total)</h2>
+            @if (Rows.Count == 0)
+            {
+                <p class="text-muted">No pages found for current query.</p>
+            }
+            else
+            {
+                <ul class="list page-results-list">
+                    @foreach (var row in Rows)
+                    {
+                        <li class="list-item page-row @(SelectedPage?.Id == row.Id ? "selected" : "")"
+                            @onclick="() => SelectPage(row.Id)">
+                            <div class="text-small text-muted">@row.SiteDomain</div>
+                            <div class="page-url">@row.Url</div>
+                            <div class="flex items-center gap-sm">
+                                <span class="badge badge-info">@row.PageType</span>
+                                <span class="text-small text-muted">HTTP @row.HttpStatus</span>
+                                @if (row.IsDuplicate)
+                                {
+                                    <span class="badge badge-warning">Duplicate</span>
+                                }
+                            </div>
+                        </li>
+                    }
+                </ul>
+            }
+        </div>
+
+        <div class="card">
+            <h2 class="card-title">Details</h2>
+            @if (SelectedPage == null)
+            {
+                <p class="text-muted">Select a result to show page metadata.</p>
+            }
+            else
+            {
+                <div class="flex flex-col gap-sm">
+                    <div><strong>URL:</strong> @SelectedPage.Url</div>
+                    <div><strong>Type:</strong> @SelectedPage.PageTypeCode</div>
+                    <div><strong>HTTP:</strong> @SelectedPage.HttpStatusCode</div>
+                    <div><strong>Accessed:</strong> @SelectedPage.AccessedTime</div>
+                    <div><strong>Images:</strong> @SelectedPage.Images.Count</div>
+                    <div><strong>Binary blobs:</strong> @SelectedPage.PageData.Count</div>
+                    <a class="btn mt-md" href="/graph">
+                        <span class="mdi mdi-graph-outline"></span> Show on Graph
+                    </a>
+                </div>
+            }
+        </div>
+    </div>
+</div>
+
+@code {
+    private string SearchTerm { get; set; } = "";
+    private string PageTypeFilter { get; set; } = "ALL";
+    private int Total;
+
+    private List<PageSearchDto> Rows = new();
+    private Page? SelectedPage;
+
+    protected override async Task OnInitializedAsync()
+    {
+        await Reload();
+    }
+
+    private async Task Reload()
+    {
+        Rows = await PageService.SearchPagesAsync(SearchTerm, PageTypeFilter, 0, 120);
+        Total = await PageService.GetSearchResultsCountAsync(SearchTerm, PageTypeFilter);
+
+        if (Rows.Count > 0)
+        {
+            await SelectPage(Rows[0].Id);
+        }
+        else
+        {
+            SelectedPage = null;
+        }
+    }
+
+    private async Task SelectPage(int pageId)
+    {
+        SelectedPage = await PageService.GetPageDetailsAsync(pageId);
+    }
+}
