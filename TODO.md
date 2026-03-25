@@ -40,14 +40,14 @@ For standalone manager setup/run instructions, see [ManagerApp/README.md](Manage
 
 ### ✅ Initialize .NET Blazor Server project and add required NuGet packages
 **Status:** COMPLETED
-**Description:** Created new Blazor Server project with .NET 8 and added Entity Framework Core, PostgreSQL provider, and tools
+**Description:** Created new Blazor Server project with .NET 10 and added Entity Framework Core, PostgreSQL provider, and tools
 
 **Files Created/Modified:**
 - `/home/tibor/Repos/EIPS-TT/ManagerApp/` - Project directory
 - Added NuGet packages:
-  - Npgsql.EntityFrameworkCore.PostgreSQL 8.0.10
-  - Microsoft.EntityFrameworkCore.Design 8.0.11
-  - Microsoft.EntityFrameworkCore.Tools 8.0.11
+  - Npgsql.EntityFrameworkCore.PostgreSQL 10.0.1
+  - Microsoft.EntityFrameworkCore.Design 10.0.5
+  - Microsoft.EntityFrameworkCore.Tools 10.0.5
 
 ---
 
@@ -274,8 +274,8 @@ For standalone manager setup/run instructions, see [ManagerApp/README.md](Manage
 
 ## Technology Stack
 
-- **.NET 8** Blazor Server
-- **Entity Framework Core 8** (Database-first)
+- **.NET 10** Blazor Server
+- **Entity Framework Core 10** (Database-first)
 - **PostgreSQL** via Npgsql
 - **D3.js v7** (Graph visualization)
 - **Material Design Icons** (Icon library)

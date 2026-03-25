@@ -1,7 +1,7 @@
 # Blazor Manager GUI - Comprehensive Implementation Plan
 
 **Project:** EIPS-TT Web Crawler Manager
-**Technology:** .NET 8 Blazor Server with SignalR
+**Technology:** .NET 10 Blazor Server with SignalR
 **Database:** PostgreSQL (crawldb)
 **Current Status:** Phase 1-5 Complete, Phase 6 In Progress
 **Last Updated:** 2026-03-26
@@ -52,13 +52,13 @@ This plan implements a web-based manager GUI for the EIPS-TT web crawler project
 ## Technology Stack
 
 ### Core Framework
-- **.NET 8 SDK** (latest LTS)
+- **.NET 10 SDK** (current)
 - **Blazor Server** (built-in SignalR support)
-- **ASP.NET Core 8** (web framework)
+- **ASP.NET Core 10** (web framework)
 
 ### Database & ORM
-- **Entity Framework Core 8** (database-first approach)
-- **Npgsql.EntityFrameworkCore.PostgreSQL 8.0.10** (PostgreSQL provider)
+- **Entity Framework Core 10** (database-first approach)
+- **Npgsql.EntityFrameworkCore.PostgreSQL 10.0.1** (PostgreSQL provider)
 - **PostgreSQL** (crawldb database)
 
 ### Frontend Libraries
@@ -69,9 +69,9 @@ This plan implements a web-based manager GUI for the EIPS-TT web crawler project
 ### NuGet Packages
 ```xml
 <!-- Core Dependencies -->
-Npgsql.EntityFrameworkCore.PostgreSQL 8.0.10
-Microsoft.EntityFrameworkCore.Design 8.0.11
-Microsoft.EntityFrameworkCore.Tools 8.0.11
+Npgsql.EntityFrameworkCore.PostgreSQL 10.0.1
+Microsoft.EntityFrameworkCore.Design 10.0.5
+Microsoft.EntityFrameworkCore.Tools 10.0.5
 
 <!-- Built-in with Blazor Server -->
 Microsoft.AspNetCore.SignalR
