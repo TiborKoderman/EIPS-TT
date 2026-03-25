@@ -9,11 +9,13 @@ RUN rm -f /etc/apt/sources.list.d/yarn*.list \
   && export DEBIAN_FRONTEND=noninteractive \
   && apt-get install -y --no-install-recommends \
     postgresql-client \
+    lmodern \
     latexmk \
     texlive-latex-recommended \
     texlive-latex-extra \
     texlive-fonts-recommended \
     texlive-lang-english \
+    texlive-publishers \
     texlive-science \
   && python -m pip install --upgrade pip \
   && python -m pip install -r /tmp/requirements.txt \

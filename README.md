@@ -1,74 +1,73 @@
 # EIPS-TT - Preferential Crawler (PA1)
 
-Clean default setup:
-- Python in local `.venv`
-- PostgreSQL in Docker (`docker compose`)
-- Optional devcontainer (not required)
+Single-compose setup with two modes:
+- host mode: local `.venv` + `db` service
+- devcontainer mode: `app` + `db` services
 
-## Recommended One-Command Setup
+`docker-compose.yml` is shared by both modes. If you only want host mode, do not start `app`.
+
+## Recommended Workflow
 
 ```bash
-bash scripts/bootstrap.sh
+# restore python env from requirements.txt
+bash scripts/venv-restore.sh
+
+# start postgres and apply migrations
+bash scripts/db-migrate.sh
 ```
 
-Safe to rerun after pulling new changes (it refreshes `.venv` packages, starts DB, and ensures base migration exists).
-
-## Manual Setup (Docker Compose + .venv)
+When dependencies change:
 
 ```bash
-# 1) Start PostgreSQL
-docker compose up -d db
+# save current .venv packages back to requirements.txt
+bash scripts/venv-dump.sh
+```
 
-# 2) Create and use Python virtual environment
-python3 -m venv .venv
+## Host Mode (No Devcontainer)
+
+```bash
+bash scripts/venv-restore.sh
 source .venv/bin/activate
-python -m pip install --upgrade pip
-python -m pip install -r requirements.txt
-
-# 3) Initialize DB schema once (if needed)
-docker compose exec -T db psql -U postgres -d postgres -f /docker-entrypoint-initdb.d/0_initial_crawldb.sql
+docker compose up -d db
+bash scripts/db-migrate.sh
+python pa1/crawler/src/db/pg_connect.py
 ```
 
-Or use the provided bootstrap script instead:
+## Devcontainer Mode (Optional)
+
+1. Open this repository folder in VS Code.
+2. Run `Dev Containers: Rebuild and Reopen in Container`.
+3. The container uses `/usr/local/bin/python`, while host mode uses `.venv/bin/python`.
+
+Both interpreter paths are only active in their own context.
+
+Non-VS Code equivalent (for quick container checks):
 
 ```bash
-bash scripts/bootstrap.sh
+docker compose --profile devcontainer up -d app
 ```
 
 ## Database Connection
 
-Use this from your DB client/tool:
+Use this from DB tools:
 
 `postgresql://postgres:postgres@localhost:5432/postgres`
 
-Credentials are local to your Docker Compose stack (`docker-compose.yml`), not shared externally.
+Credentials are local to your compose stack.
 
-## Test Python ↔ PostgreSQL
-
-```bash
-source .venv/bin/activate
-python pa1/crawler/src/db/pg_connect.py
-```
-
-## VS Code
-
-- Workspace default interpreter: `${workspaceFolder}/.venv/bin/python`
-- If it does not auto-pick, run `Python: Select Interpreter` and choose `.venv/bin/python`.
-- The old `.code-workspace` file was removed to avoid devcontainer/workspace nesting issues.
-
-## Useful Commands
+## Utility Commands
 
 ```bash
-# Recreate/refresh Python env only
-bash scripts/venv.sh
+# full setup shortcut (.venv + db + migrations)
+bash scripts/bootstrap.sh
 
-# Reset DB schema
+# reset schema, then re-apply migrations
 bash scripts/reset-db.sh
 
-# DB logs
+# db logs
 docker compose logs -f db
 ```
 
-## Optional Devcontainer
+## Optional Devcontainer Notes
 
 See `.devcontainer/NOTE.md`.

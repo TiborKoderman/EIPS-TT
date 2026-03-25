@@ -2,3 +2,7 @@
 .out
 data
 .venv
+__pycache__/
+*.pyc
+pa1/report/.out/*
+!pa1/report/.out/.gitkeep

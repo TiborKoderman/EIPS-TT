@@ -1,0 +1,7 @@
+.git
+.venv
+.refs
+data
+pa1/report/.out
+**/__pycache__
+*.pyc

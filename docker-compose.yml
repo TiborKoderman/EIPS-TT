@@ -1,4 +1,20 @@
 services:
+  app:
+    profiles: ["devcontainer"]
+    build:
+      context: .
+      dockerfile: .devcontainer/Dockerfile
+    command: sleep infinity
+    environment:
+      DB_HOST: db
+      DB_PORT: 5432
+      DB_USER: postgres
+      DB_PASSWORD: postgres
+      DB_NAME: postgres
+    depends_on:
+      db:
+        condition: service_healthy
+
   db:
     image: postgres:latest
     restart: unless-stopped

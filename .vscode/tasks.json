@@ -7,9 +7,24 @@
             "command": "bash scripts/bootstrap.sh"
         },
         {
+            "label": "environment: venv-restore",
+            "type": "shell",
+            "command": "bash scripts/venv-restore.sh"
+        },
+        {
+            "label": "environment: venv-dump",
+            "type": "shell",
+            "command": "bash scripts/venv-dump.sh"
+        },
+        {
             "label": "db: reset",
             "type": "shell",
             "command": "bash scripts/reset-db.sh"
+        },
+        {
+            "label": "db: migrate",
+            "type": "shell",
+            "command": "bash scripts/db-migrate.sh"
         },
         {
             "label": "pa1: prepare submission artifacts",
