@@ -6,3 +6,7 @@ __pycache__/
 *.pyc
 pa1/report/.out/*
 !pa1/report/.out/.gitkeep
+Preferential crawling.ipynb
+Remote crawler database (client).ipynb
+Remote crawler database (server).ipynb
+Web crawling - basic tools.ipynb
