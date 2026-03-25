@@ -20,7 +20,7 @@ class DbConfig:
     port: int = 5432
     user: str = "postgres"
     password: str = "postgres"
-    database: str = "postgres"
+    database: str = "crawldb"
 
 
 def load_db_config() -> DbConfig:
@@ -30,7 +30,7 @@ def load_db_config() -> DbConfig:
         port=int(os.getenv("DB_PORT", os.getenv("PGPORT", "5432"))),
         user=os.getenv("DB_USER", os.getenv("PGUSER", "postgres")),
         password=os.getenv("DB_PASSWORD", os.getenv("PGPASSWORD", "postgres")),
-        database=os.getenv("DB_NAME", os.getenv("PGDATABASE", "postgres")),
+        database=os.getenv("DB_NAME", os.getenv("PGDATABASE", "crawldb")),
     )
 
 

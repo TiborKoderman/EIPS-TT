@@ -1,31 +1,37 @@
 # Migrations and Requirements Workflow
 
-## Apply updates
+## Recommended setup
 
 Use:
 
 ```bash
-bash scripts/bootstrap.sh
+bash scripts/venv-restore.sh
+bash scripts/db-migrate.sh
 ```
 
 What it does:
-- rebuilds the app image (`requirements.txt` is installed during Docker build)
-- starts/updates the compose stack
-- creates `pa1/report/.out`
-- applies initial DB migration if schema is missing
+- restores `.venv` from `requirements.txt`
+- starts PostgreSQL via root `docker-compose.yml`
+- applies `0_initial_crawldb.sql` when needed
+- applies numbered migrations like `01_*.sql`
+
+To save dependency updates back to `requirements.txt`:
+
+```bash
+bash scripts/venv-dump.sh
+```
 
 ## Add a new migration
 
-1. Add a new SQL file in `db/migrations/` (example: `1_add_indexes.sql`).
-2. For fresh DB volumes, it is auto-applied on first startup by Postgres init.
-3. For an existing DB volume, apply manually:
+1. Add a new SQL file in `db/migrations/` using a two-digit prefix, e.g. `02_add_indexes.sql`.
+2. Make the migration idempotent (`IF NOT EXISTS`) so reruns are safe.
+3. Apply it:
 
 ```bash
-docker compose -f .devcontainer/docker-compose.yml exec -T db \
-  psql -v ON_ERROR_STOP=1 -U postgres -d postgres -f /docker-entrypoint-initdb.d/1_add_indexes.sql
+bash scripts/db-migrate.sh
 ```
 
-## Reset (reverse) DB state
+## Reset database
 
 Use:
 
@@ -33,4 +39,4 @@ Use:
 bash scripts/reset-db.sh
 ```
 
-This drops `crawldb` and reapplies the initial migration.
+This drops `crawldb` and reapplies all migrations.
