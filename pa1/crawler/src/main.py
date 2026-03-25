@@ -14,6 +14,32 @@ from crawler.core.robots import RobotsPolicyManager
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="PA1 crawler utilities")
     parser.add_argument(
+        "--canonicalize",
+        dest="url_to_canonicalize",
+        help="Print canonical form of this URL and exit.",
+    )
+    parser.add_argument(
+        "--ingest-demo",
+        action="store_true",
+        help="Insert/demo one HTML page in crawldb.page using dedup workflow.",
+    )
+    parser.add_argument(
+        "--url",
+        default="https://example.com/index.html?utm_source=test#fragment",
+        help="URL for --ingest-demo.",
+    )
+    parser.add_argument(
+        "--html",
+        default="<html><body>hello</body></html>",
+        help="HTML payload for --ingest-demo.",
+    )
+    parser.add_argument(
+        "--site-id",
+        type=int,
+        default=None,
+        help="Optional crawldb.site.id for --ingest-demo.",
+    )
+    parser.add_argument(
         "--check-url",
         type=str,
         help="Absolute URL to validate against robots and politeness rules.",
@@ -38,8 +64,39 @@ def build_parser() -> argparse.ArgumentParser:
 
 def main() -> int:
     args = build_parser().parse_args()
-    if not args.check_url and not args.fetch_url:
-        print("No action selected. Use --check-url or --fetch-url.")
+
+    if (
+        not args.url_to_canonicalize
+        and not args.ingest_demo
+        and not args.check_url
+        and not args.fetch_url
+    ):
+        print("No action selected. Use --canonicalize, --ingest-demo, --check-url, or --fetch-url.")
+        return 0
+
+    if args.url_to_canonicalize:
+        from utils.url_canonicalizer import DefaultUrlCanonicalizer
+
+        canonicalizer = DefaultUrlCanonicalizer()
+        print(canonicalizer.canonicalize(args.url_to_canonicalize))
+        return 0
+
+    if args.ingest_demo:
+        from db.page_store import PostgresPageStore
+        from db.pg_connect import get_connection, load_db_config
+
+        cfg = load_db_config()
+        with get_connection(cfg) as conn:
+            store = PostgresPageStore(conn)
+            result = store.ingest_html_from_frontier(
+                raw_url=args.url,
+                html_content=args.html,
+                site_id=args.site_id,
+            )
+        print(
+            f"status={result.status} page_id={result.page_id} "
+            f"canonical_url={result.canonical_url} duplicate_of={result.duplicate_of_page_id}"
+        )
         return 0
 
     config = load_crawler_config()
