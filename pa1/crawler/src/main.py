@@ -3,12 +3,19 @@
 from __future__ import annotations
 
 import argparse
+import sys
 import time
+from pathlib import Path
 
-from crawler.core.config import load_crawler_config
-from crawler.core.downloader import Downloader
-from crawler.core.politeness import PerIpRateLimiter
-from crawler.core.robots import RobotsPolicyManager
+# Ensure imports work when running this file directly from repository root.
+CRAWLER_SRC = Path(__file__).resolve().parent
+if str(CRAWLER_SRC) not in sys.path:
+    sys.path.insert(0, str(CRAWLER_SRC))
+
+from core.config import load_crawler_config
+from core.downloader import Downloader
+from core.politeness import PerIpRateLimiter
+from core.robots import RobotsPolicyManager
 
 
 def build_parser() -> argparse.ArgumentParser:

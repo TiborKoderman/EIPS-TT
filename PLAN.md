@@ -6,6 +6,8 @@
 **Current Status:** Phase 1-5 Complete, Phase 6 In Progress
 **Last Updated:** 2026-03-26
 
+For standalone manager setup/run instructions, see [ManagerApp/README.md](ManagerApp/README.md).
+
 ---
 
 ## Table of Contents
@@ -297,7 +299,7 @@ BroadcastStatisticsUpdate(StatisticsViewModel)
 ## Project Structure
 
 ```
-/home/tibor/Repos/EIPS-TT/manager/
+/home/tibor/Repos/EIPS-TT/
 ├── ManagerApp/                          # Main Blazor Server project
 │   ├── ManagerApp.csproj                # Project file with dependencies
 │   ├── Program.cs                       # Application entry, DI setup, hub mapping
@@ -888,7 +890,7 @@ GET    /api/statistics                 # Get stats
 
 ```bash
 # Navigate to project
-cd /home/tibor/Repos/EIPS-TT/manager/ManagerApp
+cd /home/tibor/Repos/EIPS-TT/ManagerApp
 
 # Run application
 dotnet run --launch-profile https

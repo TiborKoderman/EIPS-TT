@@ -8,7 +8,7 @@ from urllib.parse import urlparse
 
 import requests
 
-from crawler.core.renderer import SeleniumRenderer
+from core.renderer import SeleniumRenderer
 
 
 HTML_PAGE_TYPE = "HTML"

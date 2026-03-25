@@ -1,5 +1,9 @@
 # EIPS-TT - Preferential Crawler (PA1)
 
+## Manager GUI Docs
+
+For standalone setup and operation of the Blazor manager app, see [ManagerApp/README.md](ManagerApp/README.md).
+
 Single-compose setup with two modes:
 - host mode: local `.venv` + `db` service
 - devcontainer mode: `app` + `db` services

@@ -101,7 +101,7 @@ create a coherant step by step implementation plan to follow when implementing t
 ## Manager GUI Implementation Tracker (copilot optimized)
 
 ### 1. Foundation and architecture
-- [x] Create isolated `manager/ManagerApp` Blazor Server project.
+- [x] Create isolated `ManagerApp` Blazor Server project.
 - [x] Wire EF Core with PostgreSQL via `CrawldbContext` (DB-first model classes).
 - [x] Keep DB migration ownership in `db/migrations` (manager reads schema only).
 - [x] Read connection source-of-truth from repo docker defaults (`localhost:5432`, `crawldb`, `postgres/postgres`).

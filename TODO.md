@@ -1,5 +1,7 @@
 # Implementation Todo List
 
+For standalone manager setup/run instructions, see [ManagerApp/README.md](ManagerApp/README.md).
+
 ## Status Overview
 
 **Completed:** 11/12 tasks
@@ -41,7 +43,7 @@
 **Description:** Created new Blazor Server project with .NET 8 and added Entity Framework Core, PostgreSQL provider, and tools
 
 **Files Created/Modified:**
-- `/home/tibor/Repos/EIPS-TT/manager/ManagerApp/` - Project directory
+- `/home/tibor/Repos/EIPS-TT/ManagerApp/` - Project directory
 - Added NuGet packages:
   - Npgsql.EntityFrameworkCore.PostgreSQL 8.0.10
   - Microsoft.EntityFrameworkCore.Design 8.0.11
