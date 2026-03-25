@@ -64,6 +64,9 @@ bash scripts/bootstrap.sh
 # reset schema, then re-apply migrations
 bash scripts/reset-db.sh
 
+# full DB reset (drops compose volumes), then re-apply migrations
+bash scripts/reset-db.sh --clean
+
 # db logs
 docker compose logs -f db
 ```
