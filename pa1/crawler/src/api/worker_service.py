@@ -70,6 +70,7 @@ class DaemonWorkerService(WorkerControlService):
         self._daemon_running = False
         self._daemon_started_at: str | None = None
         self._daemon_mode = "single-instance"
+        self._daemon_id = os.getenv("CRAWLER_DAEMON_ID", "local-default").strip() or "local-default"
         self._workers: dict[int, WorkerRecord] = {
             1: WorkerRecord(
                 id=1,
@@ -459,6 +460,9 @@ class DaemonWorkerService(WorkerControlService):
                 ],
                 queue_mode=cfg.queue_mode,
                 strategy_mode=cfg.strategy_mode,
+                score_function=cfg.score_function,
+                score_weight_pages=cfg.score_weight_pages,
+                score_weight_errors=cfg.score_weight_errors,
                 topic_keywords=list(cfg.topic_keywords),
                 max_frontier_in_memory=cfg.max_frontier_in_memory,
                 avoid_duplicate_paths_across_daemons=cfg.avoid_duplicate_paths_across_daemons,
@@ -500,7 +504,7 @@ class DaemonWorkerService(WorkerControlService):
 
         queue_mode = str(payload.get("queueMode", self._global_config.queue_mode)).strip().lower()
         if queue_mode not in {"local", "server", "both"}:
-            queue_mode = "server"
+            queue_mode = "both"
 
         strategy_mode = str(payload.get("strategyMode", self._global_config.strategy_mode)).strip().lower()
         if strategy_mode not in {"balanced", "coverage", "focused", "freshness"}:
@@ -771,18 +775,19 @@ class DaemonWorkerService(WorkerControlService):
                 }
 
             claims: list[dict[str, object]] = []
-            misses = 0
-            cursor = 0
-            while len(claims) < bounded_limit and misses < len(candidates):
-                worker_id = candidates[cursor % len(candidates)]
-                cursor += 1
+            claimed_workers: set[int] = set()
+            for worker_id in candidates:
+                if len(claims) >= bounded_limit:
+                    break
 
                 lease = self._claim_next_frontier_url(worker_id)
                 if lease is None:
-                    misses += 1
                     continue
 
-                misses = 0
+                if worker_id in claimed_workers:
+                    continue
+
+                claimed_workers.add(worker_id)
                 claims.append(
                     {
                         "workerId": worker_id,
@@ -897,7 +902,13 @@ class DaemonWorkerService(WorkerControlService):
         worker = self._workers[worker_id]
         stop_event = threading.Event()
         if seed_url:
-            self._enqueue_frontier_url(seed_url)
+            queued_seed = self._enqueue_frontier_url(seed_url)
+            if not queued_seed:
+                self._append_log(
+                    worker_id,
+                    "Warning",
+                    "Initial seed was not queued; verify queue mode and server relay availability.",
+                )
 
         def run() -> None:
             while not stop_event.is_set():
@@ -909,8 +920,11 @@ class DaemonWorkerService(WorkerControlService):
                         continue
                     lease = self._claim_next_frontier_url(worker_id)
                     if lease is None:
+                        current.current_url = None
                         current.status_reason = "waiting-for-frontier"
                         continue
+                    current.current_url = lease.url
+                    current.status_reason = "fetching"
 
                 processing = self._download_and_extract_links(lease.url)
 
@@ -984,15 +998,19 @@ class DaemonWorkerService(WorkerControlService):
             worker.status_reason = reason
         self._append_log(worker_id, "Info", f"Thread worker stopped (reason={reason}).")
 
-    def _append_log(self, worker_id: int, level: str, message: str) -> None:
+    def _append_local_log(self, worker_id: int, level: str, message: str, *, emit_manager_event: bool) -> None:
         self._logs[worker_id].append(
             WorkerLogEntry(timestamp_utc=utc_now_iso(), level=level, message=message)
         )
-        self._emit_manager_event(
-            "worker-log",
-            worker_id=worker_id,
-            payload={"level": level, "message": message},
-        )
+        if emit_manager_event:
+            self._emit_manager_event(
+                "worker-log",
+                worker_id=worker_id,
+                payload={"level": level, "message": message},
+            )
+
+    def _append_log(self, worker_id: int, level: str, message: str) -> None:
+        self._append_local_log(worker_id, level, message, emit_manager_event=True)
 
     def _simulation_loop(self) -> None:
         while True:
@@ -1151,7 +1169,19 @@ class DaemonWorkerService(WorkerControlService):
         if queue_mode == "server" and not relayed and self._allow_daemon_db_fallback:
             should_enqueue_local = True
 
-        self._known_frontier_urls.add(candidate)
+        if not relayed and not should_enqueue_local:
+            self._emit_manager_event(
+                "frontier-prune",
+                payload={
+                    "url": candidate,
+                    "reason": "server-relay-unavailable",
+                    "queueMode": queue_mode,
+                },
+            )
+            return False
+
+        if should_enqueue_local:
+            self._known_frontier_urls.add(candidate)
         spilled_to_db = False
         if should_enqueue_local:
             entry = FrontierEntry(
@@ -1575,7 +1605,16 @@ class DaemonWorkerService(WorkerControlService):
             "downloadResult": download_result,
         }
 
-        self._post_manager_json(self._manager_ingest_url, payload)
+        relayed = self._post_manager_json(self._manager_ingest_url, payload)
+        if not relayed:
+            target_url = str(download_result.get("finalUrl") or raw_url)
+            self._append_local_log(
+                worker.id,
+                "Warning",
+                f"Failed to relay page result to manager for {target_url}; data remains local to daemon logs.",
+                emit_manager_event=False,
+            )
+
         self._emit_manager_event(
             "page-reported",
             worker_id=worker.id,
@@ -1595,7 +1634,7 @@ class DaemonWorkerService(WorkerControlService):
             self._manager_event_url,
             {
                 "type": event_type,
-                "daemonId": "local-default",
+                "daemonId": self._daemon_id,
                 "workerId": worker_id,
                 "payload": payload,
             },

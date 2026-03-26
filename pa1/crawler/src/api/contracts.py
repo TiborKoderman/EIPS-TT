@@ -100,7 +100,7 @@ class GlobalWorkerConfig:
     user_agent: str = "EIPS-TT-Crawler/1.0"
     seed_urls: list[str] = field(default_factory=list)
     seed_entries: list[SeedEntry] = field(default_factory=default_seed_entries)
-    queue_mode: str = "server"
+    queue_mode: str = "both"
     strategy_mode: str = "balanced"
     score_function: str = "rendezvous"
     score_weight_pages: float = 1.0

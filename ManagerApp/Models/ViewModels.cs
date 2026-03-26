@@ -120,7 +120,7 @@ public class WorkerGlobalConfigViewModel
     public string UserAgent { get; set; } = "EIPS-TT-Crawler/1.0";
     public string SeedUrlsText { get; set; } = "";
     public List<SeedEntryViewModel> SeedEntries { get; set; } = new();
-    public string QueueMode { get; set; } = "server";
+    public string QueueMode { get; set; } = "both";
     public string StrategyMode { get; set; } = "balanced";
     public string ScoreFunction { get; set; } = "rendezvous";
     public double ScoreWeightPages { get; set; } = 1.0;

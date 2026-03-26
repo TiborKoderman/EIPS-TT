@@ -4,7 +4,7 @@ and in the crawler logs make them look better, align make severity the first col
 
 in the workers tab make the buttons start all and stop all be specific icon only buttons, for the and fix the sidebar nav here, worker config and daemons config should be opened from the workers tab
 
-also use the status animations from the dashboard workers snapshot widget in the workers tab as well
+also use the status animations from the dashboard workers snapshot widget in the workers tab as well 
 
 also show the daemon status and the ccombined logs and metrics
 
@@ -57,3 +57,4 @@ Reason: Server error: 504
 1. the database should as defined by the original structure migration, it should links between pages, page data, page type, and frontier_queue, should remain implemented in memory, maybe use the table to store the data, but the main queue should be in memory  and thread safe, use the database table as a persistance log/swap
 
 2. the queue dispach should delagate work in a way to minimize collisions, when a daemon sends new queue items, check against the queues already active. maybe do a way to lock queue chuncks and make the server have an endpoint like /dequeue that would literally just send the next queue data for that specific daemon and it's workers
+

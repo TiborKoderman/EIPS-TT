@@ -272,7 +272,7 @@
         foreach (var seed in enabledSeeds)
         {
             var targetWorker = candidateWorkers
-                .OrderByDescending(worker => ComputeAssignmentScore(seed.Url, worker, candidateWorkers.Count))
+                .OrderByDescending(worker => ComputeAssignmentScore(seed.Url, worker, candidateWorkers))
                 .ThenBy(worker => worker.Id)
                 .First();
             plannedAssignments.Add(new SeedAssignment
@@ -300,20 +300,41 @@
         return hash;
     }
 
-    private double ComputeAssignmentScore(string seedUrl, WorkerViewModel worker, int workerCount)
+    private double ComputeAssignmentScore(string seedUrl, WorkerViewModel worker, IReadOnlyList<WorkerViewModel> candidateWorkers)
     {
         return scoreFunction switch
         {
-            "round_robin" => RoundRobinScore(seedUrl, worker.Id, workerCount),
+            "round_robin" => RoundRobinScore(seedUrl, worker.Id, candidateWorkers),
             "weighted" => WeightedRuntimeScore(worker),
             _ => RendezvousScore(seedUrl, worker.Id),
         };
     }
 
-    private static double RoundRobinScore(string seedUrl, int workerId, int workerCount)
+    private static double RoundRobinScore(string seedUrl, int workerId, IReadOnlyList<WorkerViewModel> candidateWorkers)
     {
-        var slot = Math.Abs(seedUrl.GetHashCode()) % Math.Max(1, workerCount);
-        return workerId == slot + 1 ? 1_000_000 : 0;
+        if (candidateWorkers.Count == 0)
+        {
+            return 0;
+        }
+
+        var slot = (int)(StableSeedHash(seedUrl) % (ulong)candidateWorkers.Count);
+        var designatedWorkerId = candidateWorkers[slot].Id;
+        return workerId == designatedWorkerId ? 1_000_000 : 0;
+    }
+
+    private static ulong StableSeedHash(string input)
+    {
+        const ulong offsetBasis = 14695981039346656037UL;
+        const ulong prime = 1099511628211UL;
+
+        ulong hash = offsetBasis;
+        foreach (var ch in input)
+        {
+            hash ^= ch;
+            hash *= prime;
+        }
+
+        return hash;
     }
 
     private double WeightedRuntimeScore(WorkerViewModel worker)

@@ -41,7 +41,7 @@ public class WorkerService : IWorkerService
     public async Task<bool> StartDaemonAsync()
     {
         LastError = null;
-        var response = await PostAsync("api/daemon/start", new { });
+        var response = await PostAsync("api/daemon/start", new { }, allowAutoStartOnFailure: true);
         if (response?.Ok == true)
         {
             return true;
@@ -803,11 +803,15 @@ public class WorkerService : IWorkerService
         }
     }
 
-    private async Task<ApiResponseEnvelope?> PostAsync(string path, object payload)
+    private async Task<ApiResponseEnvelope?> PostAsync(string path, object payload, bool allowAutoStartOnFailure = false)
     {
         try
         {
             var response = await _httpClient.PostAsJsonAsync(path, payload);
+            if (!response.IsSuccessStatusCode && allowAutoStartOnFailure && await TryAutoStartDaemonAndRetryAsync())
+            {
+                response = await _httpClient.PostAsJsonAsync(path, payload);
+            }
             if (!response.IsSuccessStatusCode)
             {
                 LastError = await ReadErrorAsync(response);
@@ -818,16 +822,39 @@ public class WorkerService : IWorkerService
         }
         catch
         {
+            if (allowAutoStartOnFailure && await TryAutoStartDaemonAndRetryAsync())
+            {
+                try
+                {
+                    var retryResponse = await _httpClient.PostAsJsonAsync(path, payload);
+                    if (retryResponse.IsSuccessStatusCode)
+                    {
+                        LastError = null;
+                        return await retryResponse.Content.ReadFromJsonAsync<ApiResponseEnvelope>(_jsonOptions);
+                    }
+
+                    LastError = await ReadErrorAsync(retryResponse);
+                    return default;
+                }
+                catch
+                {
+                    // keep default unreachable message below
+                }
+            }
             LastError = "Crawler API is unreachable. Start the API server and verify CrawlerApi:BaseUrl.";
             return default;
         }
     }
 
-    private async Task<ApiResponseEnvelope<T>?> PostAsync<T>(string path, object payload)
+    private async Task<ApiResponseEnvelope<T>?> PostAsync<T>(string path, object payload, bool allowAutoStartOnFailure = false)
     {
         try
         {
             var response = await _httpClient.PostAsJsonAsync(path, payload);
+            if (!response.IsSuccessStatusCode && allowAutoStartOnFailure && await TryAutoStartDaemonAndRetryAsync())
+            {
+                response = await _httpClient.PostAsJsonAsync(path, payload);
+            }
             if (!response.IsSuccessStatusCode)
             {
                 LastError = await ReadErrorAsync(response);
@@ -838,6 +865,25 @@ public class WorkerService : IWorkerService
         }
         catch
         {
+            if (allowAutoStartOnFailure && await TryAutoStartDaemonAndRetryAsync())
+            {
+                try
+                {
+                    var retryResponse = await _httpClient.PostAsJsonAsync(path, payload);
+                    if (retryResponse.IsSuccessStatusCode)
+                    {
+                        LastError = null;
+                        return await retryResponse.Content.ReadFromJsonAsync<ApiResponseEnvelope<T>>(_jsonOptions);
+                    }
+
+                    LastError = await ReadErrorAsync(retryResponse);
+                    return default;
+                }
+                catch
+                {
+                    // keep default unreachable message below
+                }
+            }
             LastError = "Crawler API is unreachable. Start the API server and verify CrawlerApi:BaseUrl.";
             return default;
         }

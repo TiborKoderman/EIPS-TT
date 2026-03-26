@@ -228,7 +228,7 @@
 
         if (!new[] { "local", "server", "both" }.Contains(config.QueueMode))
         {
-            config.QueueMode = "server";
+            config.QueueMode = "both";
         }
 
         if (!new[] { "balanced", "coverage", "focused", "freshness" }.Contains(config.StrategyMode))
