@@ -8,7 +8,10 @@ import sys
 import threading
 import time
 from collections import defaultdict, deque
+import os
 from pathlib import Path
+from urllib import error, request
+import json
 
 from api.contracts import (
     GlobalWorkerConfig,
@@ -80,6 +83,14 @@ class MockWorkerService(WorkerControlService):
         self._logs: dict[int, deque[WorkerLogEntry]] = defaultdict(lambda: deque(maxlen=500))
         self._local_processes: dict[int, subprocess.Popen[bytes]] = {}
         self._thread_workers: dict[int, tuple[threading.Thread, threading.Event]] = {}
+        self._frontier_queue: deque[str] = deque()
+        self._known_frontier_urls: set[str] = set()
+
+        self._frontier_relay_url = os.getenv("MANAGER_FRONTIER_INGEST_URL", "").strip() or None
+        self._frontier_relay_token = os.getenv("MANAGER_FRONTIER_INGEST_TOKEN", "").strip() or None
+        self._allow_daemon_db_fallback = os.getenv(
+            "CRAWLER_DAEMON_ALLOW_DB_FALLBACK", "false"
+        ).strip().lower() in {"1", "true", "yes", "on"}
 
         for worker in self._workers.values():
             self._append_log(worker.id, "Info", f"{worker.name} initialized in {worker.mode} mode.")
@@ -96,6 +107,16 @@ class MockWorkerService(WorkerControlService):
                 "workerCount": len(self._workers),
                 "activeWorkers": sum(1 for w in self._workers.values() if w.status == "Active"),
                 "localProcessCount": len(self._local_processes),
+                "frontier": {
+                    "inMemoryQueued": len(self._frontier_queue),
+                    "knownUrls": len(self._known_frontier_urls),
+                    "relayEnabled": self._frontier_relay_url is not None,
+                },
+                "architecture": {
+                    "pipelineOrder": "server-api -> daemon -> workers",
+                    "workerDirectDb": False,
+                    "daemonDbFallbackEnabled": self._allow_daemon_db_fallback,
+                },
             }
 
     def start_daemon(self) -> dict[str, object]:
@@ -240,7 +261,11 @@ class MockWorkerService(WorkerControlService):
                 },
             )
             self._workers[worker_id] = worker
-            target_group_id = group_id if group_id in self._groups else 1
+            if group_id is None:
+                raise RuntimeError("groupId is required when spawning a worker.")
+            if group_id not in self._groups:
+                raise RuntimeError(f"Group {group_id} not found.")
+            target_group_id = group_id
             self._groups[target_group_id].worker_ids.append(worker_id)
 
             self._append_log(worker_id, "Info", f"Worker spawned in {requested_mode} mode.")
@@ -429,26 +454,27 @@ class MockWorkerService(WorkerControlService):
         with self._lock:
             if not self._daemon_running:
                 raise RuntimeError("Crawler daemon is not running.")
+
+            queued = self._enqueue_frontier_url(url)
             if worker_id is None:
-                for worker in self._workers.values():
-                    if worker.status == "Active":
-                        worker.current_url = url
-                        self._append_log(worker.id, "Info", f"Seed assigned globally: {url}")
                 return {
-                    "appliedTo": "active-workers",
+                    "appliedTo": "daemon-frontier",
                     "workerId": None,
                     "url": url,
+                    "queued": queued,
+                    "inMemoryQueued": len(self._frontier_queue),
                 }
 
             worker = self._workers.get(worker_id)
             if worker is None:
                 raise KeyError(f"Worker {worker_id} was not found.")
-            worker.current_url = url
-            self._append_log(worker_id, "Info", f"Seed assigned: {url}")
+            self._append_log(worker_id, "Info", f"Seed routed to daemon frontier: {url}")
             return {
-                "appliedTo": "single-worker",
+                "appliedTo": "daemon-frontier",
                 "workerId": worker_id,
                 "url": url,
+                "queued": queued,
+                "inMemoryQueued": len(self._frontier_queue),
             }
 
     def get_statistics(self) -> dict[str, object]:
@@ -513,6 +539,8 @@ class MockWorkerService(WorkerControlService):
     def _launch_thread_worker(self, worker_id: int, seed_url: str | None) -> None:
         worker = self._workers[worker_id]
         stop_event = threading.Event()
+        if seed_url:
+            self._enqueue_frontier_url(seed_url)
 
         def run() -> None:
             sample_urls = [
@@ -531,7 +559,8 @@ class MockWorkerService(WorkerControlService):
                     if current is None or current.status != "Active":
                         continue
                     current.pages_processed += 1
-                    current.current_url = random.choice(sample_urls)
+                    next_url = self._pop_frontier_url()
+                    current.current_url = next_url or random.choice(sample_urls)
                     if random.random() < 0.05:
                         current.error_count += 1
                         self._append_log(worker_id, "Warning", "Thread worker fetch retry scheduled.")
@@ -580,7 +609,8 @@ class MockWorkerService(WorkerControlService):
                         continue
 
                     worker.pages_processed += 1
-                    worker.current_url = random.choice(sample_urls)
+                    next_url = self._pop_frontier_url()
+                    worker.current_url = next_url or random.choice(sample_urls)
 
                     if random.random() < 0.03:
                         worker.error_count += 1
@@ -601,6 +631,42 @@ class MockWorkerService(WorkerControlService):
                             worker.pid = None
                             self._append_log(worker_id, "Info", "Local process finished.")
                         self._local_processes.pop(worker_id, None)
+
+    def _enqueue_frontier_url(self, raw_url: str) -> bool:
+        candidate = raw_url.strip()
+        if not candidate:
+            return False
+        if candidate in self._known_frontier_urls:
+            return False
+
+        self._known_frontier_urls.add(candidate)
+        self._frontier_queue.append(candidate)
+        self._relay_frontier_seed(candidate)
+        return True
+
+    def _pop_frontier_url(self) -> str | None:
+        if not self._frontier_queue:
+            return None
+        return self._frontier_queue.popleft()
+
+    def _relay_frontier_seed(self, url: str) -> None:
+        if self._frontier_relay_url is None:
+            return
+
+        payload = json.dumps({"url": url, "source": "daemon-frontier"}).encode("utf-8")
+        headers = {
+            "Content-Type": "application/json",
+            "Accept": "application/json",
+        }
+        if self._frontier_relay_token:
+            headers["Authorization"] = f"Bearer {self._frontier_relay_token}"
+
+        req = request.Request(self._frontier_relay_url, data=payload, headers=headers, method="POST")
+        try:
+            with request.urlopen(req, timeout=2.0):
+                return
+        except (error.URLError, TimeoutError, OSError) as exc:
+            self._append_log(1, "Warning", f"Frontier relay failed, using daemon-local queue: {exc}")
 
     @staticmethod
     def _copy_worker(worker: WorkerRecord | None) -> WorkerRecord:

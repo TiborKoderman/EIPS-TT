@@ -448,7 +448,7 @@ public class WorkerService : IWorkerService
             var managerDir = Directory.GetCurrentDirectory();
             var repoRoot = Path.GetFullPath(Path.Combine(managerDir, ".."));
             var daemonArgs = _configuration["CrawlerApi:LocalDaemonArgs"]
-                ?? "pa1/crawleer/daemon/main.py";
+                ?? "pa1/crawler/src/daemon/main.py";
 
             var candidates = new List<string>();
             var configured = _configuration["CrawlerApi:PythonExecutable"];

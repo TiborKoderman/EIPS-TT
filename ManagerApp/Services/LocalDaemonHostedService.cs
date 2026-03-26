@@ -61,7 +61,7 @@ public sealed class LocalDaemonHostedService : IHostedService
     private async Task StartProcessDaemonAsync(CancellationToken cancellationToken)
     {
         var daemonArgs = _configuration["CrawlerApi:LocalDaemonArgs"]
-            ?? "pa1/crawleer/daemon/main.py";
+            ?? "pa1/crawler/src/daemon/main.py";
         var baseUrl = _configuration["CrawlerApi:BaseUrl"] ?? "http://127.0.0.1:8090";
 
         var managerDir = Directory.GetCurrentDirectory();

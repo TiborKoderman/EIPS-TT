@@ -8,7 +8,11 @@ from api.contracts import GlobalWorkerConfig, WorkerGroupSettings, WorkerLogEntr
 
 
 class WorkerControlService(Protocol):
-    """Abstract worker-control operations used by Flask routes."""
+    """Abstract worker-control operations used by Flask routes.
+
+    The service boundary is API/daemon-oriented. Workers are execution units and
+    do not directly coordinate with database persistence.
+    """
 
     def get_daemon_status(self) -> dict[str, object]:
         ...

@@ -89,7 +89,7 @@ Architecture model:
 
 ```bash
 source .venv/bin/activate
-python pa1/crawler/src/api_server.py
+python pa1/crawler/src/daemon/main.py
 ```
 
 Equivalent via the main utility entrypoint:

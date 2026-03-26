@@ -83,7 +83,11 @@ def create_app(service: WorkerControlService | None = None) -> Flask:
     def meta():
         return envelope(
             {
-                "note": "Mock-backed control plane: one daemon API manages multiple workers.",
+                "note": "Control plane is API-first: server API -> daemon queue -> workers.",
+                "persistence": {
+                    "workerDirectDb": False,
+                    "daemonPolicy": "relay-to-server-first, optional local-db-fallback",
+                },
                 "endpoints": [
                     "GET /api/workers",
                     "POST /api/workers/<id>/start",

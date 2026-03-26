@@ -6,6 +6,7 @@ from dataclasses import dataclass
 from datetime import datetime
 from typing import Protocol
 
+from core.downloader import DownloadResult
 from psycopg2.extensions import connection as PgConnection
 
 from utils.dedup import (
@@ -167,6 +168,121 @@ class PostgresPageStore:
         if row is None:
             raise RuntimeError("Failed to insert DUPLICATE page.")
         return row[0]
+
+    def insert_binary_page(
+        self,
+        *,
+        site_id: int | None,
+        canonical_url: str,
+        http_status_code: int | None,
+        accessed_time: datetime | None = None,
+    ) -> int:
+        with self._conn.cursor() as cur:
+            cur.execute(
+                """
+                INSERT INTO crawldb.page (
+                    site_id,
+                    page_type_code,
+                    url,
+                    canonical_url,
+                    html_content,
+                    http_status_code,
+                    accessed_time,
+                    content_hash,
+                    duplicate_of_page_id
+                )
+                VALUES (%s, 'BINARY', %s, %s, NULL, %s, COALESCE(%s, NOW()), NULL, NULL)
+                RETURNING id;
+                """,
+                (
+                    site_id,
+                    canonical_url,
+                    canonical_url,
+                    http_status_code,
+                    accessed_time,
+                ),
+            )
+            row = cur.fetchone()
+        if row is None:
+            raise RuntimeError("Failed to insert BINARY page.")
+        return row[0]
+
+    def insert_page_data(
+        self,
+        *,
+        page_id: int,
+        data_type_code: str,
+        binary_data: bytes | None,
+    ) -> None:
+        with self._conn.cursor() as cur:
+            cur.execute(
+                """
+                INSERT INTO crawldb.page_data (page_id, data_type_code, data)
+                VALUES (%s, %s, %s);
+                """,
+                (page_id, data_type_code, binary_data),
+            )
+
+    def ingest_download_result(
+        self,
+        *,
+        raw_url: str,
+        download_result: DownloadResult,
+        site_id: int | None,
+        source_page_id: int | None = None,
+        canonicalizer: UrlCanonicalizer | None = None,
+    ) -> IngestPageResult:
+        canonicalizer = canonicalizer or DefaultUrlCanonicalizer()
+
+        if download_result.page_type_code == 'HTML':
+            return self.ingest_html_from_frontier(
+                raw_url=raw_url,
+                html_content=download_result.html_content or "",
+                site_id=site_id,
+                source_page_id=source_page_id,
+                base_url=download_result.final_url,
+                http_status_code=download_result.status_code,
+                canonicalizer=canonicalizer,
+            )
+
+        canonical_url = canonicalizer.canonicalize(raw_url, base_url=download_result.final_url)
+        existing_page_id = self.find_page_id_by_url(canonical_url)
+        if existing_page_id is not None:
+            if source_page_id is not None:
+                self.add_link(source_page_id, existing_page_id)
+            self._conn.commit()
+            return IngestPageResult(
+                page_id=existing_page_id,
+                status='known_url',
+                canonical_url=canonical_url,
+                duplicate_of_page_id=None,
+                content_hash=None,
+            )
+
+        page_id = self.insert_binary_page(
+            site_id=site_id,
+            canonical_url=canonical_url,
+            http_status_code=download_result.status_code,
+        )
+
+        if download_result.data_type_code:
+            self.insert_page_data(
+                page_id=page_id,
+                data_type_code=download_result.data_type_code,
+                binary_data=download_result.binary_content,
+            )
+
+        if source_page_id is not None:
+            self.add_link(source_page_id, page_id)
+
+        self._conn.commit()
+        return IngestPageResult(
+            page_id=page_id,
+            status='inserted_binary',
+            canonical_url=canonical_url,
+            duplicate_of_page_id=None,
+            content_hash=None,
+        )
 
     def ingest_html_from_frontier(
         self,

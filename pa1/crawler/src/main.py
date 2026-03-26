@@ -14,7 +14,10 @@ if str(CRAWLER_SRC) not in sys.path:
 
 from core.config import load_crawler_config
 from core.downloader import Downloader
+from core.frontier import FrontierRules, UrlFrontier
+from core.link_extractor import LinkExtractor
 from core.politeness import PerIpRateLimiter
+from core.preferential import PreferentialScorer
 from core.robots import RobotsPolicyManager
 
 
@@ -67,6 +70,37 @@ def build_parser() -> argparse.ArgumentParser:
         help="When used with --fetch-url, store PDF binary content in memory.",
     )
     parser.add_argument(
+        "--download-binary",
+        action="store_true",
+        help="When used with --fetch-url, download binary files into page_data payload.",
+    )
+    parser.add_argument(
+        "--store-large-binary",
+        action="store_true",
+        help="Allow storing large binary payloads in page_data.",
+    )
+    parser.add_argument(
+        "--extract-links-demo",
+        action="store_true",
+        help="Extract <a href>, onclick location links and image sources from --html and --url.",
+    )
+    parser.add_argument(
+        "--frontier-demo",
+        action="store_true",
+        help="Run an in-memory preferential frontier demo from seed URLs.",
+    )
+    parser.add_argument(
+        "--crawl-once-demo",
+        action="store_true",
+        help="Run full pipeline once: download, persist (HTML/BINARY), and extract links.",
+    )
+    parser.add_argument(
+        "--seed-url",
+        action="append",
+        default=[],
+        help="Seed URL used by --frontier-demo (repeat for multiple seeds).",
+    )
+    parser.add_argument(
         "--run-api",
         action="store_true",
         help="Start crawler daemon API server.",
@@ -98,14 +132,17 @@ def main() -> int:
         and
         not args.url_to_canonicalize
         and not args.ingest_demo
+        and not args.extract_links_demo
+        and not args.frontier_demo
+        and not args.crawl_once_demo
         and not args.check_url
         and not args.fetch_url
     ):
-        print("No action selected. Use --run-api, --canonicalize, --ingest-demo, --check-url, or --fetch-url.")
+        print("No action selected. Use --run-api, --canonicalize, --ingest-demo, --extract-links-demo, --frontier-demo, --crawl-once-demo, --check-url, or --fetch-url.")
         return 0
 
     if args.run_api:
-        from api_server import main as run_daemon_api
+        from daemon.server import main as run_daemon_api
 
         # Keep CLI flags backward compatible by propagating to env vars consumed by api_server.
         import os
@@ -138,6 +175,77 @@ def main() -> int:
         print(
             f"status={result.status} page_id={result.page_id} "
             f"canonical_url={result.canonical_url} duplicate_of={result.duplicate_of_page_id}"
+        )
+        return 0
+
+    if args.extract_links_demo:
+        extractor = LinkExtractor()
+        extracted = extractor.extract(args.html, args.url)
+        print(f"href links: {len(extracted.links)}")
+        for link in extracted.links:
+            print(f"  - {link}")
+        print(f"js links: {len(extracted.js_links)}")
+        for link in extracted.js_links:
+            print(f"  - {link}")
+        print(f"img links: {len(extracted.images)}")
+        for link in extracted.images:
+            print(f"  - {link}")
+        return 0
+
+    if args.frontier_demo:
+        config = load_crawler_config()
+        scorer = PreferentialScorer(topic_keywords=list(config.topic_keywords))
+        rules = FrontierRules()
+        frontier = UrlFrontier(
+            scorer=scorer,
+            rules=rules,
+            max_in_memory=config.frontier_in_memory_limit,
+        )
+
+        seeds = args.seed_url or [args.url]
+        added = 0
+        for seed in seeds:
+            if frontier.add(seed, source_url=None, depth=0):
+                added += 1
+
+        print(f"Frontier seeded: {added}/{len(seeds)}")
+        print(f"Frontier stats: {frontier.stats()}")
+        print("Top URLs:")
+        for _ in range(10):
+            entry = frontier.pop_next()
+            if entry is None:
+                break
+            print(f"  - priority={entry.priority} depth={entry.depth} url={entry.url}")
+        return 0
+
+    if args.crawl_once_demo:
+        from core.crawl_processor import CrawlerPageProcessor
+        from db.page_store import PostgresPageStore
+        from db.pg_connect import get_connection, load_db_config
+
+        runtime_config = load_crawler_config()
+        cfg = load_db_config()
+        downloader = Downloader(
+            user_agent=runtime_config.user_agent,
+            timeout_seconds=runtime_config.download_timeout_seconds,
+            render_timeout_seconds=runtime_config.render_timeout_seconds,
+        )
+        with get_connection(cfg) as conn:
+            page_store = PostgresPageStore(conn)
+            processor = CrawlerPageProcessor(downloader=downloader, page_store=page_store)
+            processed = processor.crawl_and_store(
+                url=args.url,
+                site_id=args.site_id,
+                render_html=args.render_js,
+                download_pdf_content=args.download_pdf,
+                download_binary_content=args.download_binary,
+                store_large_binary_content=args.store_large_binary,
+                large_binary_threshold_bytes=runtime_config.large_binary_threshold_bytes,
+            )
+        print(
+            f"crawl-once status={processed.ingest.status} page_id={processed.ingest.page_id} "
+            f"type={processed.download.page_type_code} links={len(processed.extracted_assets.links)} "
+            f"js_links={len(processed.extracted_assets.js_links)} images={len(processed.extracted_assets.images)}"
         )
         return 0
 
@@ -186,6 +294,9 @@ def main() -> int:
             args.fetch_url,
             render_html=args.render_js,
             download_pdf_content=args.download_pdf or config.download_pdf_content,
+            download_binary_content=args.download_binary or config.download_binary_content,
+            store_large_binary_content=args.store_large_binary or config.store_large_binary_content,
+            large_binary_threshold_bytes=config.large_binary_threshold_bytes,
         )
 
         print("Fetch completed:")
@@ -195,6 +306,7 @@ def main() -> int:
         print(f"Content-Type: {result.content_type}")
         print(f"Page type: {result.page_type_code}")
         print(f"Data type: {result.data_type_code}")
+        print(f"Content length: {result.content_length}")
         print(f"Used renderer: {result.used_renderer}")
         print(f"HTML chars: {len(result.html_content) if result.html_content else 0}")
         print(f"Binary bytes: {len(result.binary_content) if result.binary_content else 0}")

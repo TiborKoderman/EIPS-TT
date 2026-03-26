@@ -43,6 +43,7 @@ class DownloadResult:
     content_type: str | None
     html_content: str | None
     binary_content: bytes | None
+    content_length: int | None
     used_renderer: bool
 
 
@@ -67,11 +68,15 @@ class Downloader:
         *,
         render_html: bool = False,
         download_pdf_content: bool = False,
+        download_binary_content: bool = False,
+        store_large_binary_content: bool = False,
+        large_binary_threshold_bytes: int = 5_000_000,
     ) -> DownloadResult:
         response = self._session.get(url, timeout=self.timeout_seconds, allow_redirects=True)
         final_url = response.url
         normalized_content_type = _normalize_content_type(response.headers)
         data_type = _detect_data_type(final_url, normalized_content_type)
+        content_length = _detect_content_length(response)
         is_html = _is_html_response(final_url, normalized_content_type, response.text)
 
         if is_html:
@@ -96,11 +101,14 @@ class Downloader:
                 content_type=normalized_content_type,
                 html_content=html_content,
                 binary_content=None,
+                content_length=content_length,
                 used_renderer=used_renderer,
             )
 
         binary_content = None
-        if data_type == "PDF" and download_pdf_content:
+        should_download_binary = download_binary_content or (data_type == "PDF" and download_pdf_content)
+        can_store_large = store_large_binary_content or (content_length is not None and content_length <= large_binary_threshold_bytes)
+        if should_download_binary and can_store_large:
             binary_content = response.content
 
         return DownloadResult(
@@ -112,8 +120,18 @@ class Downloader:
             content_type=normalized_content_type,
             html_content=None,
             binary_content=binary_content,
+            content_length=content_length,
             used_renderer=False,
         )
+
+
+def _detect_content_length(response: requests.Response) -> int | None:
+    content_length_raw = response.headers.get("Content-Length")
+    if content_length_raw and content_length_raw.isdigit():
+        return int(content_length_raw)
+    if response.content:
+        return len(response.content)
+    return None
 
 
 def _normalize_content_type(headers: Mapping[str, str]) -> str | None:
