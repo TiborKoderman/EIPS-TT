@@ -29,6 +29,12 @@
     {
         <div class="card mb-lg">
             <h2 class="card-title">Defaults</h2>
+            <div class="flex items-center gap-sm mb-sm">
+                <button class="btn" type="button" @onclick="ApplyStandalonePreset">
+                    <span class="mdi mdi-flask-outline"></span>
+                    Apply Standalone Test Preset
+                </button>
+            </div>
             <div class="workers-config-grid">
                 <label>
                     <span class="text-small text-muted">Max Concurrent Workers</span>
@@ -222,7 +228,7 @@
 
         if (!new[] { "local", "server", "both" }.Contains(config.QueueMode))
         {
-            config.QueueMode = "both";
+            config.QueueMode = "server";
         }
 
         if (!new[] { "balanced", "coverage", "focused", "freshness" }.Contains(config.StrategyMode))
@@ -282,5 +288,41 @@
         };
 
         config.SeedUrlsText = string.Join("\n", config.SeedEntries.Where(entry => entry.Enabled).Select(entry => entry.Url));
+    }
+
+    private void ApplyStandalonePreset()
+    {
+        if (config == null)
+        {
+            return;
+        }
+
+        config.MaxConcurrentWorkers = 1;
+        config.RequestTimeoutSeconds = 20;
+        config.CrawlDelayMilliseconds = 500;
+        config.RespectRobotsTxt = true;
+        config.QueueMode = "server";
+        config.StrategyMode = "focused";
+        config.MaxFrontierInMemory = 5000;
+        config.AvoidDuplicatePathsAcrossDaemons = true;
+        config.TopicKeywordsText = string.Join("\n", new[]
+        {
+            "medicine",
+            "health",
+            "clinic",
+            "hospital",
+            "doctor",
+        });
+
+        config.SeedEntries = new List<SeedEntryViewModel>
+        {
+            new() { Url = "https://nijz.si/", Enabled = true, Label = "NIJZ" },
+            new() { Url = "https://www.kclj.si/", Enabled = true, Label = "UKC" },
+            new() { Url = "https://www.gov.si/", Enabled = true, Label = "Gov SI" },
+            new() { Url = "https://www.who.int/", Enabled = false, Label = "WHO" },
+        };
+
+        config.SeedUrlsText = string.Join("\n", config.SeedEntries.Where(entry => entry.Enabled).Select(entry => entry.Url));
+        statusMessage = "Standalone preset applied. Save to persist.";
     }
 }

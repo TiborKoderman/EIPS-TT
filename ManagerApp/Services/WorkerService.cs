@@ -47,10 +47,11 @@ public class WorkerService : IWorkerService
             return true;
         }
 
-        if (_useReverseChannelCommands && await EnqueueCommandAsync("start-daemon", null))
+        // Reverse channel requires an already running daemon websocket,
+        // so enqueueing start-daemon commands only creates guaranteed failures.
+        if (string.IsNullOrWhiteSpace(LastError))
         {
-            LastError = null;
-            return true;
+            LastError = "Daemon start must go through API/process launcher; reverse-channel start is disabled.";
         }
 
         return false;
@@ -345,6 +346,26 @@ public class WorkerService : IWorkerService
         return response?.Ok == true;
     }
 
+    public async Task<bool> AddSeedAsync(string url, int? workerId = null)
+    {
+        LastError = null;
+        var normalized = (url ?? string.Empty).Trim();
+        if (string.IsNullOrWhiteSpace(normalized))
+        {
+            LastError = "Seed URL must not be empty.";
+            return false;
+        }
+
+        var payload = new
+        {
+            url = normalized,
+            workerId,
+        };
+
+        var response = await PostAsync("api/frontier/seed", payload);
+        return response?.Ok == true;
+    }
+
     public async Task<CommandQueueDiagnosticsViewModel> GetCommandQueueDiagnosticsAsync()
     {
         var diagnostics = new CommandQueueDiagnosticsViewModel();
@@ -363,6 +384,7 @@ public class WorkerService : IWorkerService
             const string countsSql = """
                 SELECT status, COUNT(*)
                 FROM manager.command
+                WHERE NOT (command_type = 'start-daemon' AND status = 'failed')
                 GROUP BY status;
                 """;
 

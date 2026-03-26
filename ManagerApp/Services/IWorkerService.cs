@@ -102,6 +102,11 @@ public interface IWorkerService
     Task<bool> SaveWorkerGroupAsync(WorkerGroupSettingsViewModel group);
 
     /// <summary>
+    /// Add one seed URL to daemon/worker frontier.
+    /// </summary>
+    Task<bool> AddSeedAsync(string url, int? workerId = null);
+
+    /// <summary>
     /// Get command queue dispatch diagnostics.
     /// </summary>
     Task<CommandQueueDiagnosticsViewModel> GetCommandQueueDiagnosticsAsync();

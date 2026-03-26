@@ -98,7 +98,7 @@ class GlobalWorkerConfig:
     user_agent: str = "EIPS-TT-Crawler/1.0"
     seed_urls: list[str] = field(default_factory=list)
     seed_entries: list[SeedEntry] = field(default_factory=default_seed_entries)
-    queue_mode: str = "both"
+    queue_mode: str = "server"
     strategy_mode: str = "balanced"
     topic_keywords: list[str] = field(
         default_factory=lambda: [

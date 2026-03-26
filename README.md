@@ -75,6 +75,27 @@ bash scripts/reset-db.sh --clean
 docker compose logs -f db
 ```
 
+## Standalone Crawler Preset
+
+For quick local crawler testing without ManagerApp orchestration, use:
+
+```bash
+bash scripts/crawler-standalone-preset.sh frontier
+```
+
+Supported modes:
+
+- `frontier`: runs preferential frontier demo with sensible health/government seeds
+- `crawl-once`: executes one crawl pipeline pass using preset runtime variables
+- `api`: starts daemon API server with standalone preset runtime variables
+
+Examples:
+
+```bash
+bash scripts/crawler-standalone-preset.sh crawl-once
+bash scripts/crawler-standalone-preset.sh api
+```
+
 ## Crawler API (Mock Scaffolding)
 
 The crawler now includes a standalone Flask API server for worker management scaffolding.

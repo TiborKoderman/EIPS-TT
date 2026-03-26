@@ -1,0 +1,214 @@
+@page "/workers/strategy"
+@using ManagerApp.Models
+@using ManagerApp.Services
+@inject IWorkerService WorkerService
+
+<div class="page-header">
+    <div class="page-header-main">
+        <div>
+            <h1 class="page-title">Worker Strategy</h1>
+            <p class="page-subtitle">Server-first queue orchestration, seed rebalancing, and daemon strategy health</p>
+        </div>
+        <a class="btn" href="/workers/config">
+            <span class="mdi mdi-cog-outline"></span>
+            Global Config
+        </a>
+    </div>
+</div>
+
+<div class="page-body">
+    @if (isLoading)
+    {
+        <div class="card"><p>Loading strategy data...</p></div>
+    }
+    else if (globalConfig == null)
+    {
+        <div class="card"><p class="text-muted">Unable to load strategy configuration.</p></div>
+    }
+    else
+    {
+        <div class="card mb-lg">
+            <h2 class="card-title">Strategy Controls</h2>
+            <div class="flex items-center gap-sm" style="flex-wrap: wrap;">
+                <button class="btn btn-primary" @onclick="EnforceServerQueueOnly">
+                    <span class="mdi mdi-server-network"></span>
+                    Enforce Server-Only Queue
+                </button>
+                <button class="btn" @onclick="RebalanceSeedsAcrossWorkers">
+                    <span class="mdi mdi-transit-connection-variant"></span>
+                    Rebalance Seeds Across Workers
+                </button>
+                <button class="btn" @onclick="RefreshAll">
+                    <span class="mdi mdi-refresh"></span>
+                    Refresh
+                </button>
+            </div>
+            @if (!string.IsNullOrWhiteSpace(statusMessage))
+            {
+                <p class="text-small text-muted mt-sm">@statusMessage</p>
+            }
+        </div>
+
+        <div class="grid grid-cols-4 mb-lg">
+            <StatCard Label="Queue Mode" Value="@globalConfig.QueueMode.ToUpperInvariant()" Footnote="Preferred default" />
+            <StatCard Label="Enabled Seeds" Value="@enabledSeeds.Count.ToString()" Footnote="From global config" />
+            <StatCard Label="Workers" Value="@workers.Count.ToString()" Footnote="Available for balancing" />
+            <StatCard Label="Daemons" Value="@groups.Count.ToString()" Footnote="Strategy segments" />
+        </div>
+
+        <div class="card mb-lg">
+            <h2 class="card-title">Planned Seed Distribution</h2>
+            @if (plannedAssignments.Count == 0)
+            {
+                <p class="text-small text-muted">No assignment possible. Ensure you have enabled seeds and available workers.</p>
+            }
+            else
+            {
+                <ul class="list">
+                    @foreach (var assignment in plannedAssignments)
+                    {
+                        <li class="list-item">
+                            <div class="flex items-center justify-between gap-sm">
+                                <strong>@assignment.SeedUrl</strong>
+                                <span class="badge badge-info">Worker @assignment.WorkerId</span>
+                            </div>
+                            <div class="text-small text-muted">@assignment.WorkerName</div>
+                        </li>
+                    }
+                </ul>
+            }
+        </div>
+
+        <div class="card mb-lg">
+            <h2 class="card-title">Daemon Strategy View</h2>
+            <ul class="list">
+                @foreach (var group in groups.OrderBy(g => g.Name))
+                {
+                    var assigned = workers.Count(w => group.WorkerIds.Contains(w.Id));
+                    <li class="list-item">
+                        <div class="flex items-center justify-between gap-sm">
+                            <strong>@group.Name</strong>
+                            <span class="badge @(group.Enabled ? "badge-success" : "badge-warning")">@(group.Enabled ? "Enabled" : "Disabled")</span>
+                        </div>
+                        <div class="text-small text-muted">
+                            Queue: @(string.IsNullOrWhiteSpace(group.QueueMode) ? "global" : group.QueueMode)
+                            | Strategy: @(string.IsNullOrWhiteSpace(group.StrategyMode) ? "global" : group.StrategyMode)
+                            | Workers: @assigned
+                        </div>
+                    </li>
+                }
+            </ul>
+        </div>
+    }
+</div>
+
+@code {
+    private WorkerGlobalConfigViewModel? globalConfig;
+    private List<WorkerGroupSettingsViewModel> groups = new();
+    private List<WorkerViewModel> workers = new();
+    private List<SeedEntryViewModel> enabledSeeds = new();
+    private List<SeedAssignment> plannedAssignments = new();
+    private bool isLoading = true;
+    private string? statusMessage;
+
+    protected override async Task OnInitializedAsync()
+    {
+        await RefreshAll();
+    }
+
+    private async Task RefreshAll()
+    {
+        isLoading = true;
+        statusMessage = null;
+
+        globalConfig = await WorkerService.GetGlobalConfigAsync();
+        groups = await WorkerService.GetWorkerGroupsAsync();
+        workers = await WorkerService.GetAllWorkersAsync();
+
+        enabledSeeds = (globalConfig?.SeedEntries ?? new List<SeedEntryViewModel>())
+            .Where(seed => seed.Enabled && !string.IsNullOrWhiteSpace(seed.Url))
+            .Select(seed => new SeedEntryViewModel
+            {
+                Url = seed.Url.Trim(),
+                Label = seed.Label,
+                Enabled = true,
+            })
+            .ToList();
+
+        BuildAssignments();
+        isLoading = false;
+    }
+
+    private void BuildAssignments()
+    {
+        plannedAssignments = new List<SeedAssignment>();
+        if (enabledSeeds.Count == 0)
+        {
+            return;
+        }
+
+        var candidateWorkers = workers
+            .Where(worker => !string.Equals(worker.Status, "Stopped", StringComparison.OrdinalIgnoreCase))
+            .OrderBy(worker => worker.Id)
+            .ToList();
+
+        if (candidateWorkers.Count == 0)
+        {
+            return;
+        }
+
+        for (var i = 0; i < enabledSeeds.Count; i++)
+        {
+            var targetWorker = candidateWorkers[i % candidateWorkers.Count];
+            plannedAssignments.Add(new SeedAssignment
+            {
+                SeedUrl = enabledSeeds[i].Url,
+                WorkerId = targetWorker.Id,
+                WorkerName = targetWorker.Name,
+            });
+        }
+    }
+
+    private async Task EnforceServerQueueOnly()
+    {
+        if (globalConfig == null)
+        {
+            return;
+        }
+
+        globalConfig.QueueMode = "server";
+        await WorkerService.SaveGlobalConfigAsync(globalConfig);
+        statusMessage = WorkerService.LastError == null
+            ? "Global queue mode set to server."
+            : $"Unable to save queue mode: {WorkerService.LastError}";
+        await RefreshAll();
+    }
+
+    private async Task RebalanceSeedsAcrossWorkers()
+    {
+        if (plannedAssignments.Count == 0)
+        {
+            statusMessage = "No assignments available for rebalance.";
+            return;
+        }
+
+        var success = 0;
+        foreach (var assignment in plannedAssignments)
+        {
+            var ok = await WorkerService.AddSeedAsync(assignment.SeedUrl, assignment.WorkerId);
+            if (ok)
+            {
+                success++;
+            }
+        }
+
+        statusMessage = $"Rebalanced seeds: {success}/{plannedAssignments.Count} queued to server frontier.";
+    }
+
+    private sealed class SeedAssignment
+    {
+        public required string SeedUrl { get; init; }
+        public required int WorkerId { get; init; }
+        public required string WorkerName { get; init; }
+    }
+}

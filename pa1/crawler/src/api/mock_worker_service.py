@@ -79,7 +79,7 @@ class MockWorkerService(WorkerControlService):
                 enabled=True,
                 max_pages_per_worker=5000,
                 rate_limit_per_minute=240,
-                queue_mode="both",
+                queue_mode="server",
                 strategy_mode="balanced",
                 topic_keywords=["medicine", "health", "clinic"],
                 avoid_duplicate_paths_across_daemons=True,
@@ -411,7 +411,7 @@ class MockWorkerService(WorkerControlService):
 
         queue_mode = str(payload.get("queueMode", self._global_config.queue_mode)).strip().lower()
         if queue_mode not in {"local", "server", "both"}:
-            queue_mode = "both"
+            queue_mode = "server"
 
         strategy_mode = str(payload.get("strategyMode", self._global_config.strategy_mode)).strip().lower()
         if strategy_mode not in {"balanced", "coverage", "focused", "freshness"}:

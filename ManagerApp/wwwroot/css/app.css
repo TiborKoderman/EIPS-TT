@@ -858,6 +858,37 @@ textarea:focus {
     position: relative;
 }
 
+.graph-status-legend {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 10px;
+    margin-bottom: var(--spacing-sm);
+    font-size: var(--font-size-sm);
+    color: var(--color-text-secondary);
+}
+
+.graph-status-legend span {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+}
+
+.graph-status-legend .muted {
+    color: var(--color-text-tertiary);
+}
+
+.graph-status-legend .dot {
+    width: 10px;
+    height: 10px;
+    border-radius: 50%;
+    display: inline-block;
+}
+
+.graph-status-legend .dot-seed { background: #f2b84b; }
+.graph-status-legend .dot-candidate { background: #9aa3ad; }
+.graph-status-legend .dot-worker { background: #1f3a5f; }
+.graph-status-legend .dot-scanned { background: #2d8f57; }
+
 .graph-toolbar {
     display: flex;
     gap: var(--spacing-sm);
@@ -881,6 +912,10 @@ textarea:focus {
     font-size: var(--font-size-sm);
     padding: var(--spacing-xs) var(--spacing-sm);
     max-width: 420px;
+}
+
+.graph-worker {
+    pointer-events: none;
 }
 
 @media (max-width: 880px) {

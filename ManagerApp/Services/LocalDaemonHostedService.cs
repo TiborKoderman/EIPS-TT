@@ -152,7 +152,22 @@ public sealed class LocalDaemonHostedService : IHostedService
         var configured = _configuration["CrawlerApi:PythonExecutable"];
         if (!string.IsNullOrWhiteSpace(configured))
         {
-            yield return configured;
+            if (Path.IsPathRooted(configured))
+            {
+                yield return configured;
+            }
+            else
+            {
+                var configuredRelative = Path.Combine(repoRoot, configured);
+                if (File.Exists(configuredRelative))
+                {
+                    yield return configuredRelative;
+                }
+                else
+                {
+                    yield return configured;
+                }
+            }
         }
 
         var venvPython = Path.Combine(repoRoot, ".venv", "bin", "python");
@@ -161,8 +176,11 @@ public sealed class LocalDaemonHostedService : IHostedService
             yield return venvPython;
         }
 
-        var relativeVenvPython = ".venv/bin/python";
-        yield return relativeVenvPython;
+        var relativeVenvPython = Path.Combine(repoRoot, ".venv", "bin", "python");
+        if (File.Exists(relativeVenvPython))
+        {
+            yield return relativeVenvPython;
+        }
 
         yield return "python3";
         yield return "python";
