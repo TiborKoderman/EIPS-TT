@@ -105,7 +105,160 @@ app.MapGet("/api/crawler/events", (int? limit, CrawlerRelayService relay) =>
     });
 });
 
+app.MapGet("/api/pages/{pageId:int}/images/{imageId:int}", async (
+    int pageId,
+    int imageId,
+    bool? download,
+    IDbContextFactory<CrawldbContext> contextFactory) =>
+{
+    await using var db = await contextFactory.CreateDbContextAsync();
+    var image = await db.Images
+        .AsNoTracking()
+        .FirstOrDefaultAsync(item => item.Id == imageId && item.PageId == pageId);
+
+    if (image?.Data is null)
+    {
+        return Results.NotFound();
+    }
+
+    var contentType = string.IsNullOrWhiteSpace(image.ContentType)
+        ? DetectContentType(image.Data, fallback: "application/octet-stream")
+        : image.ContentType;
+    var fileName = string.IsNullOrWhiteSpace(image.Filename)
+        ? $"image-{image.Id}{ResolveFileExtension(contentType)}"
+        : SanitizeFileName(image.Filename);
+
+    if (download == true)
+    {
+        return Results.File(image.Data, contentType, fileName, enableRangeProcessing: true);
+    }
+
+    return Results.File(image.Data, contentType, enableRangeProcessing: true);
+});
+
+app.MapGet("/api/pages/{pageId:int}/page-data/{pageDataId:int}", async (
+    int pageId,
+    int pageDataId,
+    bool? download,
+    IDbContextFactory<CrawldbContext> contextFactory) =>
+{
+    await using var db = await contextFactory.CreateDbContextAsync();
+    var pageData = await db.PageData
+        .AsNoTracking()
+        .FirstOrDefaultAsync(item => item.Id == pageDataId && item.PageId == pageId);
+
+    if (pageData?.Data is null)
+    {
+        return Results.NotFound();
+    }
+
+    var contentType = ResolveDataContentType(pageData.DataTypeCode, pageData.Data);
+    var fileName = $"page-{pageId}-blob-{pageData.Id}{ResolveFileExtension(contentType)}";
+
+    if (download == true)
+    {
+        return Results.File(pageData.Data, contentType, fileName, enableRangeProcessing: true);
+    }
+
+    return Results.File(pageData.Data, contentType, enableRangeProcessing: true);
+});
+
 app.Run();
+
+static string ResolveDataContentType(string? dataTypeCode, byte[] data)
+{
+    var normalized = dataTypeCode?.Trim().ToUpperInvariant();
+    return normalized switch
+    {
+        "PDF" => "application/pdf",
+        "DOC" => "application/msword",
+        "DOCX" => "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        "PPT" => "application/vnd.ms-powerpoint",
+        "PPTX" => "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+        _ => DetectContentType(data, fallback: "application/octet-stream"),
+    };
+}
+
+static string DetectContentType(byte[] data, string fallback)
+{
+    if (data.Length >= 8
+        && data[0] == 0x89
+        && data[1] == 0x50
+        && data[2] == 0x4E
+        && data[3] == 0x47
+        && data[4] == 0x0D
+        && data[5] == 0x0A
+        && data[6] == 0x1A
+        && data[7] == 0x0A)
+    {
+        return "image/png";
+    }
+
+    if (data.Length >= 3 && data[0] == 0xFF && data[1] == 0xD8 && data[2] == 0xFF)
+    {
+        return "image/jpeg";
+    }
+
+    if (data.Length >= 6
+        && data[0] == 0x47
+        && data[1] == 0x49
+        && data[2] == 0x46
+        && data[3] == 0x38
+        && (data[4] == 0x37 || data[4] == 0x39)
+        && data[5] == 0x61)
+    {
+        return "image/gif";
+    }
+
+    if (data.Length >= 12
+        && data[0] == 0x52
+        && data[1] == 0x49
+        && data[2] == 0x46
+        && data[3] == 0x46
+        && data[8] == 0x57
+        && data[9] == 0x45
+        && data[10] == 0x42
+        && data[11] == 0x50)
+    {
+        return "image/webp";
+    }
+
+    if (data.Length >= 5
+        && data[0] == 0x25
+        && data[1] == 0x50
+        && data[2] == 0x44
+        && data[3] == 0x46
+        && data[4] == 0x2D)
+    {
+        return "application/pdf";
+    }
+
+    return fallback;
+}
+
+static string ResolveFileExtension(string contentType)
+{
+    return contentType.ToLowerInvariant() switch
+    {
+        "image/png" => ".png",
+        "image/jpeg" => ".jpg",
+        "image/gif" => ".gif",
+        "image/webp" => ".webp",
+        "application/pdf" => ".pdf",
+        "application/msword" => ".doc",
+        "application/vnd.openxmlformats-officedocument.wordprocessingml.document" => ".docx",
+        "application/vnd.ms-powerpoint" => ".ppt",
+        "application/vnd.openxmlformats-officedocument.presentationml.presentation" => ".pptx",
+        _ => ".bin",
+    };
+}
+
+static string SanitizeFileName(string fileName)
+{
+    var invalidChars = Path.GetInvalidFileNameChars();
+    var sanitized = new string(fileName.Select(ch => invalidChars.Contains(ch) ? '_' : ch).ToArray());
+    return string.IsNullOrWhiteSpace(sanitized) ? "download.bin" : sanitized;
+}
 
 static void ApplyDbEnvironmentOverrides(ConfigurationManager configuration)
 {

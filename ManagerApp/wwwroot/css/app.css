@@ -302,6 +302,15 @@ h3 { font-size: var(--font-size-lg); }
     color: var(--color-primary);
 }
 
+.mdi-spin {
+    animation: mdi-spin 0.9s linear infinite;
+}
+
+@keyframes mdi-spin {
+    from { transform: rotate(0deg); }
+    to { transform: rotate(360deg); }
+}
+
 .btn-sm {
     padding: var(--spacing-xs) var(--spacing-sm);
     font-size: var(--font-size-sm);
@@ -1019,6 +1028,53 @@ textarea:focus {
 .page-url {
     font-weight: 500;
     overflow-wrap: anywhere;
+}
+
+.page-url-row {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+}
+
+.page-url-open-btn {
+    flex-shrink: 0;
+}
+
+.media-list {
+    display: grid;
+    gap: var(--spacing-xs);
+}
+
+.media-item {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: var(--spacing-sm);
+    padding: 6px 8px;
+    border: 1px solid var(--color-border-light);
+    border-radius: var(--radius-sm);
+    background: var(--color-bg-alt);
+}
+
+.media-item-main {
+    min-width: 0;
+}
+
+.media-item-name {
+    font-weight: 600;
+    overflow-wrap: anywhere;
+}
+
+.media-item-meta {
+    color: var(--color-text-secondary);
+    font-size: var(--font-size-sm);
+}
+
+.media-item-actions {
+    display: inline-flex;
+    align-items: center;
+    gap: 2px;
+    flex-shrink: 0;
 }
 
 .graph-shell {

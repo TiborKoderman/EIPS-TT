@@ -66,10 +66,6 @@
                 <button class="btn btn-primary" @onclick="SpawnWorker" disabled="@(daemonStatus?.Running != true)">
                     <span class="mdi mdi-plus"></span> Add Worker
                 </button>
-                <button class="btn" @onclick="ToggleDaemon">
-                    <span class="mdi @(daemonStatus?.Running == true ? "mdi-stop-circle-outline" : "mdi-play-circle-outline")"></span>
-                    @(daemonStatus?.Running == true ? "Stop Daemon" : "Start Daemon")
-                </button>
                 <button class="btn" @onclick="ReloadDaemon" disabled="@(daemonStatus?.Running != true)">
                     <span class="mdi mdi-refresh"></span> Reload
                 </button>
@@ -83,7 +79,27 @@
     </div>
 
     <div class="card mb-lg">
-        <h2 class="card-title">Daemon Channel Diagnostics</h2>
+        <div class="card-header-inline mb-sm">
+            <h2 class="card-title mb-0">Daemon Channel Diagnostics</h2>
+            <div class="flex items-center gap-sm">
+                <button class="btn btn-icon"
+                        type="button"
+                        title="Start daemon"
+                        aria-label="Start daemon"
+                        @onclick="StartDaemonFromDiagnostics"
+                        disabled="@(daemonActionInProgress || daemonStatus?.Running == true)">
+                    <span class="mdi @(daemonActionInProgress && daemonActionType == "start" ? "mdi-loading mdi-spin" : "mdi-play-circle-outline")"></span>
+                </button>
+                <button class="btn btn-icon"
+                        type="button"
+                        title="Stop daemon"
+                        aria-label="Stop daemon"
+                        @onclick="StopDaemonFromDiagnostics"
+                        disabled="@(daemonActionInProgress || daemonStatus?.Running != true)">
+                    <span class="mdi @(daemonActionInProgress && daemonActionType == "stop" ? "mdi-loading mdi-spin" : "mdi-stop-circle-outline")"></span>
+                </button>
+            </div>
+        </div>
         <div class="grid grid-cols-4 mb-md">
             <StatCard Label="Connected Daemons" Value="@daemonConnections.Count.ToString()" Footnote="WebSocket channel" />
             <StatCard Label="Queued" Value="@commandDiagnostics.Queued.ToString()" Footnote="Awaiting dispatch" />
@@ -349,6 +365,8 @@
     private string CombinedLogSearch { get; set; } = "";
     private bool combinedLogsUsingFallback;
     private bool combinedThroughputUsingFallback;
+    private bool daemonActionInProgress;
+    private string? daemonActionType;
 
     private IReadOnlyList<string> WorkerApiPending =>
     [
@@ -666,22 +684,54 @@
         actionStatus = "Quick Start complete: daemon running, seeds queued, workers active.";
     }
 
-    private async Task ToggleDaemon()
+    private async Task StartDaemonFromDiagnostics()
     {
-        if (daemonStatus?.Running == true)
-        {
-            var ok = await WorkerService.StopDaemonAsync();
-            actionStatus = ok ? "Daemon stopped." : $"Failed to stop daemon. {WorkerService.LastError}";
-        }
-        else
-        {
-            var ok = await WorkerService.StartDaemonAsync();
-            actionStatus = ok
-                ? "Daemon started."
-                : $"Failed to start daemon. {WorkerService.LastError ?? "Ensure crawler API server is running."}";
-        }
+        await SetDaemonRunningAsync(shouldRun: true);
+    }
 
-        await RefreshAsync();
+    private async Task StopDaemonFromDiagnostics()
+    {
+        await SetDaemonRunningAsync(shouldRun: false);
+    }
+
+    private async Task SetDaemonRunningAsync(bool shouldRun)
+    {
+        daemonActionInProgress = true;
+        daemonActionType = shouldRun ? "start" : "stop";
+
+        try
+        {
+            bool ok;
+            try
+            {
+                var operation = shouldRun
+                    ? WorkerService.StartDaemonAsync()
+                    : WorkerService.StopDaemonAsync();
+                ok = await operation.WaitAsync(TimeSpan.FromSeconds(12));
+            }
+            catch (TimeoutException)
+            {
+                actionStatus = shouldRun
+                    ? "Starting daemon timed out. Please retry and verify daemon logs."
+                    : "Stopping daemon timed out. Please retry and verify daemon logs.";
+                return;
+            }
+
+            actionStatus = shouldRun
+                ? (ok
+                    ? "Daemon started."
+                    : $"Failed to start daemon. {WorkerService.LastError ?? "Ensure crawler API server is running."}")
+                : (ok
+                    ? "Daemon stopped."
+                    : $"Failed to stop daemon. {WorkerService.LastError}");
+
+            await RefreshAsync();
+        }
+        finally
+        {
+            daemonActionInProgress = false;
+            daemonActionType = null;
+        }
     }
 
     private async Task ReloadDaemon()

@@ -78,7 +78,21 @@
                                     </td>
                                     <td>@(row.HttpStatus?.ToString() ?? "-")</td>
                                     <td>
-                                        <div class="page-url">@row.Url</div>
+                                        <div class="page-url-row">
+                                            <div class="page-url">@row.Url</div>
+                                            @if (!string.IsNullOrWhiteSpace(row.Url))
+                                            {
+                                                <a class="btn btn-icon page-url-open-btn"
+                                                   href="@row.Url"
+                                                   target="_blank"
+                                                   rel="noopener noreferrer"
+                                                   title="Open page URL"
+                                                   aria-label="Open page URL"
+                                                   @onclick:stopPropagation="true">
+                                                    <span class="mdi mdi-open-in-new"></span>
+                                                </a>
+                                            }
+                                        </div>
                                         <div class="text-small text-muted">@(string.IsNullOrWhiteSpace(row.SiteDomain) ? "-" : row.SiteDomain)</div>
                                     </td>
                                 </tr>
@@ -103,7 +117,95 @@
                     <div><strong>HTTP:</strong> @SelectedPage.HttpStatusCode</div>
                     <div><strong>Accessed:</strong> @SelectedPage.AccessedTime</div>
                     <div><strong>Images:</strong> @SelectedPage.Images.Count</div>
+                    @if (SelectedPage.Images.Count == 0)
+                    {
+                        <div class="text-small text-muted">No image rows for this page.</div>
+                    }
+                    else
+                    {
+                        <div class="media-list">
+                            @foreach (var image in SelectedPage.Images.OrderBy(item => item.Id))
+                            {
+                                <div class="media-item">
+                                    <div class="media-item-main">
+                                        <div class="media-item-name">@(string.IsNullOrWhiteSpace(image.Filename) ? $"image-{image.Id}" : image.Filename)</div>
+                                        <div class="media-item-meta">@((image.ContentType ?? "application/octet-stream") + " | " + FormatBytes(image.Data?.Length ?? 0))</div>
+                                    </div>
+                                    <div class="media-item-actions">
+                                        @if (image.Data is { Length: > 0 })
+                                        {
+                                            <a class="btn btn-icon"
+                                               href="@GetImagePreviewUrl(SelectedPage.Id, image.Id)"
+                                               target="_blank"
+                                               rel="noopener noreferrer"
+                                               title="Preview image"
+                                               aria-label="Preview image">
+                                                <span class="mdi mdi-eye-outline"></span>
+                                            </a>
+                                            <a class="btn btn-icon"
+                                               href="@GetImageDownloadUrl(SelectedPage.Id, image.Id)"
+                                               title="Download image"
+                                               aria-label="Download image">
+                                                <span class="mdi mdi-download-outline"></span>
+                                            </a>
+                                        }
+                                        else
+                                        {
+                                            <span class="text-small text-muted">No binary data</span>
+                                        }
+                                    </div>
+                                </div>
+                            }
+                        </div>
+                    }
+
                     <div><strong>Binary blobs:</strong> @SelectedPage.PageData.Count</div>
+                    @if (SelectedPage.PageData.Count == 0)
+                    {
+                        <div class="text-small text-muted">No binary blobs for this page.</div>
+                    }
+                    else
+                    {
+                        <div class="media-list">
+                            @foreach (var blob in SelectedPage.PageData.OrderBy(item => item.Id))
+                            {
+                                var contentType = ResolvePageDataContentType(blob);
+                                <div class="media-item">
+                                    <div class="media-item-main">
+                                        <div class="media-item-name">@($"blob-{blob.Id}")</div>
+                                        <div class="media-item-meta">@((blob.DataTypeCode ?? "BIN") + " | " + contentType + " | " + FormatBytes(blob.Data?.Length ?? 0))</div>
+                                    </div>
+                                    <div class="media-item-actions">
+                                        @if (blob.Data is { Length: > 0 })
+                                        {
+                                            @if (IsPreviewableBlob(contentType))
+                                            {
+                                                <a class="btn btn-icon"
+                                                   href="@GetBlobPreviewUrl(SelectedPage.Id, blob.Id)"
+                                                   target="_blank"
+                                                   rel="noopener noreferrer"
+                                                   title="Preview blob"
+                                                   aria-label="Preview blob">
+                                                    <span class="mdi mdi-eye-outline"></span>
+                                                </a>
+                                            }
+                                            <a class="btn btn-icon"
+                                               href="@GetBlobDownloadUrl(SelectedPage.Id, blob.Id)"
+                                               title="Download blob"
+                                               aria-label="Download blob">
+                                                <span class="mdi mdi-download-outline"></span>
+                                            </a>
+                                        }
+                                        else
+                                        {
+                                            <span class="text-small text-muted">No binary data</span>
+                                        }
+                                    </div>
+                                </div>
+                            }
+                        </div>
+                    }
+
                     <a class="btn mt-md" href="/graph">
                         <span class="mdi mdi-graph-outline"></span> Show on Graph
                     </a>
@@ -201,6 +303,63 @@
     {
         var seconds = Math.Max(0, (int)(DateTime.UtcNow - _lastUpdatedUtc).TotalSeconds);
         return $"{seconds}s ago";
+    }
+
+    private static string GetImagePreviewUrl(int pageId, int imageId)
+    {
+        return $"/api/pages/{pageId}/images/{imageId}";
+    }
+
+    private static string GetImageDownloadUrl(int pageId, int imageId)
+    {
+        return $"/api/pages/{pageId}/images/{imageId}?download=true";
+    }
+
+    private static string GetBlobPreviewUrl(int pageId, int pageDataId)
+    {
+        return $"/api/pages/{pageId}/page-data/{pageDataId}";
+    }
+
+    private static string GetBlobDownloadUrl(int pageId, int pageDataId)
+    {
+        return $"/api/pages/{pageId}/page-data/{pageDataId}?download=true";
+    }
+
+    private static bool IsPreviewableBlob(string contentType)
+    {
+        var normalized = contentType.ToLowerInvariant();
+        return normalized.StartsWith("image/")
+            || normalized == "application/pdf"
+            || normalized.StartsWith("text/");
+    }
+
+    private static string ResolvePageDataContentType(PageDatum pageData)
+    {
+        var normalizedType = pageData.DataTypeCode?.Trim().ToUpperInvariant();
+        return normalizedType switch
+        {
+            "PDF" => "application/pdf",
+            "DOC" => "application/msword",
+            "DOCX" => "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+            "PPT" => "application/vnd.ms-powerpoint",
+            "PPTX" => "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+            _ => "application/octet-stream",
+        };
+    }
+
+    private static string FormatBytes(long bytes)
+    {
+        string[] units = ["B", "KB", "MB", "GB"];
+        double value = bytes;
+        var unitIndex = 0;
+
+        while (value >= 1024 && unitIndex < units.Length - 1)
+        {
+            value /= 1024;
+            unitIndex++;
+        }
+
+        return $"{value:0.#} {units[unitIndex]}";
     }
 
     public ValueTask DisposeAsync()
