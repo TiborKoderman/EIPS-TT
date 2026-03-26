@@ -443,25 +443,34 @@
 
     private async Task Start(int id)
     {
-        await WorkerService.StartWorkerAsync(id);
+        var ok = await WorkerService.StartWorkerAsync(id);
+        actionStatus = ok
+            ? $"Worker {id} start requested successfully."
+            : $"Worker {id} start failed. {WorkerService.LastError}";
         await RefreshAsync();
     }
 
     private async Task Pause(int id)
     {
-        await WorkerService.PauseWorkerAsync(id);
+        var ok = await WorkerService.PauseWorkerAsync(id);
+        actionStatus = ok
+            ? $"Worker {id} pause requested successfully."
+            : $"Worker {id} pause failed. {WorkerService.LastError}";
         await RefreshAsync();
     }
 
     private async Task Stop(int id)
     {
-        await WorkerService.StopWorkerAsync(id);
+        var ok = await WorkerService.StopWorkerAsync(id);
+        actionStatus = ok
+            ? $"Worker {id} stop requested successfully."
+            : $"Worker {id} stop failed. {WorkerService.LastError}";
         await RefreshAsync();
     }
 
     private async Task StartAllInDaemon(WorkerGroupSettingsViewModel daemon)
     {
-        var targets = GetFilteredWorkersForDaemon(daemon)
+        var targets = GetAllWorkersForDaemon(daemon)
             .Where(worker => !string.Equals(worker.Status, "Active", StringComparison.OrdinalIgnoreCase))
             .ToList();
 
@@ -486,7 +495,7 @@
 
     private async Task StopAllInDaemon(WorkerGroupSettingsViewModel daemon)
     {
-        var targets = GetFilteredWorkersForDaemon(daemon)
+        var targets = GetAllWorkersForDaemon(daemon)
             .Where(worker => !string.Equals(worker.Status, "Stopped", StringComparison.OrdinalIgnoreCase))
             .ToList();
 
@@ -676,6 +685,12 @@
     {
         var ids = daemon.WorkerIds?.ToHashSet() ?? new HashSet<int>();
         return FilteredWorkers.Where(worker => ids.Contains(worker.Id)).ToList();
+    }
+
+    private List<WorkerViewModel> GetAllWorkersForDaemon(WorkerGroupSettingsViewModel daemon)
+    {
+        var ids = daemon.WorkerIds?.ToHashSet() ?? new HashSet<int>();
+        return workerItems.Where(worker => ids.Contains(worker.Id)).ToList();
     }
 
     private static int CountByStatus(IEnumerable<WorkerViewModel> workers, string status)

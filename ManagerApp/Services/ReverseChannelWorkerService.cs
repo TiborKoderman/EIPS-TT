@@ -67,19 +67,26 @@ public sealed class ReverseChannelWorkerService : IWorkerService
         }
 
         await PushPersistedStateToDaemonAsync();
+        var direct = await RequestAsync<object>("start-daemon", payload: null, ensureConnected: false);
+        if (direct is not null)
+        {
+            LastError = null;
+            return true;
+        }
+
         return await EnqueueCommandAsync("start-daemon", null);
     }
 
     public Task<bool> StopDaemonAsync()
     {
         LastError = null;
-        return EnqueueCommandAsync("stop-daemon", null);
+        return ExecuteCommandAsync("stop-daemon", null);
     }
 
     public Task<bool> ReloadDaemonAsync()
     {
         LastError = null;
-        return EnqueueCommandAsync("reload-daemon", null);
+        return ExecuteCommandAsync("reload-daemon", null);
     }
 
     public async Task<WorkerViewModel?> SpawnWorkerAsync(
@@ -142,19 +149,19 @@ public sealed class ReverseChannelWorkerService : IWorkerService
     public Task<bool> StartWorkerAsync(int id)
     {
         LastError = null;
-        return EnqueueCommandAsync("start-worker", id);
+        return ExecuteCommandAsync("start-worker", id);
     }
 
     public Task<bool> StopWorkerAsync(int id)
     {
         LastError = null;
-        return EnqueueCommandAsync("stop-worker", id);
+        return ExecuteCommandAsync("stop-worker", id);
     }
 
     public Task<bool> PauseWorkerAsync(int id)
     {
         LastError = null;
-        return EnqueueCommandAsync("pause-worker", id);
+        return ExecuteCommandAsync("pause-worker", id);
     }
 
     public async Task<Dictionary<string, int>> GetWorkerStatusCountsAsync()
@@ -649,6 +656,36 @@ public sealed class ReverseChannelWorkerService : IWorkerService
             _logger.LogWarning(ex, "Failed to enqueue command {CommandType}", commandType);
             return false;
         }
+    }
+
+    private async Task<bool> ExecuteCommandAsync(string commandType, int? workerId)
+    {
+        var payload = workerId.HasValue
+            ? new { workerId }
+            : null;
+
+        var action = commandType switch
+        {
+            "start-daemon" => "start-daemon",
+            "stop-daemon" => "stop-daemon",
+            "reload-daemon" => "reload-daemon",
+            "start-worker" => "start-worker",
+            "stop-worker" => "stop-worker",
+            "pause-worker" => "pause-worker",
+            _ => null,
+        };
+
+        if (!string.IsNullOrWhiteSpace(action))
+        {
+            var response = await RequestAsync<object>(action, payload, ensureConnected: false);
+            if (response is not null)
+            {
+                LastError = null;
+                return true;
+            }
+        }
+
+        return await EnqueueCommandAsync(commandType, workerId);
     }
 
     private async Task PersistSeedUrlsAsync(int externalWorkerId, IReadOnlyList<string> seedUrls)

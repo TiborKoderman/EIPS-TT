@@ -1560,16 +1560,25 @@ class DaemonWorkerService(WorkerControlService):
 
         try:
             discovered_links: list[str] = []
+            parser_payload: dict[str, object] | None = None
             if download.html_content:
                 extracted = self._link_extractor.extract(download.html_content, download.final_url)
                 discovered_links = extracted.links[: self._max_extracted_links_per_page]
+                parser_payload = {
+                    "links": extracted.links,
+                    "jsLinks": extracted.js_links,
+                    "images": extracted.images,
+                    "linksCount": len(extracted.links),
+                    "jsLinksCount": len(extracted.js_links),
+                    "imagesCount": len(extracted.images),
+                }
 
             return {
                 "ok": True,
                 "stage": "complete",
                 "error": None,
                 "finalUrl": download.final_url,
-                "downloadResult": self._to_download_payload(download),
+                "downloadResult": self._to_download_payload(download, parser_payload=parser_payload),
                 "discoveredLinks": discovered_links,
             }
         except Exception as exc:
@@ -1578,12 +1587,23 @@ class DaemonWorkerService(WorkerControlService):
                 "stage": "parse",
                 "error": str(exc),
                 "finalUrl": download.final_url,
-                "downloadResult": self._to_download_payload(download),
+                "downloadResult": self._to_download_payload(download, parser_payload={
+                    "links": [],
+                    "jsLinks": [],
+                    "images": [],
+                    "linksCount": 0,
+                    "jsLinksCount": 0,
+                    "imagesCount": 0,
+                }),
                 "discoveredLinks": [],
             }
 
     @staticmethod
-    def _to_download_payload(download: DownloadResult) -> dict[str, object | None]:
+    def _to_download_payload(
+        download: DownloadResult,
+        *,
+        parser_payload: dict[str, object] | None = None,
+    ) -> dict[str, object | None]:
         return {
             "requestedUrl": download.requested_url,
             "finalUrl": download.final_url,
@@ -1594,6 +1614,7 @@ class DaemonWorkerService(WorkerControlService):
             "htmlContent": download.html_content,
             "usedRenderer": download.used_renderer,
             "contentLength": download.content_length,
+            "parsedPayload": parser_payload,
         }
 
     def _report_page_to_manager(

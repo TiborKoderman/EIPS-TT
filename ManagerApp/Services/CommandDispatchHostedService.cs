@@ -93,15 +93,32 @@ public sealed class CommandDispatchHostedService : BackgroundService
                     errorMessage: null,
                     setDispatchedAt: true,
                     cancellationToken);
+
+                await InsertDispatchLogAsync(
+                    connection,
+                    command.DaemonIdentifier,
+                    level: "Info",
+                    message: $"[command-dispatch] commandId={command.Id} type={command.CommandType} status=dispatched",
+                    payloadJson: command.PayloadJson,
+                    cancellationToken);
                 continue;
             }
 
+            var errorMessage = $"Daemon '{command.DaemonIdentifier}' is not connected.";
             await UpdateCommandStatusAsync(
                 connection,
                 command.Id,
                 status: "queued",
-                errorMessage: $"Daemon '{command.DaemonIdentifier}' is not connected.",
+                errorMessage: errorMessage,
                 setDispatchedAt: false,
+                cancellationToken);
+
+            await InsertDispatchLogAsync(
+                connection,
+                command.DaemonIdentifier,
+                level: "Warning",
+                message: $"[command-dispatch] commandId={command.Id} type={command.CommandType} status=queued reason=daemon-not-connected",
+                payloadJson: command.PayloadJson,
                 cancellationToken);
         }
     }
@@ -197,6 +214,27 @@ public sealed class CommandDispatchHostedService : BackgroundService
         cmd.Parameters.AddWithValue("error_message", (object?)errorMessage ?? DBNull.Value);
         cmd.Parameters.AddWithValue("set_dispatched_at", setDispatchedAt);
         cmd.Parameters.AddWithValue("id", commandId);
+        await cmd.ExecuteNonQueryAsync(cancellationToken);
+    }
+
+    private static async Task InsertDispatchLogAsync(
+        NpgsqlConnection connection,
+        string daemonIdentifier,
+        string level,
+        string message,
+        string payloadJson,
+        CancellationToken cancellationToken)
+    {
+        const string sql = """
+            INSERT INTO manager.worker_log(daemon_identifier, external_worker_id, level, message, payload)
+            VALUES (@daemon_identifier, NULL, @level, @message, @payload::jsonb);
+            """;
+
+        await using var cmd = new NpgsqlCommand(sql, connection);
+        cmd.Parameters.AddWithValue("daemon_identifier", daemonIdentifier);
+        cmd.Parameters.AddWithValue("level", level);
+        cmd.Parameters.AddWithValue("message", message);
+        cmd.Parameters.AddWithValue("payload", string.IsNullOrWhiteSpace(payloadJson) ? "{}" : payloadJson);
         await cmd.ExecuteNonQueryAsync(cancellationToken);
     }
 

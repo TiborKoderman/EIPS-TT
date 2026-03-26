@@ -244,6 +244,7 @@ public sealed class DaemonChannelService
         };
 
         _connections[daemonId] = connection;
+        _logger.LogInformation("Daemon websocket connected: {DaemonId}", daemonId);
         await SendAsync(socket, new
         {
             type = "registered",
@@ -273,6 +274,7 @@ public sealed class DaemonChannelService
         {
             _connections.TryRemove(daemonId, out _);
             connection.SendLock.Dispose();
+            _logger.LogInformation("Daemon websocket disconnected: {DaemonId}", daemonId);
 
             if (socket.State is WebSocketState.Open or WebSocketState.CloseReceived)
             {
@@ -354,6 +356,7 @@ public sealed class DaemonChannelService
 
             if (string.Equals(messageType, "command-ack", StringComparison.OrdinalIgnoreCase))
             {
+                _logger.LogInformation("Daemon command acknowledged: daemon={DaemonId} commandId={CommandId}", daemonId, commandId);
                 await UpdateCommandStatusAsync(commandId, "acknowledged", null, setAcknowledgedAt: true, setCompletedAt: false);
                 return;
             }
@@ -370,6 +373,12 @@ public sealed class DaemonChannelService
                 var mappedStatus = string.Equals(status, "failed", StringComparison.OrdinalIgnoreCase)
                     ? "failed"
                     : "completed";
+                _logger.LogInformation(
+                    "Daemon command result: daemon={DaemonId} commandId={CommandId} status={Status} error={Error}",
+                    daemonId,
+                    commandId,
+                    mappedStatus,
+                    error);
                 await UpdateCommandStatusAsync(commandId, mappedStatus, error, setAcknowledgedAt: false, setCompletedAt: true);
             }
         }
@@ -452,6 +461,48 @@ public sealed class DaemonChannelService
         cmd.Parameters.AddWithValue("set_done", setCompletedAt);
         cmd.Parameters.AddWithValue("id", commandId);
         await cmd.ExecuteNonQueryAsync();
+
+        const string commandMetaSql = """
+            SELECT c.command_type,
+                   c.payload::text,
+                   COALESCE(d.metadata->>'daemonId', 'local-default') AS daemon_identifier
+            FROM manager.command c
+            JOIN manager.daemon d ON d.id = c.daemon_id
+            WHERE c.id = @id;
+            """;
+
+        string commandType = "unknown";
+        string payloadJson = "{}";
+        string daemonIdentifier = "local-default";
+
+        await using (var metaCmd = new NpgsqlCommand(commandMetaSql, connection))
+        {
+            metaCmd.Parameters.AddWithValue("id", commandId);
+            await using var reader = await metaCmd.ExecuteReaderAsync();
+            if (await reader.ReadAsync())
+            {
+                commandType = reader.IsDBNull(0) ? "unknown" : reader.GetString(0);
+                payloadJson = reader.IsDBNull(1) ? "{}" : reader.GetString(1);
+                daemonIdentifier = reader.IsDBNull(2) ? "local-default" : reader.GetString(2);
+            }
+        }
+
+        var level = string.Equals(status, "failed", StringComparison.OrdinalIgnoreCase) ? "Error" : "Info";
+        var message = string.IsNullOrWhiteSpace(error)
+            ? $"[command-result] commandId={commandId} type={commandType} status={status}"
+            : $"[command-result] commandId={commandId} type={commandType} status={status} error={error}";
+
+        const string logSql = """
+            INSERT INTO manager.worker_log(daemon_identifier, external_worker_id, level, message, payload)
+            VALUES (@daemon_identifier, NULL, @level, @message, @payload::jsonb);
+            """;
+
+        await using var logCmd = new NpgsqlCommand(logSql, connection);
+        logCmd.Parameters.AddWithValue("daemon_identifier", daemonIdentifier);
+        logCmd.Parameters.AddWithValue("level", level);
+        logCmd.Parameters.AddWithValue("message", message);
+        logCmd.Parameters.AddWithValue("payload", string.IsNullOrWhiteSpace(payloadJson) ? "{}" : payloadJson);
+        await logCmd.ExecuteNonQueryAsync();
     }
 
     private static async Task<string?> ReceiveTextMessageAsync(WebSocket socket, CancellationToken cancellationToken)

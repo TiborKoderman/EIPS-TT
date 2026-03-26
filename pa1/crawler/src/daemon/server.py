@@ -111,11 +111,14 @@ def _handle_reverse_command(service: DaemonWorkerService, payload: dict[str, obj
         service.reload_workers()
         return True, None
     if command == "start-worker" and worker_id is not None:
-        return service.start_worker(worker_id), None
+        ok = service.start_worker(worker_id)
+        return ok, None if ok else f"Failed to start worker {worker_id}."
     if command == "pause-worker" and worker_id is not None:
-        return service.pause_worker(worker_id), None
+        ok = service.pause_worker(worker_id)
+        return ok, None if ok else f"Failed to pause worker {worker_id}."
     if command == "stop-worker" and worker_id is not None:
-        return service.stop_worker(worker_id), None
+        ok = service.stop_worker(worker_id)
+        return ok, None if ok else f"Failed to stop worker {worker_id}."
 
     return False, f"Unsupported or invalid command: {command}"
 
@@ -131,6 +134,15 @@ def _handle_reverse_request(
     if normalized_action == "get-daemon-status":
         return True, service.get_daemon_status(), None
 
+    if normalized_action == "start-daemon":
+        return True, service.start_daemon(), None
+
+    if normalized_action == "stop-daemon":
+        return True, service.stop_daemon(), None
+
+    if normalized_action == "reload-daemon":
+        return True, service.reload_workers(), None
+
     if normalized_action == "get-workers":
         return True, [_serialize_worker(worker) for worker in service.list_workers()], None
 
@@ -139,6 +151,33 @@ def _handle_reverse_request(
             return False, None, "Missing workerId."
         worker = service.get_worker(worker_id)
         return (True, _serialize_worker(worker), None) if worker is not None else (False, None, f"Worker {worker_id} not found.")
+
+    if normalized_action == "start-worker":
+        if worker_id is None:
+            return False, None, "Missing workerId."
+        started = service.start_worker(worker_id)
+        if not started:
+            return False, None, f"Failed to start worker {worker_id}."
+        worker = service.get_worker(worker_id)
+        return True, _serialize_worker(worker) if worker is not None else {"id": worker_id}, None
+
+    if normalized_action == "pause-worker":
+        if worker_id is None:
+            return False, None, "Missing workerId."
+        paused = service.pause_worker(worker_id)
+        if not paused:
+            return False, None, f"Failed to pause worker {worker_id}."
+        worker = service.get_worker(worker_id)
+        return True, _serialize_worker(worker) if worker is not None else {"id": worker_id}, None
+
+    if normalized_action == "stop-worker":
+        if worker_id is None:
+            return False, None, "Missing workerId."
+        stopped = service.stop_worker(worker_id)
+        if not stopped:
+            return False, None, f"Failed to stop worker {worker_id}."
+        worker = service.get_worker(worker_id)
+        return True, _serialize_worker(worker) if worker is not None else {"id": worker_id}, None
 
     if normalized_action == "get-worker-detail":
         if worker_id is None:
@@ -196,10 +235,12 @@ def _handle_reverse_request(
         url = str(payload.get("url", "")).strip()
         if not url:
             return False, None, "Missing frontier URL."
+        lease_token_raw = payload.get("leaseToken")
+        lease_token = str(lease_token_raw) if lease_token_raw is not None else None
         return True, service.complete_frontier_url(
             worker_id,
             url,
-            payload.get("leaseToken"),
+            lease_token,
             str(payload.get("status", "completed")).strip() or "completed",
         ), None
 

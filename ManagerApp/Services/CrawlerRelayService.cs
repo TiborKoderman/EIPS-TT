@@ -51,6 +51,7 @@ public sealed class CrawlerRelayService
             : request.DownloadResult!.PageTypeCode!.Trim().ToUpperInvariant();
         var html = request.DownloadResult?.HtmlContent;
         var contentHash = string.IsNullOrWhiteSpace(html) ? null : Sha256Hex(html);
+        var parsedPayloadBytes = SerializeParsedPayload(request.DownloadResult?.ParsedPayload);
 
         await using var context = await _contextFactory.CreateDbContextAsync(cancellationToken);
 
@@ -143,16 +144,21 @@ public sealed class CrawlerRelayService
 
         if (!string.IsNullOrWhiteSpace(request.DownloadResult?.DataTypeCode))
         {
-            var hasPageData = await context.PageData
-                .AnyAsync(pd => pd.PageId == targetPage.Id && pd.DataTypeCode == request.DownloadResult!.DataTypeCode, cancellationToken);
-            if (!hasPageData)
+            var existingPageData = await context.PageData
+                .FirstOrDefaultAsync(pd => pd.PageId == targetPage.Id && pd.DataTypeCode == request.DownloadResult!.DataTypeCode, cancellationToken);
+            if (existingPageData is null)
             {
                 context.PageData.Add(new PageDatum
                 {
                     PageId = targetPage.Id,
                     DataTypeCode = request.DownloadResult!.DataTypeCode,
-                    Data = null,
+                    Data = parsedPayloadBytes,
                 });
+                await context.SaveChangesAsync(cancellationToken);
+            }
+            else if (parsedPayloadBytes is not null)
+            {
+                existingPageData.Data = parsedPayloadBytes;
                 await context.SaveChangesAsync(cancellationToken);
             }
         }
@@ -229,6 +235,29 @@ public sealed class CrawlerRelayService
         }
     }
 
+    private static byte[]? SerializeParsedPayload(JsonElement? parsedPayload)
+    {
+        if (parsedPayload is null)
+        {
+            return null;
+        }
+
+        var payload = parsedPayload.Value;
+        if (payload.ValueKind is JsonValueKind.Undefined or JsonValueKind.Null)
+        {
+            return null;
+        }
+
+        try
+        {
+            return Encoding.UTF8.GetBytes(payload.GetRawText());
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
     private async Task PersistObservabilityEventAsync(CrawlerEventEnvelope envelope)
     {
         if (string.IsNullOrWhiteSpace(_connectionString))
@@ -253,14 +282,26 @@ public sealed class CrawlerRelayService
 
     private static async Task PersistLogEntryIfApplicableAsync(NpgsqlConnection connection, CrawlerEventEnvelope envelope)
     {
-        if (!string.Equals(envelope.Type, "worker-log", StringComparison.OrdinalIgnoreCase)
-            && !string.Equals(envelope.Type, "error", StringComparison.OrdinalIgnoreCase))
+        var eventType = envelope.Type?.Trim() ?? string.Empty;
+        var shouldPersist = string.Equals(eventType, "worker-log", StringComparison.OrdinalIgnoreCase)
+            || string.Equals(eventType, "error", StringComparison.OrdinalIgnoreCase)
+            || string.Equals(eventType, "status-change", StringComparison.OrdinalIgnoreCase)
+            || string.Equals(eventType, "worker-spawned", StringComparison.OrdinalIgnoreCase)
+            || string.Equals(eventType, "queue-change", StringComparison.OrdinalIgnoreCase)
+            || string.Equals(eventType, "frontier-lease", StringComparison.OrdinalIgnoreCase)
+            || string.Equals(eventType, "frontier-release", StringComparison.OrdinalIgnoreCase)
+            || string.Equals(eventType, "frontier-complete", StringComparison.OrdinalIgnoreCase)
+            || string.Equals(eventType, "frontier-prune", StringComparison.OrdinalIgnoreCase)
+            || string.Equals(eventType, "frontier-lease-expired", StringComparison.OrdinalIgnoreCase)
+            || string.Equals(eventType, "page-reported", StringComparison.OrdinalIgnoreCase);
+
+        if (!shouldPersist)
         {
             return;
         }
 
         var level = "Info";
-        var message = envelope.PayloadJson;
+        var message = $"[{eventType}] {envelope.PayloadJson}";
 
         try
         {
@@ -278,11 +319,54 @@ public sealed class CrawlerRelayService
                 {
                     message = messageNode.GetString() ?? message;
                 }
+
+                if (!string.Equals(eventType, "worker-log", StringComparison.OrdinalIgnoreCase)
+                    && !string.Equals(eventType, "error", StringComparison.OrdinalIgnoreCase))
+                {
+                    if (payloadDoc.RootElement.TryGetProperty("status", out var statusNode)
+                        && statusNode.ValueKind == JsonValueKind.String)
+                    {
+                        var status = statusNode.GetString() ?? "unknown";
+                        var reason = payloadDoc.RootElement.TryGetProperty("reason", out var reasonNode)
+                            && reasonNode.ValueKind == JsonValueKind.String
+                            ? reasonNode.GetString()
+                            : null;
+                        message = string.IsNullOrWhiteSpace(reason)
+                            ? $"[{eventType}] status={status}"
+                            : $"[{eventType}] status={status} reason={reason}";
+                    }
+                    else if (payloadDoc.RootElement.TryGetProperty("action", out var actionNode)
+                        && actionNode.ValueKind == JsonValueKind.String)
+                    {
+                        message = $"[{eventType}] action={actionNode.GetString()}";
+                    }
+                    else if (payloadDoc.RootElement.TryGetProperty("url", out var urlNode)
+                        && urlNode.ValueKind == JsonValueKind.String)
+                    {
+                        message = $"[{eventType}] url={urlNode.GetString()}";
+                    }
+                    else if (payloadDoc.RootElement.TryGetProperty("name", out var nameNode)
+                        && nameNode.ValueKind == JsonValueKind.String)
+                    {
+                        message = $"[{eventType}] name={nameNode.GetString()}";
+                    }
+                }
             }
         }
         catch
         {
             // Keep defaults from payload JSON.
+        }
+
+        if (string.Equals(eventType, "error", StringComparison.OrdinalIgnoreCase)
+            || message.Contains("failed", StringComparison.OrdinalIgnoreCase)
+            || message.Contains("error", StringComparison.OrdinalIgnoreCase))
+        {
+            level = "Error";
+        }
+        else if (string.Equals(eventType, "frontier-prune", StringComparison.OrdinalIgnoreCase))
+        {
+            level = "Warning";
         }
 
         const string sql = """
@@ -524,6 +608,7 @@ public sealed class CrawlerDownloadResult
     public string? HtmlContent { get; set; }
     public bool? UsedRenderer { get; set; }
     public int? ContentLength { get; set; }
+    public JsonElement? ParsedPayload { get; set; }
 }
 
 public sealed class CrawlerIngestResponse

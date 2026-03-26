@@ -6,6 +6,7 @@ using ManagerApp.Hubs;
 using Npgsql;
 
 var builder = WebApplication.CreateBuilder(args);
+LoadProjectEnvFile();
 ApplyDbEnvironmentOverrides(builder.Configuration);
 
 // Add services to the container.
@@ -147,6 +148,49 @@ static void ApplyDbEnvironmentOverrides(ConfigurationManager configuration)
     };
 
     configuration["ConnectionStrings:CrawldbConnection"] = builder.ConnectionString;
+}
+
+static void LoadProjectEnvFile()
+{
+    var current = new DirectoryInfo(Directory.GetCurrentDirectory());
+    while (current is not null)
+    {
+        var envFile = Path.Combine(current.FullName, ".env.local");
+        if (File.Exists(envFile))
+        {
+            ApplyEnvFile(envFile);
+            return;
+        }
+
+        current = current.Parent;
+    }
+}
+
+static void ApplyEnvFile(string filePath)
+{
+    foreach (var rawLine in File.ReadLines(filePath))
+    {
+        var line = rawLine.Trim();
+        if (line.Length == 0 || line.StartsWith("#", StringComparison.Ordinal))
+        {
+            continue;
+        }
+
+        var separator = line.IndexOf('=');
+        if (separator <= 0)
+        {
+            continue;
+        }
+
+        var key = line[..separator].Trim();
+        if (key.Length == 0 || Environment.GetEnvironmentVariable(key) is not null)
+        {
+            continue;
+        }
+
+        var value = line[(separator + 1)..].Trim();
+        Environment.SetEnvironmentVariable(key, value);
+    }
 }
 
 static int ParsePort(string? rawPort, int fallback)
