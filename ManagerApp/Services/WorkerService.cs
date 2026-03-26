@@ -71,17 +71,40 @@ public class WorkerService : IWorkerService
         return response?.Ok == true;
     }
 
-    public async Task<WorkerViewModel?> SpawnWorkerAsync(string? name = null, int? daemonGroupId = null)
+    public async Task<WorkerViewModel?> SpawnWorkerAsync(
+        string? name = null,
+        int? daemonGroupId = null,
+        string? mode = null,
+        IReadOnlyList<string>? seedUrls = null)
     {
         LastError = null;
+        var normalizedSeedUrls = (seedUrls ?? Array.Empty<string>())
+            .Select(url => url.Trim())
+            .Where(url => !string.IsNullOrWhiteSpace(url))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToList();
+
         var payload = new
         {
             name,
-            mode = "mock",
-            groupId = daemonGroupId
+            mode = string.IsNullOrWhiteSpace(mode) ? "mock" : mode,
+            groupId = daemonGroupId,
+            seedUrl = normalizedSeedUrls.FirstOrDefault(),
+            seedUrls = normalizedSeedUrls,
         };
         var response = await PostAsync<WorkerViewModel>("api/workers/spawn", payload);
-        return response?.Data;
+        var spawned = response?.Data;
+        if (spawned is null)
+        {
+            return null;
+        }
+
+        if (normalizedSeedUrls.Count > 0)
+        {
+            await PersistSeedUrlsAsync(spawned.Id, normalizedSeedUrls);
+        }
+
+        return spawned;
     }
 
     public async Task<List<WorkerViewModel>> GetAllWorkersAsync()
@@ -101,34 +124,92 @@ public class WorkerService : IWorkerService
     public async Task<bool> StartWorkerAsync(int id)
     {
         LastError = null;
-        if (_useReverseChannelCommands && await EnqueueCommandAsync("start-worker", id))
+        var response = await PostAsync($"api/workers/{id}/start", new { });
+        if (response?.Ok == true)
         {
             return true;
         }
-        var response = await PostAsync($"api/workers/{id}/start", new { });
-        return response?.Ok == true;
+
+        if (_useReverseChannelCommands && await EnqueueCommandAsync("start-worker", id))
+        {
+            LastError = null;
+            return true;
+        }
+
+        return false;
     }
 
     public async Task<bool> StopWorkerAsync(int id)
     {
         LastError = null;
-        if (_useReverseChannelCommands && await EnqueueCommandAsync("stop-worker", id))
+        var response = await PostAsync($"api/workers/{id}/stop", new { });
+        if (response?.Ok == true)
         {
             return true;
         }
-        var response = await PostAsync($"api/workers/{id}/stop", new { });
-        return response?.Ok == true;
+
+        if (_useReverseChannelCommands && await EnqueueCommandAsync("stop-worker", id))
+        {
+            LastError = null;
+            return true;
+        }
+
+        return false;
     }
 
     public async Task<bool> PauseWorkerAsync(int id)
     {
         LastError = null;
-        if (_useReverseChannelCommands && await EnqueueCommandAsync("pause-worker", id))
+        var response = await PostAsync($"api/workers/{id}/pause", new { });
+        if (response?.Ok == true)
         {
             return true;
         }
-        var response = await PostAsync($"api/workers/{id}/pause", new { });
-        return response?.Ok == true;
+
+        if (_useReverseChannelCommands && await EnqueueCommandAsync("pause-worker", id))
+        {
+            LastError = null;
+            return true;
+        }
+
+        return false;
+    }
+
+    private async Task PersistSeedUrlsAsync(int externalWorkerId, IReadOnlyList<string> seedUrls)
+    {
+        try
+        {
+            var connectionString = _configuration.GetConnectionString("CrawldbConnection");
+            if (string.IsNullOrWhiteSpace(connectionString))
+            {
+                return;
+            }
+
+            var daemonDbId = _configuration.GetValue("CrawlerApi:DefaultDaemonDbId", 1);
+
+            await using var connection = new NpgsqlConnection(connectionString);
+            await connection.OpenAsync();
+
+            const string insertSql = """
+                INSERT INTO manager.seed_url (daemon_id, external_worker_id, url)
+                VALUES (@daemon_id, @external_worker_id, @url)
+                ON CONFLICT (daemon_id, external_worker_id, url)
+                DO NOTHING;
+                """;
+
+            foreach (var url in seedUrls)
+            {
+                await using var cmd = new NpgsqlCommand(insertSql, connection);
+                cmd.Parameters.AddWithValue("daemon_id", daemonDbId);
+                cmd.Parameters.AddWithValue("external_worker_id", externalWorkerId);
+                cmd.Parameters.AddWithValue("url", url);
+                await cmd.ExecuteNonQueryAsync();
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Failed to persist seed URLs for worker {WorkerId}", externalWorkerId);
+        }
     }
 
     private async Task<bool> EnqueueCommandAsync(string commandType, int? workerId)

@@ -189,11 +189,17 @@ def create_app(service: WorkerControlService | None = None) -> Flask:
     @maybe_auth
     def spawn_worker():
         payload = request.get_json(silent=True) or {}
+        raw_seed_urls = payload.get("seedUrls")
+        seed_urls: list[str] | None = None
+        if isinstance(raw_seed_urls, list):
+            seed_urls = [str(url).strip() for url in raw_seed_urls if str(url).strip()]
+
         try:
             worker = worker_service.spawn_worker(
                 name=payload.get("name"),
                 mode=str(payload.get("mode", "mock")),
                 seed_url=payload.get("seedUrl"),
+                seed_urls=seed_urls,
                 group_id=payload.get("groupId"),
             )
             return envelope(worker.to_view_model(), status_code=201)

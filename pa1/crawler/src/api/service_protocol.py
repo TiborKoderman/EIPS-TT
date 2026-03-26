@@ -40,6 +40,7 @@ class WorkerControlService(Protocol):
         name: str | None,
         mode: str,
         seed_url: str | None,
+        seed_urls: list[str] | None,
         group_id: int | None,
     ) -> WorkerRecord:
         ...

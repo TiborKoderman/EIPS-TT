@@ -1,6 +1,7 @@
 @page "/workers"
 @using ManagerApp.Models
 @using ManagerApp.Services
+@implements IAsyncDisposable
 @inject IWorkerService WorkerService
 @inject NavigationManager Navigation
 
@@ -17,7 +18,7 @@
             </div>
             <div class="header-updated-pill">
                 <span class="mdi mdi-robot"></span>
-                <span>@FilteredWorkers.Count workers</span>
+                <span>@workerItems.Count workers</span>
             </div>
         </div>
     </div>
@@ -35,8 +36,19 @@
                         <option value="@status">@status</option>
                     }
                 </select>
+                <select @bind="SpawnGroupId">
+                    @foreach (var daemon in Daemons)
+                    {
+                        <option value="@daemon.Id">@daemon.Name</option>
+                    }
+                </select>
+                <select @bind="SpawnMode">
+                    <option value="mock">Mock</option>
+                    <option value="local">Local Process</option>
+                </select>
             </div>
             <div class="flex items-center gap-sm">
+                <input type="text" placeholder="Worker name (optional)" @bind="SpawnWorkerName" />
                 <button class="btn btn-primary" @onclick="SpawnWorker" disabled="@(daemonStatus?.Running != true)">
                     <span class="mdi mdi-plus"></span> Add Worker
                 </button>
@@ -53,46 +65,79 @@
         {
             <p class="text-small text-muted mt-sm">@actionStatus</p>
         }
+        <textarea class="spawn-seed-textarea mt-sm" rows="3" placeholder="Seed URLs (one per line)" @bind="SpawnSeedUrlsText"></textarea>
     </div>
 
     <div class="card mb-lg">
-        <h2 class="card-title">Worker Fleet</h2>
-        @if (FilteredWorkers.Count == 0)
+        <h2 class="card-title">Daemons</h2>
+        @if (Daemons.Count == 0)
         {
-            <p class="text-muted">No workers match current filters.</p>
+            <p class="text-muted">No daemon groups configured.</p>
         }
         else
         {
-            <ul class="list">
-                @foreach (var worker in FilteredWorkers)
+            <ul class="list daemon-list">
+                @foreach (var daemon in Daemons)
                 {
-                    <li class="list-item worker-row worker-list-clickable" @onclick="() => OpenWorkerDetail(worker.Id)">
-                        <div class="worker-row-main">
-                            <div class="worker-title">@worker.Name</div>
-                            <div class="text-small text-muted">@worker.CurrentUrl</div>
-                            <div class="text-small">Processed: @worker.PagesProcessed | Errors: @worker.ErrorCount</div>
-                        </div>
-                        <div class="worker-row-actions" @onclick:stopPropagation="true">
-                            <span class="badge @GetStatusBadgeClass(worker.Status)">@worker.Status</span>
-                            <button class="btn btn-icon" title="Logs" aria-label="Logs" @onclick='() => OpenWorkerSection(worker.Id, "logs")' type="button">
-                                <span class="mdi mdi-text-box-search-outline"></span>
-                            </button>
-                            <button class="btn btn-icon" title="Config" aria-label="Config" @onclick='() => OpenWorkerSection(worker.Id, "config")' type="button">
-                                <span class="mdi mdi-cog-outline"></span>
-                            </button>
-                            <button class="btn btn-icon" title="Metrics" aria-label="Metrics" @onclick='() => OpenWorkerSection(worker.Id, "metrics")' type="button">
-                                <span class="mdi mdi-chart-line"></span>
-                            </button>
-                            <button class="btn btn-icon" title="Start" aria-label="Start" @onclick="() => Start(worker.Id)" type="button">
-                                <span class="mdi mdi-play"></span>
-                            </button>
-                            <button class="btn btn-icon" title="Pause" aria-label="Pause" @onclick="() => Pause(worker.Id)" type="button">
-                                <span class="mdi mdi-pause"></span>
-                            </button>
-                            <button class="btn btn-icon" title="Stop" aria-label="Stop" @onclick="() => Stop(worker.Id)" type="button">
-                                <span class="mdi mdi-stop"></span>
-                            </button>
-                        </div>
+                    var daemonWorkers = GetFilteredWorkersForDaemon(daemon);
+                    var expanded = expandedDaemonIds.Contains(daemon.Id);
+                    <li class="list-item daemon-item">
+                        <button class="daemon-header" type="button" @onclick="() => ToggleDaemonExpand(daemon.Id)">
+                            <div class="daemon-header-title">
+                                <span class="mdi @(expanded ? "mdi-chevron-down" : "mdi-chevron-right")"></span>
+                                <strong>@daemon.Name</strong>
+                            </div>
+                            <div class="daemon-header-stats">
+                                <span class="badge badge-info">@daemonWorkers.Count total</span>
+                                <span class="badge badge-success">@CountByStatus(daemonWorkers, "Active") active</span>
+                                <span class="badge badge-warning">@CountByStatus(daemonWorkers, "Paused") paused</span>
+                                <span class="badge badge-error">@CountByStatus(daemonWorkers, "Error") errors</span>
+                            </div>
+                        </button>
+
+                        @if (expanded)
+                        {
+                            if (daemonWorkers.Count == 0)
+                            {
+                                <p class="text-small text-muted mt-sm">No workers in this daemon match current filters.</p>
+                            }
+                            else
+                            {
+                                <ul class="list daemon-worker-list">
+                                    @foreach (var worker in daemonWorkers)
+                                    {
+                                        <li class="list-item worker-row worker-list-clickable" @onclick="() => OpenWorkerDetail(worker.Id)">
+                                            <div class="worker-row-main">
+                                                <div class="worker-title">@worker.Name</div>
+                                                <div class="text-small text-muted">@worker.CurrentUrl</div>
+                                                <div class="text-small">Processed: @worker.PagesProcessed | Errors: @worker.ErrorCount</div>
+                                            </div>
+                                            <div class="worker-row-actions" @onclick:stopPropagation="true">
+                                                <span class="badge @GetStatusBadgeClass(worker.Status)">@worker.Status</span>
+                                                <button class="btn btn-icon" title="Logs" aria-label="Logs" @onclick='() => OpenWorkerSection(worker.Id, "logs")' type="button">
+                                                    <span class="mdi mdi-text-box-search-outline"></span>
+                                                </button>
+                                                <button class="btn btn-icon" title="Config" aria-label="Config" @onclick='() => OpenWorkerSection(worker.Id, "config")' type="button">
+                                                    <span class="mdi mdi-cog-outline"></span>
+                                                </button>
+                                                <button class="btn btn-icon" title="Metrics" aria-label="Metrics" @onclick='() => OpenWorkerSection(worker.Id, "metrics")' type="button">
+                                                    <span class="mdi mdi-chart-line"></span>
+                                                </button>
+                                                <button class="btn btn-icon" title="Start" aria-label="Start" @onclick="() => Start(worker.Id)" type="button">
+                                                    <span class="mdi mdi-play"></span>
+                                                </button>
+                                                <button class="btn btn-icon" title="Pause" aria-label="Pause" @onclick="() => Pause(worker.Id)" type="button">
+                                                    <span class="mdi mdi-pause"></span>
+                                                </button>
+                                                <button class="btn btn-icon" title="Stop" aria-label="Stop" @onclick="() => Stop(worker.Id)" type="button">
+                                                    <span class="mdi mdi-stop"></span>
+                                                </button>
+                                            </div>
+                                        </li>
+                                    }
+                                </ul>
+                            }
+                        }
                     </li>
                 }
             </ul>
@@ -114,10 +159,18 @@
 
 @code {
     private List<WorkerViewModel> workerItems = new();
+    private List<WorkerGroupSettingsViewModel> daemonGroups = new();
     private DaemonStatusViewModel? daemonStatus;
     private string? actionStatus;
+    private readonly HashSet<int> expandedDaemonIds = new();
+    private PeriodicTimer? _refreshTimer;
+    private CancellationTokenSource? _refreshCts;
     private string SearchTerm { get; set; } = "";
     private string StatusFilter { get; set; } = "ALL";
+    private int SpawnGroupId { get; set; } = 1;
+    private string SpawnMode { get; set; } = "mock";
+    private string SpawnWorkerName { get; set; } = "";
+    private string SpawnSeedUrlsText { get; set; } = "";
 
     private IReadOnlyList<string> WorkerApiPending =>
     [
@@ -133,6 +186,10 @@
         .OrderBy(s => s)
         .ToList();
 
+    private List<WorkerGroupSettingsViewModel> Daemons => daemonGroups
+        .OrderBy(group => group.Name)
+        .ToList();
+
     private List<WorkerViewModel> FilteredWorkers => workerItems
         .Where(w => StatusFilter == "ALL" || string.Equals(w.Status, StatusFilter, StringComparison.OrdinalIgnoreCase))
         .Where(w => string.IsNullOrWhiteSpace(SearchTerm)
@@ -144,12 +201,37 @@
     protected override async Task OnInitializedAsync()
     {
         await RefreshAsync();
+
+        _refreshCts = new CancellationTokenSource();
+        _refreshTimer = new PeriodicTimer(TimeSpan.FromSeconds(3));
+        _ = Task.Run(async () =>
+        {
+            while (_refreshTimer is not null && await _refreshTimer.WaitForNextTickAsync(_refreshCts.Token))
+            {
+                await InvokeAsync(async () =>
+                {
+                    await RefreshAsync();
+                    StateHasChanged();
+                });
+            }
+        }, _refreshCts.Token);
     }
 
     private async Task RefreshAsync()
     {
         daemonStatus = await WorkerService.GetDaemonStatusAsync();
         workerItems = await WorkerService.GetAllWorkersAsync();
+        daemonGroups = await WorkerService.GetWorkerGroupsAsync();
+
+        if (daemonGroups.Count > 0 && daemonGroups.All(group => !expandedDaemonIds.Contains(group.Id)))
+        {
+            expandedDaemonIds.Add(daemonGroups[0].Id);
+        }
+
+        if (daemonGroups.Count > 0 && daemonGroups.All(group => group.Id != SpawnGroupId))
+        {
+            SpawnGroupId = daemonGroups[0].Id;
+        }
 
         if (daemonStatus == null && !string.IsNullOrWhiteSpace(WorkerService.LastError))
         {
@@ -183,10 +265,29 @@
             return;
         }
 
-        var spawned = await WorkerService.SpawnWorkerAsync();
+        var seedUrls = SpawnSeedUrlsText
+            .Split(new[] { '\r', '\n' }, StringSplitOptions.RemoveEmptyEntries)
+            .Select(url => url.Trim())
+            .Where(url => !string.IsNullOrWhiteSpace(url))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToList();
+
+        var spawned = await WorkerService.SpawnWorkerAsync(
+            name: string.IsNullOrWhiteSpace(SpawnWorkerName) ? null : SpawnWorkerName.Trim(),
+            daemonGroupId: SpawnGroupId,
+            mode: SpawnMode,
+            seedUrls: seedUrls);
+
         actionStatus = spawned == null
             ? $"Failed to spawn worker. {WorkerService.LastError}"
-            : $"Spawned {spawned.Name}.";
+            : $"Spawned {spawned.Name} ({SpawnMode}) with {seedUrls.Count} seed URL(s).";
+
+        if (spawned != null)
+        {
+            SpawnWorkerName = "";
+            SpawnSeedUrlsText = "";
+        }
+
         await RefreshAsync();
     }
 
@@ -223,8 +324,28 @@
             "error" => "badge-error",
             "idle" => "badge-info",
             "paused" => "badge-warning",
+            "stopped" => "badge-warning",
             _ => "badge-info"
         };
+    }
+
+    private List<WorkerViewModel> GetFilteredWorkersForDaemon(WorkerGroupSettingsViewModel daemon)
+    {
+        var ids = daemon.WorkerIds?.ToHashSet() ?? new HashSet<int>();
+        return FilteredWorkers.Where(worker => ids.Contains(worker.Id)).ToList();
+    }
+
+    private static int CountByStatus(IEnumerable<WorkerViewModel> workers, string status)
+    {
+        return workers.Count(worker => string.Equals(worker.Status, status, StringComparison.OrdinalIgnoreCase));
+    }
+
+    private void ToggleDaemonExpand(int daemonId)
+    {
+        if (!expandedDaemonIds.Add(daemonId))
+        {
+            expandedDaemonIds.Remove(daemonId);
+        }
     }
 
     private void OpenWorkerDetail(int workerId)
@@ -235,5 +356,21 @@
     private void OpenWorkerSection(int workerId, string section)
     {
         Navigation.NavigateTo($"/workers/{workerId}/{section}");
+    }
+
+    public ValueTask DisposeAsync()
+    {
+        try
+        {
+            _refreshCts?.Cancel();
+        }
+        catch
+        {
+            // ignore shutdown cancellation race
+        }
+
+        _refreshTimer?.Dispose();
+        _refreshCts?.Dispose();
+        return ValueTask.CompletedTask;
     }
 }

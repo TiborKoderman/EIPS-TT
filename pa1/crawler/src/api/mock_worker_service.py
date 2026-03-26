@@ -195,11 +195,17 @@ class MockWorkerService(WorkerControlService):
         name: str | None,
         mode: str,
         seed_url: str | None,
+        seed_urls: list[str] | None,
         group_id: int | None,
     ) -> WorkerRecord:
         requested_mode = (mode or "mock").strip().lower()
         if requested_mode not in {"mock", "local"}:
             requested_mode = "mock"
+
+        normalized_seed_urls = [url.strip() for url in (seed_urls or []) if url and url.strip()]
+        effective_seed_url = seed_url
+        if not effective_seed_url and normalized_seed_urls:
+            effective_seed_url = normalized_seed_urls[0]
 
         with self._lock:
             if not self._daemon_running:
@@ -212,7 +218,7 @@ class MockWorkerService(WorkerControlService):
                 id=worker_id,
                 name=worker_name,
                 status="Idle",
-                current_url=seed_url,
+                current_url=effective_seed_url,
                 pages_processed=0,
                 error_count=0,
                 started_at=None,
@@ -221,6 +227,7 @@ class MockWorkerService(WorkerControlService):
                     "Retries": "3",
                     "Render JS": "false",
                     "Depth Limit": "5",
+                    "Seed URLs": "\n".join(normalized_seed_urls),
                 },
             )
             self._workers[worker_id] = worker
@@ -228,11 +235,13 @@ class MockWorkerService(WorkerControlService):
             self._groups[target_group_id].worker_ids.append(worker_id)
 
             self._append_log(worker_id, "Info", f"Worker spawned in {requested_mode} mode.")
-            if seed_url:
-                self._append_log(worker_id, "Info", f"Initial seed assigned: {seed_url}")
+            if effective_seed_url:
+                self._append_log(worker_id, "Info", f"Initial seed assigned: {effective_seed_url}")
+            if len(normalized_seed_urls) > 1:
+                self._append_log(worker_id, "Info", f"Configured {len(normalized_seed_urls)} seed URLs.")
 
             if requested_mode == "local":
-                self._launch_local_worker_process(worker_id, seed_url)
+                self._launch_local_worker_process(worker_id, effective_seed_url)
 
             return self._copy_worker(worker)
 

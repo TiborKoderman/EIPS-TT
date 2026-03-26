@@ -618,6 +618,51 @@ textarea:focus {
     flex-wrap: wrap;
 }
 
+.daemon-item {
+    padding: 0;
+}
+
+.daemon-header {
+    width: 100%;
+    border: none;
+    background: transparent;
+    text-align: left;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: var(--spacing-md);
+    padding: 12px;
+}
+
+.daemon-header:hover {
+    background: var(--color-bg-hover);
+}
+
+.daemon-header-title {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.daemon-header-stats {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    flex-wrap: wrap;
+    justify-content: flex-end;
+}
+
+.daemon-worker-list {
+    margin: 0;
+    border-top: 1px solid var(--color-border-light);
+}
+
+.spawn-seed-textarea {
+    width: 100%;
+    resize: vertical;
+}
+
 .worker-config-row,
 .worker-log-row {
     display: flex;

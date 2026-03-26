@@ -36,7 +36,11 @@ public interface IWorkerService
     /// <summary>
     /// Spawn a new worker inside the daemon.
     /// </summary>
-    Task<WorkerViewModel?> SpawnWorkerAsync(string? name = null, int? daemonGroupId = null);
+    Task<WorkerViewModel?> SpawnWorkerAsync(
+        string? name = null,
+        int? daemonGroupId = null,
+        string? mode = null,
+        IReadOnlyList<string>? seedUrls = null);
 
     /// <summary>
     /// Get list of all workers with their current status
