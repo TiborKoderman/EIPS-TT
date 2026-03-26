@@ -11,8 +11,11 @@ builder.Services.AddRazorComponents()
     .AddInteractiveServerComponents();
 
 // Register DbContext with PostgreSQL
-builder.Services.AddDbContext<CrawldbContext>(options =>
+builder.Services.AddDbContextFactory<CrawldbContext>(options =>
     options.UseNpgsql(builder.Configuration.GetConnectionString("CrawldbConnection")));
+// Bridge existing services that request CrawldbContext directly.
+builder.Services.AddScoped(sp =>
+    sp.GetRequiredService<IDbContextFactory<CrawldbContext>>().CreateDbContext());
 
 // Register application services
 builder.Services.AddScoped<IStatisticsService, StatisticsService>();

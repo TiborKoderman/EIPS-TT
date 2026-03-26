@@ -9,23 +9,22 @@ namespace ManagerApp.Services;
 /// </summary>
 public class StatisticsService : IStatisticsService
 {
-    private readonly CrawldbContext _context;
+    private readonly IDbContextFactory<CrawldbContext> _dbContextFactory;
 
-    public StatisticsService(CrawldbContext context)
+    public StatisticsService(IDbContextFactory<CrawldbContext> dbContextFactory)
     {
-        _context = context;
+        _dbContextFactory = dbContextFactory;
     }
 
     /// <summary>
     /// Get comprehensive statistics for the dashboard
-    /// Queries run in parallel for optimal performance
+    /// Queries run in parallel using separate DbContext instances for thread safety
     /// </summary>
     public async Task<StatisticsViewModel> GetStatisticsAsync()
     {
-        // Run queries in parallel for performance
-        var totalSitesTask = _context.Sites.CountAsync();
-        var totalPagesTask = _context.Pages.CountAsync();
-        var htmlPagesTask = _context.Pages.CountAsync(p => p.PageTypeCode == "HTML");
+        var totalSitesTask = GetTotalSitesAsync();
+        var totalPagesTask = GetTotalPagesAsync();
+        var htmlPagesTask = GetHtmlPagesAsync();
         var duplicatesTask = GetDuplicateCountAsync();
         var imagesTask = GetImageCountAsync();
         var avgImagesTask = GetAverageImagesPerPageAsync();
@@ -51,7 +50,9 @@ public class StatisticsService : IStatisticsService
 
     public async Task<Dictionary<string, int>> GetPageTypeCountsAsync()
     {
-        return await _context.Pages
+        await using var context = await _dbContextFactory.CreateDbContextAsync();
+
+        return await context.Pages
             .GroupBy(p => p.PageTypeCode)
             .Select(g => new { Type = g.Key ?? "Unknown", Count = g.Count() })
             .ToDictionaryAsync(x => x.Type, x => x.Count);
@@ -59,17 +60,21 @@ public class StatisticsService : IStatisticsService
 
     public async Task<int> GetDuplicateCountAsync()
     {
-        return await _context.Pages.CountAsync(p => p.PageTypeCode == "DUPLICATE");
+        await using var context = await _dbContextFactory.CreateDbContextAsync();
+        return await context.Pages.CountAsync(p => p.PageTypeCode == "DUPLICATE");
     }
 
     public async Task<int> GetImageCountAsync()
     {
-        return await _context.Images.CountAsync();
+        await using var context = await _dbContextFactory.CreateDbContextAsync();
+        return await context.Images.CountAsync();
     }
 
     public async Task<Dictionary<string, int>> GetBinaryFileCountsAsync()
     {
-        return await _context.PageData
+        await using var context = await _dbContextFactory.CreateDbContextAsync();
+
+        return await context.PageData
             .GroupBy(pd => pd.DataTypeCode)
             .Select(g => new { Type = g.Key ?? "Unknown", Count = g.Count() })
             .ToDictionaryAsync(x => x.Type, x => x.Count);
@@ -77,10 +82,30 @@ public class StatisticsService : IStatisticsService
 
     public async Task<double> GetAverageImagesPerPageAsync()
     {
-        var totalPages = await _context.Pages.CountAsync(p => p.PageTypeCode == "HTML");
+        await using var context = await _dbContextFactory.CreateDbContextAsync();
+
+        var totalPages = await context.Pages.CountAsync(p => p.PageTypeCode == "HTML");
         if (totalPages == 0) return 0;
 
-        var totalImages = await _context.Images.CountAsync();
+        var totalImages = await context.Images.CountAsync();
         return Math.Round((double)totalImages / totalPages, 2);
+    }
+
+    private async Task<int> GetTotalSitesAsync()
+    {
+        await using var context = await _dbContextFactory.CreateDbContextAsync();
+        return await context.Sites.CountAsync();
+    }
+
+    private async Task<int> GetTotalPagesAsync()
+    {
+        await using var context = await _dbContextFactory.CreateDbContextAsync();
+        return await context.Pages.CountAsync();
+    }
+
+    private async Task<int> GetHtmlPagesAsync()
+    {
+        await using var context = await _dbContextFactory.CreateDbContextAsync();
+        return await context.Pages.CountAsync(p => p.PageTypeCode == "HTML");
     }
 }
