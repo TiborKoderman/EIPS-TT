@@ -4,10 +4,35 @@ namespace ManagerApp.Services;
 
 /// <summary>
 /// Service for managing crawler workers
-/// Currently uses mock data - will integrate with Python crawler API when available
+/// Daemon-based control surface backed by Python crawler API
 /// </summary>
 public interface IWorkerService
 {
+    /// <summary>
+    /// Get current daemon status.
+    /// </summary>
+    Task<DaemonStatusViewModel?> GetDaemonStatusAsync();
+
+    /// <summary>
+    /// Start crawler daemon process.
+    /// </summary>
+    Task<bool> StartDaemonAsync();
+
+    /// <summary>
+    /// Stop crawler daemon process.
+    /// </summary>
+    Task<bool> StopDaemonAsync();
+
+    /// <summary>
+    /// Reload daemon workers.
+    /// </summary>
+    Task<bool> ReloadDaemonAsync();
+
+    /// <summary>
+    /// Spawn a new worker inside the daemon.
+    /// </summary>
+    Task<WorkerViewModel?> SpawnWorkerAsync(string? name = null, int? daemonGroupId = null);
+
     /// <summary>
     /// Get list of all workers with their current status
     /// </summary>

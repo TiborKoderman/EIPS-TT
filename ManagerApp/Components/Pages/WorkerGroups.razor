@@ -1,4 +1,6 @@
 @page "/workers/groups"
+@page "/workers/daemons"
+@using ManagerApp.Components.Shared
 @using ManagerApp.Models
 @using ManagerApp.Services
 @inject IWorkerService WorkerService
@@ -6,8 +8,8 @@
 <div class="page-header">
     <div class="page-header-main">
         <div>
-            <h1 class="page-title">Worker Groups</h1>
-            <p class="page-subtitle">Group-wise worker settings and assignment controls</p>
+            <h1 class="page-title">Daemons</h1>
+            <p class="page-subtitle">Each daemon is one crawler process that owns one or more workers</p>
         </div>
         <a class="btn" href="/workers/config">
             <span class="mdi mdi-tune"></span>
@@ -19,24 +21,35 @@
 <div class="page-body">
     @if (isLoading)
     {
-        <div class="card"><p>Loading groups...</p></div>
+        <div class="card"><p>Loading daemons...</p></div>
     }
     else if (groups.Count == 0)
     {
-        <div class="card"><p class="text-muted">No worker groups defined yet.</p></div>
+        <div class="card"><p class="text-muted">No daemons defined yet.</p></div>
     }
     else
     {
+        <div class="placeholder-note mb-lg">
+            <div class="placeholder-note-title">
+                <span class="mdi mdi-information-outline"></span> Runtime model
+            </div>
+            <ul class="placeholder-note-list">
+                <li>Daemon = one crawler API server instance.</li>
+                <li>Workers are managed under a daemon (not separate worker APIs).</li>
+                <li>Default setup uses one local daemon with one worker.</li>
+            </ul>
+        </div>
+
         <div class="grid grid-cols-4 mb-lg">
-            <StatCard Label="Groups" Value="@groups.Count.ToString()" Footnote="Total defined" />
-            <StatCard Label="Enabled" Value="@groups.Count(g => g.Enabled).ToString()" Footnote="Active groups" />
+            <StatCard Label="Daemons" Value="@groups.Count.ToString()" Footnote="Total registered" />
+            <StatCard Label="Running" Value="@groups.Count(g => g.Enabled).ToString()" Footnote="Active daemons" />
             <StatCard Label="Assigned Workers" Value="@DistinctAssignedWorkers.ToString()" Footnote="Unique worker IDs" />
-            <StatCard Label="Avg Rate Limit" Value="@GetAverageRateLimit()" Footnote="req/min per group" />
+            <StatCard Label="Avg Rate Limit" Value="@GetAverageRateLimit()" Footnote="req/min per daemon" />
         </div>
 
         <div class="grid grid-cols-2 mb-lg">
             <div class="card">
-                <h2 class="card-title">Groups</h2>
+                <h2 class="card-title">Daemon Registry</h2>
                 <ul class="list">
                     @foreach (var group in groups)
                     {
@@ -58,7 +71,7 @@
             <div class="card">
                 @if (selectedGroup == null)
                 {
-                    <p class="text-muted">Select a group to edit settings.</p>
+                    <p class="text-muted">Select a daemon to edit settings.</p>
                 }
                 else
                 {
@@ -85,7 +98,7 @@
 
                     <label class="mt-md flex items-center gap-sm">
                         <input type="checkbox" @bind="selectedGroup.Enabled" style="width:auto;" />
-                        <span>Group enabled</span>
+                        <span>Daemon enabled</span>
                     </label>
 
                     <label class="mt-md">
@@ -96,7 +109,7 @@
                     <div class="mt-md flex gap-sm">
                         <button class="btn btn-primary" @onclick="SaveSelectedGroup">
                             <span class="mdi mdi-content-save"></span>
-                            Save Group
+                            Save Daemon
                         </button>
                         @if (!string.IsNullOrWhiteSpace(statusMessage))
                         {
@@ -151,7 +164,7 @@
             .ToList();
 
         var saved = await WorkerService.SaveWorkerGroupAsync(selectedGroup);
-        statusMessage = saved ? "Saved" : "Unable to save group";
+        statusMessage = saved ? "Saved" : "Unable to save daemon";
     }
 
     private string GetAverageRateLimit()

@@ -124,3 +124,16 @@ public class WorkerGroupSettingsViewModel
     public int? RateLimitPerMinute { get; set; }
     public List<int> WorkerIds { get; set; } = new();
 }
+
+/// <summary>
+/// Daemon status model exposed by crawler control API.
+/// </summary>
+public class DaemonStatusViewModel
+{
+    public bool Running { get; set; }
+    public DateTime? StartedAt { get; set; }
+    public string Mode { get; set; } = "single-instance";
+    public int WorkerCount { get; set; }
+    public int ActiveWorkers { get; set; }
+    public int LocalProcessCount { get; set; }
+}

@@ -3,6 +3,7 @@ using ManagerApp.Components;
 using ManagerApp.Data;
 using ManagerApp.Services;
 using ManagerApp.Hubs;
+using System.Net.Http.Headers;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -21,7 +22,18 @@ builder.Services.AddScoped(sp =>
 builder.Services.AddScoped<IStatisticsService, StatisticsService>();
 builder.Services.AddScoped<IGraphService, GraphService>();
 builder.Services.AddScoped<IPageService, PageService>();
-builder.Services.AddScoped<IWorkerService, WorkerService>(); // Mock for now
+builder.Services.AddHttpClient<IWorkerService, WorkerService>((sp, client) =>
+{
+    var configuration = sp.GetRequiredService<IConfiguration>();
+    var baseUrl = configuration["CrawlerApi:BaseUrl"] ?? "http://127.0.0.1:8090";
+    client.BaseAddress = new Uri(baseUrl.TrimEnd('/') + "/");
+
+    var token = configuration["CrawlerApi:Token"];
+    if (!string.IsNullOrWhiteSpace(token))
+    {
+        client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", token);
+    }
+});
 
 // SignalR for real-time updates
 builder.Services.AddSignalR();

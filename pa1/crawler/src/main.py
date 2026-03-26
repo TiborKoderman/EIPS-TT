@@ -66,6 +66,27 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="When used with --fetch-url, store PDF binary content in memory.",
     )
+    parser.add_argument(
+        "--run-api",
+        action="store_true",
+        help="Start crawler daemon API server.",
+    )
+    parser.add_argument(
+        "--api-host",
+        default="127.0.0.1",
+        help="Host for --run-api (default: 127.0.0.1).",
+    )
+    parser.add_argument(
+        "--api-port",
+        type=int,
+        default=8090,
+        help="Port for --run-api (default: 8090).",
+    )
+    parser.add_argument(
+        "--api-debug",
+        action="store_true",
+        help="Enable Flask debug mode when used with --run-api.",
+    )
     return parser
 
 
@@ -73,12 +94,21 @@ def main() -> int:
     args = build_parser().parse_args()
 
     if (
+        not args.run_api
+        and
         not args.url_to_canonicalize
         and not args.ingest_demo
         and not args.check_url
         and not args.fetch_url
     ):
-        print("No action selected. Use --canonicalize, --ingest-demo, --check-url, or --fetch-url.")
+        print("No action selected. Use --run-api, --canonicalize, --ingest-demo, --check-url, or --fetch-url.")
+        return 0
+
+    if args.run_api:
+        from api.app import create_app
+
+        app = create_app()
+        app.run(host=args.api_host, port=args.api_port, debug=args.api_debug)
         return 0
 
     if args.url_to_canonicalize:

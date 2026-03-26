@@ -75,6 +75,49 @@ bash scripts/reset-db.sh --clean
 docker compose logs -f db
 ```
 
+## Crawler API (Mock Scaffolding)
+
+The crawler now includes a standalone Flask API server for worker management scaffolding.
+This is additive and does not change existing `pa1/crawler/src/main.py` standalone behavior.
+
+Architecture model:
+
+- One API server process represents one crawler daemon instance.
+- The daemon manages multiple workers internally (worker-level parallelism).
+- There is no nested "worker API per worker" process.
+- The API is primarily the manager/external control plane (local or remote).
+
+```bash
+source .venv/bin/activate
+python pa1/crawler/src/api_server.py
+```
+
+Equivalent via the main utility entrypoint:
+
+```bash
+python pa1/crawler/src/main.py --run-api --api-host 127.0.0.1 --api-port 8090
+```
+
+Default API URL: `http://127.0.0.1:8090`
+
+Optional environment variables:
+
+- `CRAWLER_API_HOST` (default `127.0.0.1`)
+- `CRAWLER_API_PORT` (default `8090`)
+- `CRAWLER_API_DEBUG` (`true/false`, default `false`)
+- `CRAWLER_API_TOKEN` (if set, Bearer auth is required)
+
+The current implementation is mock-backed and marks responses with `isMock: true` and `source: "mock"` so the manager UI can clearly distinguish scaffold data from real crawler-backed data.
+
+Typical flow:
+
+1. `POST /api/daemon/start`
+2. `PUT /api/config/global` and optional group/worker config endpoints
+3. `POST /api/workers/spawn` (repeat as needed)
+4. `POST /api/workers/{id}/start` to activate specific workers
+5. Manager reads status/logs/statistics endpoints
+6. `POST /api/daemon/reload` or `POST /api/daemon/stop` as needed
+
 ## Optional Devcontainer Notes
 
 See `.devcontainer/NOTE.md`.

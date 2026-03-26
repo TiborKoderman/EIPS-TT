@@ -33,7 +33,7 @@
             <StatCard Label="Worker" Value="@workerDetail.Worker.Name" Footnote="@workerDetail.Worker.Status" />
             <StatCard Label="Pages" Value="@workerDetail.Worker.PagesProcessed.ToString()" Footnote="Processed" />
             <StatCard Label="Errors" Value="@workerDetail.Worker.ErrorCount.ToString()" Footnote="Observed failures" />
-            <StatCard Label="Group" Value="@(workerDetail.GroupName ?? "Unassigned")" Footnote="Current assignment" />
+            <StatCard Label="Daemon" Value="@(workerDetail.GroupName ?? "Unassigned")" Footnote="Current owner process" />
         </div>
 
         <div class="card mb-lg worker-detail-tabs-card">
@@ -134,7 +134,7 @@
                             <span class="mdi mdi-tune"></span> Global
                         </a>
                         <a class="btn btn-sm" href="/workers/groups">
-                            <span class="mdi mdi-account-group"></span> Groups
+                            <span class="mdi mdi-account-group"></span> Daemons
                         </a>
                     </div>
                 </div>
@@ -165,7 +165,7 @@
                 <ul class="placeholder-note-list">
                     <li>Current metrics are derived from mock data in ManagerApp service.</li>
                     <li>Planned: replace with real worker telemetry stream and persisted runtime counters.</li>
-                    <li>Per-group aggregate metrics will be shown on Worker Groups page next.</li>
+                    <li>Per-daemon aggregate metrics are available on the Daemons page.</li>
                 </ul>
             </div>
         }

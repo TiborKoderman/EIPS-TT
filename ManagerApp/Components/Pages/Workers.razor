@@ -8,11 +8,17 @@
     <div class="page-header-main">
         <div>
             <h1 class="page-title">Workers</h1>
-            <p class="page-subtitle">Manage crawler workers and inspect runtime state</p>
+            <p class="page-subtitle">Manage workers inside crawler daemons (one daemon process can run multiple workers)</p>
         </div>
-        <div class="header-updated-pill">
-            <span class="mdi mdi-robot"></span>
-            <span>@FilteredWorkers.Count workers</span>
+        <div class="flex items-center gap-sm">
+            <div class="header-updated-pill">
+                <span class="mdi mdi-server"></span>
+                <span>Daemon: @(daemonStatus?.Running == true ? "Running" : "Stopped")</span>
+            </div>
+            <div class="header-updated-pill">
+                <span class="mdi mdi-robot"></span>
+                <span>@FilteredWorkers.Count workers</span>
+            </div>
         </div>
     </div>
 </div>
@@ -31,14 +37,22 @@
                 </select>
             </div>
             <div class="flex items-center gap-sm">
-                <button class="btn btn-primary" @onclick="AddMockWorker">
+                <button class="btn btn-primary" @onclick="SpawnWorker" disabled="@(daemonStatus?.Running != true)">
                     <span class="mdi mdi-plus"></span> Add Worker
                 </button>
-                <button class="btn" disabled title="Planned: spawn via Python API tokenized setup">
-                    <span class="mdi mdi-server-plus"></span> Add Remote
+                <button class="btn" @onclick="ToggleDaemon">
+                    <span class="mdi @(daemonStatus?.Running == true ? "mdi-stop-circle-outline" : "mdi-play-circle-outline")"></span>
+                    @(daemonStatus?.Running == true ? "Stop Daemon" : "Start Daemon")
+                </button>
+                <button class="btn" @onclick="ReloadDaemon" disabled="@(daemonStatus?.Running != true)">
+                    <span class="mdi mdi-refresh"></span> Reload
                 </button>
             </div>
         </div>
+        @if (!string.IsNullOrWhiteSpace(actionStatus))
+        {
+            <p class="text-small text-muted mt-sm">@actionStatus</p>
+        }
     </div>
 
     <div class="card mb-lg">
@@ -87,7 +101,7 @@
 
     <div class="placeholder-note">
         <div class="placeholder-note-title">
-            <span class="mdi mdi-tools"></span> Python Worker API required for full worker management
+            <span class="mdi mdi-server-network"></span> Daemon-based control model
         </div>
         <ul class="placeholder-note-list">
             @foreach (var item in WorkerApiPending)
@@ -100,15 +114,17 @@
 
 @code {
     private List<WorkerViewModel> workerItems = new();
+    private DaemonStatusViewModel? daemonStatus;
+    private string? actionStatus;
     private string SearchTerm { get; set; } = "";
     private string StatusFilter { get; set; } = "ALL";
 
     private IReadOnlyList<string> WorkerApiPending =>
     [
-        "Expose REST or SignalR endpoints for start, stop, pause, and status updates.",
-        "Publish worker stack/progress snapshots to enable live route visualization.",
-        "Provide signed bootstrap payload (token + manager endpoint) for remote worker onboarding.",
-        "Emit structured runtime events (dead links, traps, retry/failure reasons)."
+        "One daemon API controls many workers; workers do not host nested APIs.",
+        "Start daemon first, then spawn/start workers under that daemon.",
+        "Use daemon-scoped config as defaults; worker config can override when needed.",
+        "Expose API externally for remote workers; local worker coordination can stay in-process."
     ];
 
     private IReadOnlyList<string> Statuses => workerItems
@@ -127,42 +143,69 @@
 
     protected override async Task OnInitializedAsync()
     {
+        await RefreshAsync();
+    }
+
+    private async Task RefreshAsync()
+    {
+        daemonStatus = await WorkerService.GetDaemonStatusAsync();
         workerItems = await WorkerService.GetAllWorkersAsync();
     }
 
     private async Task Start(int id)
     {
         await WorkerService.StartWorkerAsync(id);
-        workerItems = await WorkerService.GetAllWorkersAsync();
+        await RefreshAsync();
     }
 
     private async Task Pause(int id)
     {
         await WorkerService.PauseWorkerAsync(id);
-        workerItems = await WorkerService.GetAllWorkersAsync();
+        await RefreshAsync();
     }
 
     private async Task Stop(int id)
     {
         await WorkerService.StopWorkerAsync(id);
-        workerItems = await WorkerService.GetAllWorkersAsync();
+        await RefreshAsync();
     }
 
-    private Task AddMockWorker()
+    private async Task SpawnWorker()
     {
-        var maxId = workerItems.Count == 0 ? 0 : workerItems.Max(w => w.Id);
-        workerItems.Add(new WorkerViewModel
+        if (daemonStatus?.Running != true)
         {
-            Id = maxId + 1,
-            Name = $"Worker-{maxId + 1}",
-            Status = "Idle",
-            CurrentUrl = null,
-            PagesProcessed = 0,
-            ErrorCount = 0,
-            StartedAt = DateTime.UtcNow
-        });
+            actionStatus = "Start daemon first, then spawn workers.";
+            return;
+        }
 
-        return Task.CompletedTask;
+        var spawned = await WorkerService.SpawnWorkerAsync();
+        actionStatus = spawned == null
+            ? "Failed to spawn worker."
+            : $"Spawned {spawned.Name}.";
+        await RefreshAsync();
+    }
+
+    private async Task ToggleDaemon()
+    {
+        if (daemonStatus?.Running == true)
+        {
+            var ok = await WorkerService.StopDaemonAsync();
+            actionStatus = ok ? "Daemon stopped." : "Failed to stop daemon.";
+        }
+        else
+        {
+            var ok = await WorkerService.StartDaemonAsync();
+            actionStatus = ok ? "Daemon started." : "Failed to start daemon.";
+        }
+
+        await RefreshAsync();
+    }
+
+    private async Task ReloadDaemon()
+    {
+        var ok = await WorkerService.ReloadDaemonAsync();
+        actionStatus = ok ? "Daemon reloaded." : "Failed to reload daemon.";
+        await RefreshAsync();
     }
 
     private string GetStatusBadgeClass(string status)
