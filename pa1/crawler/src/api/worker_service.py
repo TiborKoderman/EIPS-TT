@@ -29,6 +29,9 @@ from api.service_protocol import WorkerControlService
 from core.downloader import DownloadResult, Downloader
 from core.frontier import FrontierEntry
 from core.link_extractor import LinkExtractor
+from core.politeness import PerIpRateLimiter
+from core.robots import RobotsPolicy
+from core.robots import RobotsPolicyManager
 from db.frontier_store import PostgresFrontierSwapStore
 from db.pg_connect import get_connection
 
@@ -154,6 +157,8 @@ class DaemonWorkerService(WorkerControlService):
         self._frontier_swap_conn = None
         self._frontier_swap_store: PostgresFrontierSwapStore | None = None
         self._link_extractor = LinkExtractor()
+        self._robots_policy_manager = RobotsPolicyManager(user_agent=self._global_config.user_agent)
+        self._ip_rate_limiter = PerIpRateLimiter(min_interval_seconds=0.0)
 
         for worker in self._workers.values():
             self._append_log(worker.id, "Info", f"{worker.name} initialized in {worker.mode} mode.")
@@ -1652,6 +1657,39 @@ class DaemonWorkerService(WorkerControlService):
 
     def _download_and_extract_links(self, url: str) -> dict[str, Any]:
         downloader = Downloader(user_agent=self._global_config.user_agent)
+        policy = self._resolve_robots_policy(url)
+        robots_allowed = self._robots_allowed_for_url(policy, url)
+        effective_delay_seconds = self._effective_delay_seconds(policy)
+
+        if not robots_allowed:
+            return {
+                "ok": False,
+                "stage": "robots",
+                "error": "Blocked by robots.txt policy.",
+                "finalUrl": url,
+                "downloadResult": {
+                    "requestedUrl": url,
+                    "finalUrl": url,
+                    "statusCode": 0,
+                    "contentType": None,
+                    "dataTypeCode": None,
+                    "pageTypeCode": "HTML",
+                    "htmlContent": None,
+                    "usedRenderer": False,
+                    "contentLength": None,
+                    "robotsAllowed": False,
+                    "robotsUrl": policy.robots_url if policy else None,
+                    "robotsFetched": policy.fetched if policy else False,
+                    "robotsCrawlDelaySeconds": policy.crawl_delay_seconds if policy else None,
+                    "robotsSitemaps": policy.sitemaps if policy else [],
+                    "robotsContent": policy.raw_content if policy else None,
+                    "effectiveDelaySeconds": effective_delay_seconds,
+                },
+                "discoveredLinks": [],
+            }
+
+        self._ip_rate_limiter.wait_for_turn(url, effective_delay_seconds)
+
         try:
             download = downloader.fetch(
                 url,
@@ -1676,6 +1714,13 @@ class DaemonWorkerService(WorkerControlService):
                     "htmlContent": None,
                     "usedRenderer": False,
                     "contentLength": None,
+                    "robotsAllowed": robots_allowed,
+                    "robotsUrl": policy.robots_url if policy else None,
+                    "robotsFetched": policy.fetched if policy else False,
+                    "robotsCrawlDelaySeconds": policy.crawl_delay_seconds if policy else None,
+                    "robotsSitemaps": policy.sitemaps if policy else [],
+                    "robotsContent": policy.raw_content if policy else None,
+                    "effectiveDelaySeconds": effective_delay_seconds,
                 },
                 "discoveredLinks": [],
             }
@@ -1700,7 +1745,13 @@ class DaemonWorkerService(WorkerControlService):
                 "stage": "complete",
                 "error": None,
                 "finalUrl": download.final_url,
-                "downloadResult": self._to_download_payload(download, parser_payload=parser_payload),
+                "downloadResult": self._to_download_payload(
+                    download,
+                    parser_payload=parser_payload,
+                    robots_policy=policy,
+                    robots_allowed=robots_allowed,
+                    effective_delay_seconds=effective_delay_seconds,
+                ),
                 "discoveredLinks": discovered_links,
             }
         except Exception as exc:
@@ -1709,22 +1760,53 @@ class DaemonWorkerService(WorkerControlService):
                 "stage": "parse",
                 "error": str(exc),
                 "finalUrl": download.final_url,
-                "downloadResult": self._to_download_payload(download, parser_payload={
-                    "links": [],
-                    "jsLinks": [],
-                    "images": [],
-                    "linksCount": 0,
-                    "jsLinksCount": 0,
-                    "imagesCount": 0,
-                }),
+                "downloadResult": self._to_download_payload(
+                    download,
+                    parser_payload={
+                        "links": [],
+                        "jsLinks": [],
+                        "images": [],
+                        "linksCount": 0,
+                        "jsLinksCount": 0,
+                        "imagesCount": 0,
+                    },
+                    robots_policy=policy,
+                    robots_allowed=robots_allowed,
+                    effective_delay_seconds=effective_delay_seconds,
+                ),
                 "discoveredLinks": [],
             }
+
+    def _resolve_robots_policy(self, url: str) -> RobotsPolicy | None:
+        if not self._global_config.respect_robots_txt:
+            return None
+        self._robots_policy_manager.user_agent = self._global_config.user_agent
+        try:
+            return self._robots_policy_manager.get_policy(url)
+        except Exception:
+            return None
+
+    def _robots_allowed_for_url(self, policy: RobotsPolicy | None, url: str) -> bool:
+        if not self._global_config.respect_robots_txt or policy is None:
+            return True
+        try:
+            return policy.allows(self._global_config.user_agent, url)
+        except Exception:
+            return True
+
+    def _effective_delay_seconds(self, policy: RobotsPolicy | None) -> float:
+        configured_delay = max(0.0, float(self._global_config.crawl_delay_milliseconds) / 1000.0)
+        robots_delay = 0.0 if policy is None or policy.crawl_delay_seconds is None else max(0.0, float(policy.crawl_delay_seconds))
+        return max(configured_delay, robots_delay)
 
     @staticmethod
     def _to_download_payload(
         download: DownloadResult,
         *,
         parser_payload: dict[str, object] | None = None,
+        robots_policy: RobotsPolicy | None = None,
+        robots_allowed: bool = True,
+        effective_delay_seconds: float | None = None,
     ) -> dict[str, object | None]:
         return {
             "requestedUrl": download.requested_url,
@@ -1737,6 +1819,13 @@ class DaemonWorkerService(WorkerControlService):
             "usedRenderer": download.used_renderer,
             "contentLength": download.content_length,
             "parsedPayload": parser_payload,
+            "robotsAllowed": robots_allowed,
+            "robotsUrl": robots_policy.robots_url if robots_policy else None,
+            "robotsFetched": robots_policy.fetched if robots_policy else False,
+            "robotsCrawlDelaySeconds": robots_policy.crawl_delay_seconds if robots_policy else None,
+            "robotsSitemaps": robots_policy.sitemaps if robots_policy else [],
+            "robotsContent": robots_policy.raw_content if robots_policy else None,
+            "effectiveDelaySeconds": effective_delay_seconds,
         }
 
     def _report_page_to_manager(

@@ -177,10 +177,24 @@ export function renderGraph(hostId, payloadJson) {
   host.innerHTML = "";
 
   const payload = JSON.parse(payloadJson || "{}");
-  const nodes = Array.isArray(payload.nodes) ? payload.nodes.map((n) => ({ ...n })) : [];
-  const links = Array.isArray(payload.links)
-    ? payload.links.map((l) => ({ ...l, source: l.source, target: l.target }))
-    : [];
+  const rawNodes = Array.isArray(payload.nodes)
+    ? payload.nodes
+    : (Array.isArray(payload.Nodes) ? payload.Nodes : []);
+  const rawLinks = Array.isArray(payload.links)
+    ? payload.links
+    : (Array.isArray(payload.Links) ? payload.Links : []);
+
+  const nodes = rawNodes.map((n) => ({
+    id: n.id ?? n.Id,
+    url: n.url ?? n.Url ?? "",
+    domain: n.domain ?? n.Domain ?? "unknown",
+    pageType: n.pageType ?? n.PageType ?? "HTML",
+    size: n.size ?? n.Size ?? 1,
+  }));
+  const links = rawLinks.map((l) => ({
+    source: l.source ?? l.Source,
+    target: l.target ?? l.Target,
+  }));
 
   if (nodes.length === 0) {
     return;
@@ -194,7 +208,7 @@ export function renderGraph(hostId, payloadJson) {
     return;
   }
 
-  renderLegend(host, payload.queueMode || "server");
+  renderLegend(host, payload.queueMode || payload.QueueMode || "server");
 
   const svg = d3
     .select(host)
@@ -261,9 +275,9 @@ export function renderGraph(hostId, payloadJson) {
 
   const linkBySource = new Map();
   const nodeById = new Map(nodes.map((node) => [Number(node.id), node]));
-  const rawLinks = links.map((link) => ({ source: Number(link.source), target: Number(link.target) }));
+  const normalizedLinks = links.map((link) => ({ source: Number(link.source), target: Number(link.target) }));
 
-  for (const link of rawLinks) {
+  for (const link of normalizedLinks) {
     const entries = linkBySource.get(link.source) || [];
     entries.push(link);
     linkBySource.set(link.source, entries);
@@ -272,12 +286,13 @@ export function renderGraph(hostId, payloadJson) {
   const seedNodes = pickSeedNodes(nodes);
   const seedIdSet = new Set(seedNodes.map((node) => Number(node.id)));
   for (const node of nodes) {
-    node._visited = false;
+    const classification = classifyNode(node.url);
+    node._visited = true;
     node._isCandidate = false;
     node._candidatePriority = 0;
     node._seed = seedIdSet.has(Number(node.id));
-    node._score = 0;
-    node._category = "generic";
+    node._score = classification.score;
+    node._category = classification.category;
   }
 
   const seedSelection = seedLayer
@@ -316,23 +331,7 @@ export function renderGraph(hostId, payloadJson) {
     }
   }
 
-  for (const seedNode of seedNodes) {
-    enqueueCandidatesFromNode(seedNode);
-  }
-
-  const workerCount = clamp(Math.max(2, Math.floor(nodes.length / 120) + 1), 2, 6);
-  const workers = Array.from({ length: workerCount }).map((_, index) => {
-    const seed = seedNodes[index % seedNodes.length];
-    return {
-      id: index + 1,
-      status: "Active",
-      currentNodeId: Number(seed.id),
-      targetNodeId: null,
-      moving: false,
-      x: seed.x || width / 2,
-      y: seed.y || height / 2,
-    };
-  });
+  const workers = [];
 
   const workerGroups = workerLayer
     .selectAll("g")
@@ -373,7 +372,7 @@ export function renderGraph(hostId, payloadJson) {
   }
 
   function updateCandidateLinks() {
-    const candidateEdges = rawLinks
+    const candidateEdges = normalizedLinks
       .map((edge) => {
         const priority = candidateEdgePriority.get(edgeKey(edge.source, edge.target)) || 0;
         if (priority <= 0) return null;
@@ -561,10 +560,6 @@ export function renderGraph(hostId, payloadJson) {
   updateNodeVisuals();
   updateWorkerVisuals();
 
-  const workerTimer = d3.interval(() => {
-    stepWorkers();
-  }, 1600);
-
   state.set(hostId, {
     svg,
     node: nodeSelection,
@@ -573,7 +568,7 @@ export function renderGraph(hostId, payloadJson) {
     height,
     nodes,
     simulation,
-    workerTimer,
+    workerTimer: null,
   });
 }
 

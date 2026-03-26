@@ -25,6 +25,9 @@ class RobotsPolicy:
 
     def allows(self, user_agent: str, url: str) -> bool:
         """Return True when user-agent may fetch URL according to robots.txt."""
+        # If robots.txt could not be fetched, treat policy as unavailable and allow crawl.
+        if not self.fetched:
+            return True
         return self.parser.can_fetch(user_agent, url)
 
 

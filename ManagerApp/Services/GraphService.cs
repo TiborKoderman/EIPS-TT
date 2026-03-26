@@ -26,9 +26,10 @@ public class GraphService : IGraphService
         // Get incoming link counts for node sizing
         var incomingCounts = await GetIncomingLinkCountsAsync();
 
-        // Get all HTML pages (or limited set for performance)
+        // Get pages with stable URLs (or limited set for performance).
         var query = _context.Pages
-            .Where(p => p.PageTypeCode == "HTML")
+            .Where(p => p.Url != null)
+            .OrderByDescending(p => p.Id)
             .Include(p => p.Site)
             .Select(p => new GraphNodeDto
             {

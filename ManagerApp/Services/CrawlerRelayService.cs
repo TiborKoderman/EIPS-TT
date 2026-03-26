@@ -59,6 +59,10 @@ public sealed class CrawlerRelayService
             .FirstOrDefaultAsync(page => page.Url == url, cancellationToken);
 
         var siteId = await ResolveSiteIdAsync(context, url, request.SiteId, cancellationToken);
+        if (siteId.HasValue)
+        {
+            await UpdateSitePolicyAsync(context, siteId.Value, request.DownloadResult, cancellationToken);
+        }
         var status = "inserted";
         Page targetPage;
 
@@ -586,6 +590,42 @@ public sealed class CrawlerRelayService
         await context.SaveChangesAsync(cancellationToken);
         return site.Id;
     }
+
+    private static async Task UpdateSitePolicyAsync(
+        CrawldbContext context,
+        int siteId,
+        CrawlerDownloadResult? downloadResult,
+        CancellationToken cancellationToken)
+    {
+        if (downloadResult is null)
+        {
+            return;
+        }
+
+        var site = await context.Sites.FirstOrDefaultAsync(item => item.Id == siteId, cancellationToken);
+        if (site is null)
+        {
+            return;
+        }
+
+        var changed = false;
+        if (!string.IsNullOrWhiteSpace(downloadResult.RobotsContent))
+        {
+            site.RobotsContent = downloadResult.RobotsContent;
+            changed = true;
+        }
+
+        if (downloadResult.RobotsSitemaps is { Count: > 0 })
+        {
+            site.SitemapContent = string.Join('\n', downloadResult.RobotsSitemaps.Distinct(StringComparer.Ordinal));
+            changed = true;
+        }
+
+        if (changed)
+        {
+            await context.SaveChangesAsync(cancellationToken);
+        }
+    }
 }
 
 public sealed class CrawlerIngestRequest
@@ -609,6 +649,13 @@ public sealed class CrawlerDownloadResult
     public bool? UsedRenderer { get; set; }
     public int? ContentLength { get; set; }
     public JsonElement? ParsedPayload { get; set; }
+    public bool? RobotsAllowed { get; set; }
+    public string? RobotsUrl { get; set; }
+    public bool? RobotsFetched { get; set; }
+    public double? RobotsCrawlDelaySeconds { get; set; }
+    public List<string>? RobotsSitemaps { get; set; }
+    public string? RobotsContent { get; set; }
+    public double? EffectiveDelaySeconds { get; set; }
 }
 
 public sealed class CrawlerIngestResponse
