@@ -1,0 +1,31 @@
+@namespace ManagerApp.Components.Shared
+
+<span class="hover-tooltip @Class"
+      @onmouseenter="Open"
+      @onmouseleave="Close"
+      @onfocusin="Open"
+      @onfocusout="Close"
+      tabindex="0">
+    <span class="hover-tooltip-trigger">
+        @ChildContent
+    </span>
+
+    @if (_isOpen)
+    {
+        <span class="hover-tooltip-bubble pos-@Position" role="tooltip">
+            @Text
+        </span>
+    }
+</span>
+
+@code {
+    private bool _isOpen;
+
+    [Parameter] public RenderFragment? ChildContent { get; set; }
+    [Parameter] public string Text { get; set; } = string.Empty;
+    [Parameter] public string Position { get; set; } = "top";
+    [Parameter] public string? Class { get; set; }
+
+    private void Open() => _isOpen = true;
+    private void Close() => _isOpen = false;
+}

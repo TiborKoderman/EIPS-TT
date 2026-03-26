@@ -7,8 +7,18 @@
 @implements IAsyncDisposable
 
 <div class="page-header">
-    <h1 class="page-title">Dashboard</h1>
-    <p class="page-subtitle">Overview of crawler statistics and worker status</p>
+    <div class="page-header-main">
+        <div>
+            <h1 class="page-title">Dashboard</h1>
+            <p class="page-subtitle">Overview of crawler statistics and worker status</p>
+        </div>
+        <HoverTooltip Text="@GetSinceUpdateDetailsText()" Class="header-update-tooltip-wrap">
+            <div class="header-updated-pill">
+                <span class="mdi mdi-history"></span>
+                <span>@GetSinceUpdateCompactText()</span>
+            </div>
+        </HoverTooltip>
+    </div>
 </div>
 
 <div class="page-body">
@@ -44,33 +54,6 @@
         }
 
         <div class="dashboard-main-grid mb-lg">
-            <div class="card dashboard-graph-card">
-                <div class="card-header-inline mb-md">
-                    <h2 class="card-title mb-0">Node Graph Preview</h2>
-                    <a href="/graph" class="btn btn-primary btn-sm">
-                        <span class="mdi mdi-open-in-new"></span>
-                        Full View
-                    </a>
-                </div>
-
-                @if (isGraphLoading)
-                {
-                    <p class="text-muted">Loading graph preview...</p>
-                }
-                else if (!string.IsNullOrWhiteSpace(graphError))
-                {
-                    <p class="text-muted">@graphError</p>
-                }
-                else if (graphPreview.Nodes.Count == 0)
-                {
-                    <p class="text-muted">No graph nodes available yet.</p>
-                }
-                else
-                {
-                    <ForceGraph Data="graphPreview" Height="340" ShowToolbar="false" />
-                }
-            </div>
-
             <div class="card dashboard-worker-status-card">
                 <div class="card-header-inline mb-sm">
                     <h2 class="card-title mb-0">Worker Status</h2>
@@ -124,25 +107,51 @@
                                     <span class="badge @GetStatusBadgeClass(worker.Status)">@worker.Status</span>
                                 </div>
                                 <div class="text-small text-muted worker-url-row">
-                                    <span class="mdi @activity.IconClass worker-activity-icon @activity.CssClass"></span>
-                                    <span class="worker-activity-label">@activity.Label:</span>
+                                    <HoverTooltip Text="@activity.Label" Class="worker-activity-tooltip-wrap">
+                                        <span class="mdi @activity.IconClass worker-activity-icon @activity.CssClass"></span>
+                                    </HoverTooltip>
                                     <span class="worker-url-processing @(activity.IsProcessing ? "is-processing" : "")">
-                                        @(string.IsNullOrWhiteSpace(worker.CurrentUrl) ? "Waiting for next page..." : worker.CurrentUrl)
+                                        @(string.IsNullOrWhiteSpace(worker.CurrentUrl) ? "Waiting for next page..." : worker.CurrentUrl) · @worker.Status
                                     </span>
+                                    @if (activity.IsProcessing)
+                                    {
+                                        <span class="processing-ellipsis" aria-hidden="true">
+                                            <span></span><span></span><span></span>
+                                        </span>
+                                    }
                                 </div>
                             </li>
                         }
                     </ul>
-
-                    <div class="text-small text-muted mt-sm">
-                        Workers updated: @lastWorkerRefreshUtc.ToString("HH:mm:ss") UTC
-                    </div>
                 }
             </div>
-        </div>
 
-        <div class="text-small text-muted mt-md text-center">
-            Last updated: @stats.LastUpdated.ToString("yyyy-MM-dd HH:mm:ss UTC")
+            <div class="card dashboard-graph-card">
+                <div class="card-header-inline mb-md">
+                    <h2 class="card-title mb-0">Node Graph Preview</h2>
+                    <a href="/graph" class="btn btn-primary btn-sm">
+                        <span class="mdi mdi-open-in-new"></span>
+                        Full View
+                    </a>
+                </div>
+
+                @if (isGraphLoading)
+                {
+                    <p class="text-muted">Loading graph preview...</p>
+                }
+                else if (!string.IsNullOrWhiteSpace(graphError))
+                {
+                    <p class="text-muted">@graphError</p>
+                }
+                else if (graphPreview.Nodes.Count == 0)
+                {
+                    <p class="text-muted">No graph nodes available yet.</p>
+                }
+                else
+                {
+                    <ForceGraph Data="graphPreview" Height="360" ShowToolbar="false" />
+                }
+            </div>
         </div>
     }
     else
@@ -162,11 +171,11 @@
     private string? selectedWorkerStatus;
     private bool isLoading = true;
     private bool isGraphLoading = true;
-    private DateTime lastWorkerRefreshUtc = DateTime.UtcNow;
     private PeriodicTimer? refreshTimer;
     private CancellationTokenSource? refreshCts;
     private readonly SemaphoreSlim workerRefreshLock = new(1, 1);
     private static readonly string[] DashboardStatuses = ["Active", "Idle", "Paused", "Error", "Stopped"];
+    private DateTime lastDashboardUpdateUtc = DateTime.UtcNow;
 
     private List<WorkerViewModel> visibleWorkers => workers
         .Where(w => selectedWorkerStatus == null || string.Equals(w.Status, selectedWorkerStatus, StringComparison.OrdinalIgnoreCase))
@@ -178,6 +187,7 @@
         try
         {
             stats = await StatisticsService.GetStatisticsAsync();
+            lastDashboardUpdateUtc = DateTime.UtcNow;
             await RefreshWorkersAsync();
             await LoadGraphPreviewAsync();
             StartWorkerRefreshLoop();
@@ -201,6 +211,7 @@
         try
         {
             graphPreview = await GraphService.GetGraphDataAsync(120);
+            lastDashboardUpdateUtc = DateTime.UtcNow;
         }
         catch (Exception ex)
         {
@@ -246,7 +257,7 @@
         {
             workerStatusCounts = await WorkerService.GetWorkerStatusCountsAsync();
             workers = await WorkerService.GetAllWorkersAsync();
-            lastWorkerRefreshUtc = DateTime.UtcNow;
+            lastDashboardUpdateUtc = DateTime.UtcNow;
         }
         catch (Exception ex)
         {
@@ -314,6 +325,18 @@
     }
 
     private readonly record struct WorkerActivity(string IconClass, string Label, string CssClass, bool IsProcessing);
+
+    private string GetSinceUpdateCompactText()
+    {
+        var seconds = Math.Max(0, (int)(DateTime.UtcNow - lastDashboardUpdateUtc).TotalSeconds);
+        return $"{seconds}s";
+    }
+
+    private string GetSinceUpdateDetailsText()
+    {
+        var seconds = Math.Max(0, (int)(DateTime.UtcNow - lastDashboardUpdateUtc).TotalSeconds);
+        return $"{seconds}s since last dashboard update (stats, workers, and graph preview refresh).";
+    }
 
     public ValueTask DisposeAsync()
     {

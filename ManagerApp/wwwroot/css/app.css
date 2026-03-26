@@ -103,6 +103,74 @@ h3 { font-size: var(--font-size-lg); }
     border-bottom: 1px solid var(--color-border);
 }
 
+.page-header-main {
+    display: flex;
+    align-items: flex-end;
+    justify-content: space-between;
+    gap: var(--spacing-md);
+}
+
+.header-updated-pill {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 4px 10px;
+    border-radius: 999px;
+    background: rgba(255, 255, 255, 0.75);
+    color: var(--color-text-secondary);
+    font-size: var(--font-size-sm);
+    font-weight: 600;
+    white-space: nowrap;
+}
+
+.hover-tooltip {
+    position: relative;
+    display: inline-flex;
+}
+
+.hover-tooltip:focus-visible {
+    outline: 2px solid var(--color-primary);
+    outline-offset: 2px;
+    border-radius: var(--radius-sm);
+}
+
+.hover-tooltip-trigger {
+    display: inline-flex;
+}
+
+.hover-tooltip-bubble {
+    position: absolute;
+    z-index: 20;
+    min-width: 160px;
+    max-width: 320px;
+    padding: 6px 10px;
+    border-radius: var(--radius-sm);
+    background: #1f2d26;
+    color: #fff;
+    box-shadow: var(--shadow-md);
+    font-size: var(--font-size-sm);
+    line-height: 1.3;
+    pointer-events: none;
+    white-space: normal;
+}
+
+.hover-tooltip-bubble.pos-top {
+    bottom: calc(100% + 8px);
+    left: 50%;
+    transform: translateX(-50%);
+}
+
+.hover-tooltip-bubble.pos-top::after {
+    content: "";
+    position: absolute;
+    left: 50%;
+    top: 100%;
+    transform: translateX(-50%);
+    border-width: 6px 5px 0 5px;
+    border-style: solid;
+    border-color: #1f2d26 transparent transparent transparent;
+}
+
 .page-title {
     font-size: 1.45rem;
     font-weight: 600;
@@ -420,11 +488,6 @@ textarea:focus {
     font-size: 15px;
 }
 
-.worker-activity-label {
-    font-weight: 600;
-    color: var(--color-text-secondary);
-}
-
 .activity-searching,
 .activity-processing {
     color: var(--color-primary);
@@ -451,6 +514,7 @@ textarea:focus {
     display: inline-block;
     padding: 1px 0;
     isolation: isolate;
+    overflow: hidden;
 }
 
 .worker-url-processing.is-processing::after {
@@ -475,6 +539,41 @@ textarea:focus {
     0% { left: -36%; }
     50% { left: 102%; }
     100% { left: -36%; }
+}
+
+.processing-ellipsis {
+    display: inline-flex;
+    align-items: flex-end;
+    gap: 3px;
+    margin-left: 4px;
+}
+
+.processing-ellipsis span {
+    width: 4px;
+    height: 4px;
+    border-radius: 999px;
+    background: var(--color-primary);
+    opacity: 0.45;
+    animation: dots-bounce 0.9s infinite ease-in-out;
+}
+
+.processing-ellipsis span:nth-child(2) {
+    animation-delay: 0.12s;
+}
+
+.processing-ellipsis span:nth-child(3) {
+    animation-delay: 0.24s;
+}
+
+@keyframes dots-bounce {
+    0%, 80%, 100% {
+        transform: translateY(0);
+        opacity: 0.4;
+    }
+    40% {
+        transform: translateY(-4px);
+        opacity: 1;
+    }
 }
 
 .dashboard-worker-list .list-item {
@@ -515,17 +614,30 @@ textarea:focus {
 
 .dashboard-main-grid {
     display: grid;
-    grid-template-columns: minmax(0, 1.45fr) minmax(250px, 0.9fr);
+    grid-template-columns: minmax(0, 0.85fr) minmax(0, 1.35fr);
+    grid-template-areas:
+        "status graph"
+        "workers graph";
     gap: var(--spacing-md);
 }
 
 .dashboard-graph-card .graph-canvas {
-    min-height: 340px;
+    min-height: 420px;
 }
 
 .dashboard-worker-status-card {
-    max-width: 420px;
-    width: 100%;
+    grid-area: status;
+    max-width: 360px;
+    width: min(100%, 360px);
+    justify-self: start;
+}
+
+.dashboard-main-grid > .card:nth-child(2) {
+    grid-area: workers;
+}
+
+.dashboard-graph-card {
+    grid-area: graph;
 }
 
 .live-pill {
@@ -634,12 +746,22 @@ textarea:focus {
 }
 
 @media (max-width: 880px) {
+    .page-header-main {
+        flex-direction: column;
+        align-items: flex-start;
+    }
+
     .dashboard-main-grid {
         grid-template-columns: 1fr;
+        grid-template-areas:
+            "status"
+            "workers"
+            "graph";
     }
 
     .dashboard-worker-status-card {
         max-width: none;
+        width: 100%;
     }
 
     .dashboard-worker-status {
