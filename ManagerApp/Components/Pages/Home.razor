@@ -180,6 +180,21 @@
                     <ForceGraph Data="graphPreview" Height="360" ShowToolbar="false" />
                 }
             </div>
+
+            <div class="card">
+                <div class="card-header-inline mb-md">
+                    <h2 class="card-title mb-0">Cluster Throughput Trend</h2>
+                    <span class="live-pill"><span class="live-dot"></span> Live</span>
+                </div>
+                @if (dashboardThroughputSeries.Count == 0)
+                {
+                    <p class="text-small text-muted">No throughput points yet.</p>
+                }
+                else
+                {
+                    <ThroughputLineChart Points="dashboardThroughputSeries" />
+                }
+            </div>
         </div>
     }
     else
@@ -195,6 +210,7 @@
     private Dictionary<string, int>? workerStatusCounts;
     private List<WorkerViewModel> workers = new();
     private List<DaemonQueueSnapshot> daemonQueueSnapshots = new();
+    private List<WorkerThroughputPointViewModel> dashboardThroughputSeries = new();
     private GraphDataDto graphPreview = new();
     private string? graphError;
     private string? selectedWorkerStatus;
@@ -292,6 +308,7 @@
             var daemonStatus = await WorkerService.GetDaemonStatusAsync();
             var events = await WorkerService.GetRecentCrawlerEventsAsync(200);
             daemonQueueSnapshots = BuildDaemonQueueSnapshots(daemonStatus, events);
+            dashboardThroughputSeries = await WorkerService.GetThroughputSeriesAsync(workerId: null, windowMinutes: 60, bucketSeconds: 30);
 
             lastDashboardUpdateUtc = DateTime.UtcNow;
         }

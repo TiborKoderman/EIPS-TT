@@ -102,6 +102,9 @@ class GlobalWorkerConfig:
     seed_entries: list[SeedEntry] = field(default_factory=default_seed_entries)
     queue_mode: str = "server"
     strategy_mode: str = "balanced"
+    score_function: str = "rendezvous"
+    score_weight_pages: float = 1.0
+    score_weight_errors: float = 1.0
     topic_keywords: list[str] = field(
         default_factory=lambda: [
             "medicine",
@@ -129,6 +132,9 @@ class GlobalWorkerConfig:
             "seedEntries": [entry.to_view_model() for entry in self.seed_entries],
             "queueMode": self.queue_mode,
             "strategyMode": self.strategy_mode,
+            "scoreFunction": self.score_function,
+            "scoreWeightPages": self.score_weight_pages,
+            "scoreWeightErrors": self.score_weight_errors,
             "topicKeywords": list(self.topic_keywords),
             "topicKeywordsText": "\n".join(self.topic_keywords),
             "maxFrontierInMemory": self.max_frontier_in_memory,

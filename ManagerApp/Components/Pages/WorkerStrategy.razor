@@ -30,7 +30,29 @@
     {
         <div class="card mb-lg">
             <h2 class="card-title">Strategy Controls</h2>
+            <div class="workers-config-grid mb-sm">
+                <label>
+                    <span class="text-small text-muted">Score Function</span>
+                    <select @bind="scoreFunction">
+                        <option value="rendezvous">Rendezvous Hash</option>
+                        <option value="round_robin">Round Robin</option>
+                        <option value="weighted">Weighted Runtime</option>
+                    </select>
+                </label>
+                <label>
+                    <span class="text-small text-muted">Weight: Pages</span>
+                    <input type="number" step="0.1" @bind="scoreWeightPages" />
+                </label>
+                <label>
+                    <span class="text-small text-muted">Weight: Errors</span>
+                    <input type="number" step="0.1" @bind="scoreWeightErrors" />
+                </label>
+            </div>
             <div class="flex items-center gap-sm" style="flex-wrap: wrap;">
+                <button class="btn" @onclick="SaveScoreFunction">
+                    <span class="mdi mdi-content-save"></span>
+                    Save Score Function
+                </button>
                 <button class="btn btn-primary" @onclick="EnforceServerQueueOnly">
                     <span class="mdi mdi-server-network"></span>
                     Enforce Server-Only Queue
@@ -171,6 +193,9 @@
     private int lastRunPending;
     private bool isLoading = true;
     private string? statusMessage;
+    private string scoreFunction = "rendezvous";
+    private double scoreWeightPages = 1.0;
+    private double scoreWeightErrors = 1.0;
     private PeriodicTimer? _refreshTimer;
     private CancellationTokenSource? _refreshCts;
 
@@ -215,6 +240,13 @@
             })
             .ToList();
 
+        if (globalConfig != null)
+        {
+            scoreFunction = globalConfig.ScoreFunction;
+            scoreWeightPages = globalConfig.ScoreWeightPages;
+            scoreWeightErrors = globalConfig.ScoreWeightErrors;
+        }
+
         BuildAssignments();
         isLoading = false;
     }
@@ -240,7 +272,7 @@
         foreach (var seed in enabledSeeds)
         {
             var targetWorker = candidateWorkers
-                .OrderByDescending(worker => RendezvousScore(seed.Url, worker.Id))
+                .OrderByDescending(worker => ComputeAssignmentScore(seed.Url, worker, candidateWorkers.Count))
                 .ThenBy(worker => worker.Id)
                 .First();
             plannedAssignments.Add(new SeedAssignment
@@ -266,6 +298,44 @@
         }
 
         return hash;
+    }
+
+    private double ComputeAssignmentScore(string seedUrl, WorkerViewModel worker, int workerCount)
+    {
+        return scoreFunction switch
+        {
+            "round_robin" => RoundRobinScore(seedUrl, worker.Id, workerCount),
+            "weighted" => WeightedRuntimeScore(worker),
+            _ => RendezvousScore(seedUrl, worker.Id),
+        };
+    }
+
+    private static double RoundRobinScore(string seedUrl, int workerId, int workerCount)
+    {
+        var slot = Math.Abs(seedUrl.GetHashCode()) % Math.Max(1, workerCount);
+        return workerId == slot + 1 ? 1_000_000 : 0;
+    }
+
+    private double WeightedRuntimeScore(WorkerViewModel worker)
+    {
+        return (scoreWeightPages * worker.PagesProcessed) - (scoreWeightErrors * worker.ErrorCount);
+    }
+
+    private async Task SaveScoreFunction()
+    {
+        if (globalConfig == null)
+        {
+            return;
+        }
+
+        globalConfig.ScoreFunction = scoreFunction;
+        globalConfig.ScoreWeightPages = scoreWeightPages;
+        globalConfig.ScoreWeightErrors = scoreWeightErrors;
+        await WorkerService.SaveGlobalConfigAsync(globalConfig);
+        statusMessage = WorkerService.LastError == null
+            ? "Score function saved."
+            : $"Unable to save score function: {WorkerService.LastError}";
+        await RefreshAll();
     }
 
     private async Task EnforceServerQueueOnly()

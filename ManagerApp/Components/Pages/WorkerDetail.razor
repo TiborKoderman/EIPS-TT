@@ -1,5 +1,6 @@
 @page "/workers/{WorkerId:int}"
 @page "/workers/{WorkerId:int}/{Section}"
+@implements IAsyncDisposable
 @using ManagerApp.Models
 @using ManagerApp.Services
 @inject IWorkerService WorkerService
@@ -102,25 +103,47 @@
         {
             <div class="card">
                 <h2 class="card-title">Recent Logs</h2>
-                @if (workerDetail.RecentLogs.Count == 0)
-                {
-                    <p class="text-muted">No logs available.</p>
-                }
-                else
-                {
-                    <ul class="list worker-log-list">
-                        @foreach (var log in workerDetail.RecentLogs.OrderByDescending(l => l.TimestampUtc))
-                        {
-                            <li class="list-item">
-                                <div class="worker-log-row">
-                                    <span class="text-small text-muted">@log.TimestampUtc.ToString("HH:mm:ss")</span>
-                                    <span class="badge @GetLogBadgeClass(log.Level)">@log.Level</span>
-                                    <span>@log.Message</span>
-                                </div>
-                            </li>
-                        }
-                    </ul>
-                }
+                <div class="workers-observability-toolbar mb-sm">
+                    <select @bind="LogSeverityFilter">
+                        <option value="all">All severities</option>
+                        <option value="Info">Info</option>
+                        <option value="Warning">Warning</option>
+                        <option value="Error">Error</option>
+                        <option value="Debug">Debug</option>
+                    </select>
+                    <input type="search" placeholder="Search log message..." @bind="LogSearch" @bind:event="oninput" />
+                </div>
+
+                <div class="workers-log-table-wrap">
+                    <table class="workers-log-table">
+                        <thead>
+                            <tr>
+                                <th>SEV</th>
+                                <th>TS</th>
+                                <th>Message</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            @if (persistedLogs.Count == 0)
+                            {
+                                <tr>
+                                    <td colspan="3" class="text-small text-muted">No logs available in selected filter.</td>
+                                </tr>
+                            }
+                            else
+                            {
+                                @foreach (var log in persistedLogs)
+                                {
+                                    <tr>
+                                        <td><span class="badge @GetLogBadgeClass(log.Level)">@ToShortSeverity(log.Level)</span></td>
+                                        <td class="workers-log-ts">@log.TimestampUtc.ToLocalTime().ToString("HH:mm:ss")</td>
+                                        <td>@log.Message</td>
+                                    </tr>
+                                }
+                            }
+                        </tbody>
+                    </table>
+                </div>
             </div>
         }
 
@@ -128,8 +151,20 @@
         {
             <div class="grid grid-cols-3 mb-lg">
                 <StatCard Label="Success Rate" Value="@GetSuccessRate()" Footnote="Processed vs errors" />
-                <StatCard Label="Log Throughput" Value="@GetLogThroughput()" Footnote="entries/min" />
+                <StatCard Label="Recent Throughput" Value="@GetRecentThroughput()" Footnote="pages/bucket" />
                 <StatCard Label="Uptime" Value="@GetUptime()" Footnote="Since started" />
+            </div>
+
+            <div class="card mb-lg">
+                <h2 class="card-title">Throughput Trend (Last Hour)</h2>
+                @if (throughputSeries.Count == 0)
+                {
+                    <p class="text-small text-muted">No persisted throughput points yet.</p>
+                }
+                else
+                {
+                    <ThroughputLineChart Points="throughputSeries" />
+                }
             </div>
 
             <div class="card">
@@ -149,7 +184,13 @@
     [Parameter] public string? Section { get; set; }
 
     private WorkerDetailViewModel? workerDetail;
+    private List<WorkerLogEntryViewModel> persistedLogs = new();
+    private List<WorkerThroughputPointViewModel> throughputSeries = new();
     private bool isLoading = true;
+    private PeriodicTimer? _refreshTimer;
+    private CancellationTokenSource? _refreshCts;
+    private string LogSeverityFilter { get; set; } = "all";
+    private string LogSearch { get; set; } = "";
     private static readonly (string Key, string Label, string Icon)[] Tabs =
     [
         ("overview", "Overview", "mdi-view-dashboard-outline"),
@@ -160,12 +201,36 @@
     protected override async Task OnParametersSetAsync()
     {
         isLoading = true;
-        workerDetail = await WorkerService.GetWorkerDetailAsync(WorkerId);
+        await RefreshDataAsync();
         if (!Tabs.Any(t => string.Equals(t.Key, CurrentSection, StringComparison.OrdinalIgnoreCase)))
         {
             Navigation.NavigateTo($"/workers/{WorkerId}/overview", replace: true);
         }
         isLoading = false;
+
+        if (_refreshTimer == null)
+        {
+            _refreshCts = new CancellationTokenSource();
+            _refreshTimer = new PeriodicTimer(TimeSpan.FromSeconds(3));
+            _ = Task.Run(async () =>
+            {
+                while (_refreshTimer is not null && await _refreshTimer.WaitForNextTickAsync(_refreshCts.Token))
+                {
+                    await InvokeAsync(async () =>
+                    {
+                        await RefreshDataAsync();
+                        StateHasChanged();
+                    });
+                }
+            }, _refreshCts.Token);
+        }
+    }
+
+    private async Task RefreshDataAsync()
+    {
+        workerDetail = await WorkerService.GetWorkerDetailAsync(WorkerId);
+        persistedLogs = await WorkerService.GetPersistedWorkerLogsAsync(WorkerId, limit: 120, severity: LogSeverityFilter, search: LogSearch);
+        throughputSeries = await WorkerService.GetThroughputSeriesAsync(WorkerId, windowMinutes: 60, bucketSeconds: 30);
     }
 
     private string CurrentSection => string.IsNullOrWhiteSpace(Section) ? "overview" : Section.ToLowerInvariant();
@@ -178,19 +243,19 @@
     private async Task StartWorker()
     {
         await WorkerService.StartWorkerAsync(WorkerId);
-        workerDetail = await WorkerService.GetWorkerDetailAsync(WorkerId);
+        await RefreshDataAsync();
     }
 
     private async Task PauseWorker()
     {
         await WorkerService.PauseWorkerAsync(WorkerId);
-        workerDetail = await WorkerService.GetWorkerDetailAsync(WorkerId);
+        await RefreshDataAsync();
     }
 
     private async Task StopWorker()
     {
         await WorkerService.StopWorkerAsync(WorkerId);
-        workerDetail = await WorkerService.GetWorkerDetailAsync(WorkerId);
+        await RefreshDataAsync();
     }
 
     private static string GetStatusBadgeClass(string status)
@@ -216,6 +281,21 @@
         };
     }
 
+    private static string ToShortSeverity(string level)
+    {
+        return level.ToUpperInvariant() switch
+        {
+            "WARNING" => "WRN",
+            "INFORMATION" => "INF",
+            "DEBUG" => "DBG",
+            _ => level.ToUpperInvariant() switch
+            {
+                var text when text.Length >= 3 => text[..3],
+                var text => text,
+            }
+        };
+    }
+
     private string GetSuccessRate()
     {
         if (workerDetail == null)
@@ -233,18 +313,14 @@
         return $"{Math.Round(success, 1)}%";
     }
 
-    private string GetLogThroughput()
+    private string GetRecentThroughput()
     {
-        if (workerDetail == null || workerDetail.RecentLogs.Count == 0)
+        if (throughputSeries.Count == 0)
         {
             return "0";
         }
 
-        var minTs = workerDetail.RecentLogs.Min(l => l.TimestampUtc);
-        var maxTs = workerDetail.RecentLogs.Max(l => l.TimestampUtc);
-        var minutes = Math.Max(1.0 / 60.0, (maxTs - minTs).TotalMinutes);
-        var perMinute = workerDetail.RecentLogs.Count / minutes;
-        return Math.Round(perMinute, 1).ToString();
+        return Math.Round(throughputSeries.Average(point => point.Value), 2).ToString();
     }
 
     private string GetUptime()
@@ -277,5 +353,21 @@
         }
 
         return $"Current owner process · {reason}";
+    }
+
+    public ValueTask DisposeAsync()
+    {
+        try
+        {
+            _refreshCts?.Cancel();
+        }
+        catch
+        {
+            // ignore cancellation races
+        }
+
+        _refreshTimer?.Dispose();
+        _refreshCts?.Dispose();
+        return ValueTask.CompletedTask;
     }
 }

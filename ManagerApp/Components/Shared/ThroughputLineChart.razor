@@ -1,0 +1,59 @@
+@using ManagerApp.Models
+
+@if (Points.Count == 0)
+{
+    <p class="text-small text-muted">No throughput points available yet.</p>
+}
+else
+{
+    <svg viewBox="0 0 560 180" class="throughput-chart" role="img" aria-label="Throughput line chart">
+        <line x1="36" y1="12" x2="36" y2="152" class="throughput-axis"></line>
+        <line x1="36" y1="152" x2="540" y2="152" class="throughput-axis"></line>
+        <polyline points="@PolylinePoints" class="throughput-line" fill="none"></polyline>
+        @foreach (var point in RenderPoints)
+        {
+            <circle cx="@point.X" cy="@point.Y" r="2.6" class="throughput-point">
+                <title>@$"{point.Timestamp:HH:mm:ss} -> {point.Value:0.##}"</title>
+            </circle>
+        }
+    </svg>
+}
+
+@code {
+    [Parameter] public List<WorkerThroughputPointViewModel> Points { get; set; } = new();
+
+    private List<RenderPoint> RenderPoints
+    {
+        get
+        {
+            if (Points.Count == 0)
+            {
+                return new List<RenderPoint>();
+            }
+
+            var ordered = Points.OrderBy(item => item.TimestampUtc).ToList();
+            var minTs = ordered.First().TimestampUtc;
+            var maxTs = ordered.Last().TimestampUtc;
+            var spanSeconds = Math.Max(1.0, (maxTs - minTs).TotalSeconds);
+            var maxValue = Math.Max(1.0, ordered.Max(item => item.Value));
+
+            return ordered.Select(item => new RenderPoint
+            {
+                Timestamp = item.TimestampUtc,
+                Value = item.Value,
+                X = 36 + ((item.TimestampUtc - minTs).TotalSeconds / spanSeconds) * 504,
+                Y = 152 - ((item.Value / maxValue) * 128),
+            }).ToList();
+        }
+    }
+
+    private string PolylinePoints => string.Join(" ", RenderPoints.Select(point => $"{point.X:F1},{point.Y:F1}"));
+
+    private sealed class RenderPoint
+    {
+        public DateTime Timestamp { get; set; }
+        public double Value { get; set; }
+        public double X { get; set; }
+        public double Y { get; set; }
+    }
+}

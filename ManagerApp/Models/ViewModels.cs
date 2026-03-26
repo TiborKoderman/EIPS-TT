@@ -87,6 +87,14 @@ public class WorkerLogEntryViewModel
     public DateTime TimestampUtc { get; set; }
     public string Level { get; set; } = "Info";
     public string Message { get; set; } = "";
+    public string DaemonId { get; set; } = "local-default";
+    public int? WorkerId { get; set; }
+}
+
+public class WorkerThroughputPointViewModel
+{
+    public DateTime TimestampUtc { get; set; }
+    public double Value { get; set; }
 }
 
 /// <summary>
@@ -114,6 +122,9 @@ public class WorkerGlobalConfigViewModel
     public List<SeedEntryViewModel> SeedEntries { get; set; } = new();
     public string QueueMode { get; set; } = "server";
     public string StrategyMode { get; set; } = "balanced";
+    public string ScoreFunction { get; set; } = "rendezvous";
+    public double ScoreWeightPages { get; set; } = 1.0;
+    public double ScoreWeightErrors { get; set; } = 1.0;
     public List<string> TopicKeywords { get; set; } = new();
     public string TopicKeywordsText { get; set; } = "";
     public int MaxFrontierInMemory { get; set; } = 50000;

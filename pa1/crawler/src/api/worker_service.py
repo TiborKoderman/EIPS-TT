@@ -492,6 +492,20 @@ class DaemonWorkerService(WorkerControlService):
         if strategy_mode not in {"balanced", "coverage", "focused", "freshness"}:
             strategy_mode = "balanced"
 
+        score_function = str(payload.get("scoreFunction", self._global_config.score_function)).strip().lower()
+        if score_function not in {"rendezvous", "round_robin", "weighted"}:
+            score_function = "rendezvous"
+
+        try:
+            score_weight_pages = float(payload.get("scoreWeightPages", self._global_config.score_weight_pages))
+        except (TypeError, ValueError):
+            score_weight_pages = self._global_config.score_weight_pages
+
+        try:
+            score_weight_errors = float(payload.get("scoreWeightErrors", self._global_config.score_weight_errors))
+        except (TypeError, ValueError):
+            score_weight_errors = self._global_config.score_weight_errors
+
         topic_keywords: list[str] = []
         raw_topic_keywords = payload.get("topicKeywords")
         if isinstance(raw_topic_keywords, list):
@@ -529,6 +543,9 @@ class DaemonWorkerService(WorkerControlService):
                 seed_entries=seed_entries,
                 queue_mode=queue_mode,
                 strategy_mode=strategy_mode,
+                score_function=score_function,
+                score_weight_pages=score_weight_pages,
+                score_weight_errors=score_weight_errors,
                 topic_keywords=topic_keywords,
                 max_frontier_in_memory=_coerce_int(
                     payload.get("maxFrontierInMemory"),
@@ -553,6 +570,9 @@ class DaemonWorkerService(WorkerControlService):
                 ],
                 queue_mode=cfg.queue_mode,
                 strategy_mode=cfg.strategy_mode,
+                score_function=cfg.score_function,
+                score_weight_pages=cfg.score_weight_pages,
+                score_weight_errors=cfg.score_weight_errors,
                 topic_keywords=list(cfg.topic_keywords),
                 max_frontier_in_memory=cfg.max_frontier_in_memory,
                 avoid_duplicate_paths_across_daemons=cfg.avoid_duplicate_paths_across_daemons,
@@ -831,6 +851,11 @@ class DaemonWorkerService(WorkerControlService):
                     if processing["ok"]:
                         current.status_reason = "processing"
                         current.pages_processed += 1
+                        self._append_log(
+                            worker_id,
+                            "Info",
+                            f"Fetched {current.current_url} (status={processing['downloadResult'].get('statusCode')}, links={len(processing['discoveredLinks'])}).",
+                        )
                     else:
                         current.status_reason = "fetch-failed"
                         current.error_count += 1
@@ -840,6 +865,18 @@ class DaemonWorkerService(WorkerControlService):
                         self._enqueue_frontier_url(link)
 
                     self._report_page_to_manager(current, lease.url, processing["downloadResult"])
+                    self._emit_manager_event(
+                        "worker-metric",
+                        worker_id=worker_id,
+                        payload={
+                            "pages_processed_total": current.pages_processed,
+                            "errors_total": current.error_count,
+                            "frontier_in_memory": len(self._frontier_queue),
+                            "frontier_leases": len(self._frontier_leases),
+                            "page_processed": 1 if processing["ok"] else 0,
+                            "page_error": 0 if processing["ok"] else 1,
+                        },
+                    )
                     self._complete_frontier_claim(
                         worker_id,
                         lease.url,

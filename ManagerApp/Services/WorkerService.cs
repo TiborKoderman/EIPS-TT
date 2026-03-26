@@ -523,6 +523,122 @@ public class WorkerService : IWorkerService
         return diagnostics;
     }
 
+    public async Task<List<WorkerLogEntryViewModel>> GetPersistedWorkerLogsAsync(
+        int? workerId,
+        int limit = 120,
+        string? severity = null,
+        string? search = null)
+    {
+        var result = new List<WorkerLogEntryViewModel>();
+        var boundedLimit = Math.Clamp(limit, 1, 400);
+        var normalizedSeverity = string.IsNullOrWhiteSpace(severity) || string.Equals(severity, "all", StringComparison.OrdinalIgnoreCase)
+            ? null
+            : severity.Trim();
+        var normalizedSearch = string.IsNullOrWhiteSpace(search) ? null : search.Trim();
+
+        try
+        {
+            var connectionString = _configuration.GetConnectionString("CrawldbConnection");
+            if (string.IsNullOrWhiteSpace(connectionString))
+            {
+                return result;
+            }
+
+            await using var connection = new NpgsqlConnection(connectionString);
+            await connection.OpenAsync();
+
+            const string sql = """
+                SELECT created_at, level, message, daemon_identifier, external_worker_id
+                FROM manager.worker_log
+                WHERE (@worker_id IS NULL OR external_worker_id = @worker_id)
+                  AND (@severity IS NULL OR lower(level) = lower(@severity))
+                  AND (@search IS NULL OR message ILIKE ('%' || @search || '%'))
+                ORDER BY created_at DESC
+                LIMIT @limit;
+                """;
+
+            await using var cmd = new NpgsqlCommand(sql, connection);
+            cmd.Parameters.AddWithValue("worker_id", (object?)workerId ?? DBNull.Value);
+            cmd.Parameters.AddWithValue("severity", (object?)normalizedSeverity ?? DBNull.Value);
+            cmd.Parameters.AddWithValue("search", (object?)normalizedSearch ?? DBNull.Value);
+            cmd.Parameters.AddWithValue("limit", boundedLimit);
+
+            await using var reader = await cmd.ExecuteReaderAsync();
+            while (await reader.ReadAsync())
+            {
+                result.Add(new WorkerLogEntryViewModel
+                {
+                    TimestampUtc = DateTime.SpecifyKind(reader.GetDateTime(0), DateTimeKind.Utc),
+                    Level = reader.GetString(1),
+                    Message = reader.GetString(2),
+                    DaemonId = reader.IsDBNull(3) ? "local-default" : reader.GetString(3),
+                    WorkerId = reader.IsDBNull(4) ? null : reader.GetInt32(4),
+                });
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogDebug(ex, "Failed to load persisted worker logs.");
+        }
+
+        return result;
+    }
+
+    public async Task<List<WorkerThroughputPointViewModel>> GetThroughputSeriesAsync(
+        int? workerId,
+        int windowMinutes = 60,
+        int bucketSeconds = 30)
+    {
+        var result = new List<WorkerThroughputPointViewModel>();
+        var boundedWindow = Math.Clamp(windowMinutes, 5, 24 * 60);
+        var boundedBucket = Math.Clamp(bucketSeconds, 10, 600);
+
+        try
+        {
+            var connectionString = _configuration.GetConnectionString("CrawldbConnection");
+            if (string.IsNullOrWhiteSpace(connectionString))
+            {
+                return result;
+            }
+
+            await using var connection = new NpgsqlConnection(connectionString);
+            await connection.OpenAsync();
+
+            const string sql = """
+                SELECT
+                    date_bin(make_interval(secs => @bucket_seconds), created_at, timestamp '2001-01-01') AS bucket_time,
+                    COALESCE(SUM(metric_value), 0)
+                FROM manager.worker_metric
+                WHERE metric_name = 'page_processed'
+                  AND created_at >= NOW() - make_interval(mins => @window_minutes)
+                  AND (@worker_id IS NULL OR external_worker_id = @worker_id)
+                GROUP BY bucket_time
+                ORDER BY bucket_time;
+                """;
+
+            await using var cmd = new NpgsqlCommand(sql, connection);
+            cmd.Parameters.AddWithValue("bucket_seconds", boundedBucket);
+            cmd.Parameters.AddWithValue("window_minutes", boundedWindow);
+            cmd.Parameters.AddWithValue("worker_id", (object?)workerId ?? DBNull.Value);
+
+            await using var reader = await cmd.ExecuteReaderAsync();
+            while (await reader.ReadAsync())
+            {
+                result.Add(new WorkerThroughputPointViewModel
+                {
+                    TimestampUtc = DateTime.SpecifyKind(reader.GetDateTime(0), DateTimeKind.Utc),
+                    Value = reader.GetDouble(1),
+                });
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogDebug(ex, "Failed to load throughput series.");
+        }
+
+        return result;
+    }
+
     private async Task<ApiEnvelope<T>?> GetAsync<T>(string path)
     {
         try

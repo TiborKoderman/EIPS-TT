@@ -3,23 +3,36 @@ using System.Text;
 using System.Text.Json;
 using ManagerApp.Data;
 using Microsoft.EntityFrameworkCore;
+using Npgsql;
 
 namespace ManagerApp.Services;
 
 public sealed class CrawlerRelayService
 {
     private readonly IDbContextFactory<CrawldbContext> _contextFactory;
+    private readonly IConfiguration _configuration;
     private readonly ILogger<CrawlerRelayService> _logger;
     private readonly object _eventLock = new();
     private readonly LinkedList<CrawlerEventEnvelope> _recentEvents = new();
+    private readonly string? _connectionString;
+    private readonly int _workerLogRetentionDays;
+    private readonly int _workerMetricRetentionDays;
+    private readonly TimeSpan _cleanupInterval;
+    private DateTime _lastCleanupUtc = DateTime.MinValue;
     private const int MaxRecentEvents = 400;
 
     public CrawlerRelayService(
         IDbContextFactory<CrawldbContext> contextFactory,
+        IConfiguration configuration,
         ILogger<CrawlerRelayService> logger)
     {
         _contextFactory = contextFactory;
+        _configuration = configuration;
         _logger = logger;
+        _connectionString = _configuration.GetConnectionString("CrawldbConnection");
+        _workerLogRetentionDays = Math.Clamp(_configuration.GetValue("CrawlerApi:WorkerLogRetentionDays", 14), 1, 365);
+        _workerMetricRetentionDays = Math.Clamp(_configuration.GetValue("CrawlerApi:WorkerMetricRetentionDays", 30), 1, 365);
+        _cleanupInterval = TimeSpan.FromMinutes(Math.Clamp(_configuration.GetValue("CrawlerApi:ObservabilityCleanupMinutes", 30), 5, 24 * 60));
     }
 
     public async Task<CrawlerIngestResponse> IngestAsync(CrawlerIngestRequest request, CancellationToken cancellationToken)
@@ -114,7 +127,7 @@ public sealed class CrawlerRelayService
         };
     }
 
-    public Task IngestEventAsync(CrawlerEventMessage message)
+    public async Task IngestEventAsync(CrawlerEventMessage message)
     {
         var envelope = new CrawlerEventEnvelope
         {
@@ -140,7 +153,8 @@ public sealed class CrawlerRelayService
             envelope.DaemonId,
             envelope.WorkerId,
             envelope.PayloadJson);
-        return Task.CompletedTask;
+
+        await PersistObservabilityEventAsync(envelope);
     }
 
     public IReadOnlyList<CrawlerEventEnvelope> GetRecentEvents(int limit = 80)
@@ -167,6 +181,156 @@ public sealed class CrawlerRelayService
         {
             return payload.ToString() ?? "{}";
         }
+    }
+
+    private async Task PersistObservabilityEventAsync(CrawlerEventEnvelope envelope)
+    {
+        if (string.IsNullOrWhiteSpace(_connectionString))
+        {
+            return;
+        }
+
+        try
+        {
+            await using var connection = new NpgsqlConnection(_connectionString);
+            await connection.OpenAsync();
+
+            await PersistLogEntryIfApplicableAsync(connection, envelope);
+            await PersistMetricEntriesIfApplicableAsync(connection, envelope);
+            await RunRetentionCleanupIfNeededAsync(connection);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogDebug(ex, "Failed to persist crawler observability event.");
+        }
+    }
+
+    private static async Task PersistLogEntryIfApplicableAsync(NpgsqlConnection connection, CrawlerEventEnvelope envelope)
+    {
+        if (!string.Equals(envelope.Type, "worker-log", StringComparison.OrdinalIgnoreCase)
+            && !string.Equals(envelope.Type, "error", StringComparison.OrdinalIgnoreCase))
+        {
+            return;
+        }
+
+        var level = "Info";
+        var message = envelope.PayloadJson;
+
+        try
+        {
+            using var payloadDoc = JsonDocument.Parse(envelope.PayloadJson);
+            if (payloadDoc.RootElement.ValueKind == JsonValueKind.Object)
+            {
+                if (payloadDoc.RootElement.TryGetProperty("level", out var levelNode)
+                    && levelNode.ValueKind == JsonValueKind.String)
+                {
+                    level = levelNode.GetString() ?? "Info";
+                }
+
+                if (payloadDoc.RootElement.TryGetProperty("message", out var messageNode)
+                    && messageNode.ValueKind == JsonValueKind.String)
+                {
+                    message = messageNode.GetString() ?? message;
+                }
+            }
+        }
+        catch
+        {
+            // Keep defaults from payload JSON.
+        }
+
+        const string sql = """
+            INSERT INTO manager.worker_log(daemon_identifier, external_worker_id, level, message, payload)
+            VALUES (@daemon_identifier, @external_worker_id, @level, @message, @payload::jsonb);
+            """;
+        await using var cmd = new NpgsqlCommand(sql, connection);
+        cmd.Parameters.AddWithValue("daemon_identifier", envelope.DaemonId);
+        cmd.Parameters.AddWithValue("external_worker_id", (object?)envelope.WorkerId ?? DBNull.Value);
+        cmd.Parameters.AddWithValue("level", level);
+        cmd.Parameters.AddWithValue("message", message);
+        cmd.Parameters.AddWithValue("payload", envelope.PayloadJson);
+        await cmd.ExecuteNonQueryAsync();
+    }
+
+    private static async Task PersistMetricEntriesIfApplicableAsync(NpgsqlConnection connection, CrawlerEventEnvelope envelope)
+    {
+        var metrics = new List<(string Name, double Value)>();
+
+        if (string.Equals(envelope.Type, "page-reported", StringComparison.OrdinalIgnoreCase))
+        {
+            metrics.Add(("page_processed", 1));
+        }
+        else if (string.Equals(envelope.Type, "worker-metric", StringComparison.OrdinalIgnoreCase))
+        {
+            try
+            {
+                using var payloadDoc = JsonDocument.Parse(envelope.PayloadJson);
+                if (payloadDoc.RootElement.ValueKind == JsonValueKind.Object)
+                {
+                    foreach (var item in payloadDoc.RootElement.EnumerateObject())
+                    {
+                        if (item.Value.ValueKind == JsonValueKind.Number && item.Value.TryGetDouble(out var value))
+                        {
+                            metrics.Add((item.Name, value));
+                        }
+                    }
+                }
+            }
+            catch
+            {
+                // Ignore malformed metric payloads.
+            }
+        }
+
+        if (metrics.Count == 0)
+        {
+            return;
+        }
+
+        const string sql = """
+            INSERT INTO manager.worker_metric(daemon_identifier, external_worker_id, metric_name, metric_value, payload)
+            VALUES (@daemon_identifier, @external_worker_id, @metric_name, @metric_value, @payload::jsonb);
+            """;
+
+        foreach (var metric in metrics)
+        {
+            await using var cmd = new NpgsqlCommand(sql, connection);
+            cmd.Parameters.AddWithValue("daemon_identifier", envelope.DaemonId);
+            cmd.Parameters.AddWithValue("external_worker_id", (object?)envelope.WorkerId ?? DBNull.Value);
+            cmd.Parameters.AddWithValue("metric_name", metric.Name);
+            cmd.Parameters.AddWithValue("metric_value", metric.Value);
+            cmd.Parameters.AddWithValue("payload", envelope.PayloadJson);
+            await cmd.ExecuteNonQueryAsync();
+        }
+    }
+
+    private async Task RunRetentionCleanupIfNeededAsync(NpgsqlConnection connection)
+    {
+        var now = DateTime.UtcNow;
+        if (now - _lastCleanupUtc < _cleanupInterval)
+        {
+            return;
+        }
+
+        _lastCleanupUtc = now;
+
+        const string deleteLogsSql = """
+            DELETE FROM manager.worker_log
+            WHERE created_at < NOW() - make_interval(days => @days);
+            """;
+        await using (var logCmd = new NpgsqlCommand(deleteLogsSql, connection))
+        {
+            logCmd.Parameters.AddWithValue("days", _workerLogRetentionDays);
+            await logCmd.ExecuteNonQueryAsync();
+        }
+
+        const string deleteMetricsSql = """
+            DELETE FROM manager.worker_metric
+            WHERE created_at < NOW() - make_interval(days => @days);
+            """;
+        await using var metricCmd = new NpgsqlCommand(deleteMetricsSql, connection);
+        metricCmd.Parameters.AddWithValue("days", _workerMetricRetentionDays);
+        await metricCmd.ExecuteNonQueryAsync();
     }
 
     private static string Sha256Hex(string input)

@@ -135,4 +135,21 @@ public interface IWorkerService
     /// Get command queue dispatch diagnostics.
     /// </summary>
     Task<CommandQueueDiagnosticsViewModel> GetCommandQueueDiagnosticsAsync();
+
+    /// <summary>
+    /// Query persisted worker logs (worker-scoped or daemon-combined when workerId is null).
+    /// </summary>
+    Task<List<WorkerLogEntryViewModel>> GetPersistedWorkerLogsAsync(
+        int? workerId,
+        int limit = 120,
+        string? severity = null,
+        string? search = null);
+
+    /// <summary>
+    /// Query persisted throughput buckets for worker or all daemons when workerId is null.
+    /// </summary>
+    Task<List<WorkerThroughputPointViewModel>> GetThroughputSeriesAsync(
+        int? workerId,
+        int windowMinutes = 60,
+        int bucketSeconds = 30);
 }

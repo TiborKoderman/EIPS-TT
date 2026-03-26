@@ -19,6 +19,9 @@
             <a class="btn btn-icon" href="/workers/config" title="Global worker config" aria-label="Global worker config">
                 <span class="mdi mdi-cog-outline"></span>
             </a>
+            <a class="btn btn-icon" href="/workers/groups" title="Daemon config" aria-label="Daemon config">
+                <span class="mdi mdi-server-cog"></span>
+            </a>
             <div class="header-updated-pill">
                 <span class="mdi mdi-server"></span>
                 <span>Daemon: @(daemonStatus?.Running == true ? "Running" : "Stopped")</span>
@@ -145,13 +148,11 @@
                             @if (daemonWorkers.Count > 0)
                             {
                                 <div class="flex items-center gap-sm">
-                                    <button class="btn btn-sm" @onclick="() => StartAllInDaemon(daemon)" type="button" title="Start all workers in this daemon">
-                                        <span class="mdi mdi-play"></span>
-                                        Start All
+                                    <button class="btn btn-icon" @onclick="() => StartAllInDaemon(daemon)" type="button" title="Start all workers in this daemon" aria-label="Start all workers in this daemon">
+                                        <span class="mdi mdi-play-network"></span>
                                     </button>
-                                    <button class="btn btn-sm" @onclick="() => StopAllInDaemon(daemon)" type="button" title="Stop all workers in this daemon">
-                                        <span class="mdi mdi-stop"></span>
-                                        Stop All
+                                    <button class="btn btn-icon" @onclick="() => StopAllInDaemon(daemon)" type="button" title="Stop all workers in this daemon" aria-label="Stop all workers in this daemon">
+                                        <span class="mdi mdi-stop-circle-outline"></span>
                                     </button>
                                 </div>
                             }
@@ -180,7 +181,23 @@
                                         <li class="list-item worker-row worker-list-clickable" @onclick="() => OpenWorkerDetail(worker.Id)">
                                             <div class="worker-row-main">
                                                 <div class="worker-title">@worker.Name</div>
-                                                <div class="text-small text-muted">@worker.CurrentUrl</div>
+                                                @{
+                                                    var activity = GetWorkerActivity(worker);
+                                                }
+                                                <div class="text-small text-muted worker-url-row">
+                                                    <HoverTooltip Text="@activity.Label" Class="worker-activity-tooltip-wrap">
+                                                        <span class="mdi @activity.IconClass worker-activity-icon @activity.CssClass"></span>
+                                                    </HoverTooltip>
+                                                    <span class="worker-url-processing @(activity.IsProcessing ? "is-processing" : "")">
+                                                        @(string.IsNullOrWhiteSpace(worker.CurrentUrl) ? "Waiting for next page..." : worker.CurrentUrl)
+                                                    </span>
+                                                    @if (activity.IsProcessing)
+                                                    {
+                                                        <span class="processing-ellipsis" aria-hidden="true">
+                                                            <span></span><span></span><span></span>
+                                                        </span>
+                                                    }
+                                                </div>
                                                 <div class="text-small">Processed: @worker.PagesProcessed | Errors: @worker.ErrorCount</div>
                                                 @if (!string.IsNullOrWhiteSpace(worker.StatusReason))
                                                 {
@@ -216,6 +233,66 @@
         }
     </div>
 
+    <div class="card mb-lg">
+        <div class="card-header-inline mb-sm">
+            <h2 class="card-title mb-0">Daemon Combined Logs and Metrics</h2>
+            <span class="live-pill"><span class="live-dot"></span> Live</span>
+        </div>
+        <div class="workers-observability-toolbar mb-sm">
+            <select @bind="CombinedSeverityFilter">
+                <option value="all">All severities</option>
+                <option value="Info">Info</option>
+                <option value="Warning">Warning</option>
+                <option value="Error">Error</option>
+                <option value="Debug">Debug</option>
+            </select>
+            <input type="search" placeholder="Search log message..." @bind="CombinedLogSearch" @bind:event="oninput" />
+        </div>
+
+        <div class="grid grid-cols-3 mb-md">
+            <StatCard Label="Throughput (1h)" Value="@GetCombinedThroughputTotal()" Footnote="pages processed" />
+            <StatCard Label="Logs (filtered)" Value="@combinedLogs.Count.ToString()" Footnote="recent rows" />
+            <StatCard Label="Warnings+Errors" Value="@combinedLogs.Count(log => IsWarnOrError(log.Level)).ToString()" Footnote="recent rows" />
+        </div>
+
+        <div class="workers-log-table-wrap">
+            <table class="workers-log-table">
+                <thead>
+                    <tr>
+                        <th>SEV</th>
+                        <th>TS</th>
+                        <th>Message</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    @if (combinedLogs.Count == 0)
+                    {
+                        <tr>
+                            <td colspan="3" class="text-small text-muted">No logs in selected filter.</td>
+                        </tr>
+                    }
+                    else
+                    {
+                        @foreach (var log in combinedLogs.Take(80))
+                        {
+                            <tr>
+                                <td><span class="badge @GetLogBadgeClass(log.Level)">@ToShortSeverity(log.Level)</span></td>
+                                <td class="workers-log-ts">@log.TimestampUtc.ToLocalTime().ToString("HH:mm:ss")</td>
+                                <td>
+                                    @if (log.WorkerId.HasValue)
+                                    {
+                                        <span class="text-small text-muted">w@log.WorkerId · </span>
+                                    }
+                                    @log.Message
+                                </td>
+                            </tr>
+                        }
+                    }
+                </tbody>
+            </table>
+        </div>
+    </div>
+
     <div class="placeholder-note">
         <div class="placeholder-note-title">
             <span class="mdi mdi-server-network"></span> Daemon-based control model
@@ -234,6 +311,8 @@
     private List<WorkerGroupSettingsViewModel> daemonGroups = new();
     private List<DaemonChannelService.DaemonConnectionInfo> daemonConnections = new();
     private CommandQueueDiagnosticsViewModel commandDiagnostics = new();
+    private List<WorkerLogEntryViewModel> combinedLogs = new();
+    private List<WorkerThroughputPointViewModel> combinedThroughputSeries = new();
     private WorkerGlobalConfigViewModel? globalConfig;
     private DaemonStatusViewModel? daemonStatus;
     private string? actionStatus;
@@ -246,6 +325,8 @@
     private string SpawnMode { get; set; } = "thread";
     private string SpawnWorkerName { get; set; } = "";
     private string SpawnSeedUrlsText { get; set; } = "";
+    private string CombinedSeverityFilter { get; set; } = "all";
+    private string CombinedLogSearch { get; set; } = "";
 
     private IReadOnlyList<string> WorkerApiPending =>
     [
@@ -305,6 +386,12 @@
         daemonGroups = await WorkerService.GetWorkerGroupsAsync();
         daemonConnections = DaemonChannel.GetConnectionInfos().ToList();
         commandDiagnostics = await WorkerService.GetCommandQueueDiagnosticsAsync();
+        combinedLogs = await WorkerService.GetPersistedWorkerLogsAsync(
+            workerId: null,
+            limit: 160,
+            severity: CombinedSeverityFilter,
+            search: CombinedLogSearch);
+        combinedThroughputSeries = await WorkerService.GetThroughputSeriesAsync(workerId: null, windowMinutes: 60, bucketSeconds: 30);
 
         var groupedWorkerIds = daemonGroups
             .SelectMany(group => group.WorkerIds)
@@ -583,6 +670,85 @@
     {
         return workers.Count(worker => string.Equals(worker.Status, status, StringComparison.OrdinalIgnoreCase));
     }
+
+    private static WorkerActivity GetWorkerActivity(WorkerViewModel worker)
+    {
+        var status = worker.Status.ToLowerInvariant();
+        var reason = (worker.StatusReason ?? string.Empty).ToLowerInvariant();
+
+        if (status == "error")
+        {
+            return new WorkerActivity("mdi-alert-circle-outline", string.IsNullOrWhiteSpace(worker.StatusReason) ? "Issue" : worker.StatusReason, "activity-error", false);
+        }
+
+        if (status is "idle" or "stopped")
+        {
+            var label = string.IsNullOrWhiteSpace(worker.StatusReason) ? "Waiting" : worker.StatusReason;
+            return new WorkerActivity("mdi-sleep", label, "activity-waiting", false);
+        }
+
+        if (status == "paused")
+        {
+            var label = string.IsNullOrWhiteSpace(worker.StatusReason) ? "Paused" : worker.StatusReason;
+            return new WorkerActivity("mdi-pause-circle-outline", label, "activity-paused", false);
+        }
+
+        if (status == "active")
+        {
+            if (reason.Contains("waiting"))
+            {
+                return new WorkerActivity("mdi-timer-sand", "Waiting for queue", "activity-waiting", false);
+            }
+
+            if (reason.Contains("processing") || reason.Contains("fetch"))
+            {
+                return new WorkerActivity("mdi-file-code-outline", "Parsing", "activity-parsing", true);
+            }
+
+            return new WorkerActivity("mdi-magnify", "Searching", "activity-searching", true);
+        }
+
+        return new WorkerActivity("mdi-cog-outline", "Processing", "activity-processing", true);
+    }
+
+    private string GetCombinedThroughputTotal()
+    {
+        return Math.Round(combinedThroughputSeries.Sum(point => point.Value), 1).ToString();
+    }
+
+    private static bool IsWarnOrError(string level)
+    {
+        return level.Equals("Warning", StringComparison.OrdinalIgnoreCase)
+            || level.Equals("Error", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static string ToShortSeverity(string level)
+    {
+        return level.ToUpperInvariant() switch
+        {
+            "WARNING" => "WRN",
+            "INFORMATION" => "INF",
+            "DEBUG" => "DBG",
+            _ => level.ToUpperInvariant() switch
+            {
+                var text when text.Length >= 3 => text[..3],
+                var text => text,
+            }
+        };
+    }
+
+    private static string GetLogBadgeClass(string level)
+    {
+        return level.ToLowerInvariant() switch
+        {
+            "error" => "badge-error",
+            "warning" => "badge-warning",
+            "debug" => "badge-info",
+            _ => "badge-success",
+        };
+    }
+
+    private readonly record struct WorkerActivity(string IconClass, string Label, string CssClass, bool IsProcessing);
 
     private void ToggleDaemonExpand(int daemonId)
     {
