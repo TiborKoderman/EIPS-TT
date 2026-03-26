@@ -3,6 +3,7 @@
 @using ManagerApp.Models
 @using ManagerApp.Services
 @inject IPageService PageService
+@inject IJSRuntime JS
 @implements IAsyncDisposable
 
 <div class="page-header">
@@ -23,15 +24,31 @@
                     @oninput="OnSearchInput" />
             </div>
 
-            <div class="pages-filter-shell">
-                <span class="mdi mdi-filter-variant pages-filter-icon" aria-hidden="true"></span>
-                <select value="@PageTypeFilter" @onchange="OnFilterChanged">
-                    <option value="ALL">All page types</option>
-                    <option value="HTML">HTML</option>
-                    <option value="BINARY">BINARY</option>
-                    <option value="DUPLICATE">DUPLICATE</option>
-                    <option value="FRONTIER">FRONTIER</option>
-                </select>
+            <div class="pages-filter-dropdown">
+                <button type="button"
+                        class="btn pages-filter-toggle"
+                        @onclick="ToggleFilterDropdown"
+                        aria-haspopup="menu"
+                        aria-expanded="@ShowFilterDropdown">
+                    <span class="mdi mdi-filter-variant" aria-hidden="true"></span>
+                    <span>@GetFilterLabel(PageTypeFilter)</span>
+                    <span class="mdi @(ShowFilterDropdown ? "mdi-chevron-up" : "mdi-chevron-down")" aria-hidden="true"></span>
+                </button>
+
+                @if (ShowFilterDropdown)
+                {
+                    <div class="pages-filter-menu" role="menu">
+                        @foreach (var option in FilterOptions)
+                        {
+                            <button type="button"
+                                    class="pages-filter-option @(string.Equals(PageTypeFilter, option.Value, StringComparison.OrdinalIgnoreCase) ? "active" : "")"
+                                    @onclick='() => SelectFilterOption(option.Value)'>
+                                <span class="mdi @(string.Equals(PageTypeFilter, option.Value, StringComparison.OrdinalIgnoreCase) ? "mdi-radiobox-marked" : "mdi-radiobox-blank")"></span>
+                                <span>@option.Label</span>
+                            </button>
+                        }
+                    </div>
+                }
             </div>
 
             <button class="btn btn-primary pages-search-button" @onclick="() => ReloadAsync(keepSelection: true)">
@@ -79,7 +96,13 @@
                                     <td>@(row.HttpStatus?.ToString() ?? "-")</td>
                                     <td>
                                         <div class="page-url-row">
-                                            <div class="page-url">@row.Url</div>
+                                            <button type="button"
+                                                    class="page-url-text-btn"
+                                                    title="Click to copy full URL"
+                                                    @onclick="() => CopyUrlAsync(row.Url)"
+                                                    @onclick:stopPropagation="true">
+                                                @CompactUrl(row.Url)
+                                            </button>
                                             @if (!string.IsNullOrWhiteSpace(row.Url))
                                             {
                                                 <a class="btn btn-icon page-url-open-btn"
@@ -93,6 +116,10 @@
                                                 </a>
                                             }
                                         </div>
+                                        @if (IsCopiedUrl(row.Url))
+                                        {
+                                            <div class="text-small copied-pill">Copied full URL</div>
+                                        }
                                         <div class="text-small text-muted">@(string.IsNullOrWhiteSpace(row.SiteDomain) ? "-" : row.SiteDomain)</div>
                                     </td>
                                 </tr>
@@ -112,7 +139,12 @@
             else
             {
                 <div class="flex flex-col gap-sm">
-                    <div><strong>URL:</strong> @SelectedPage.Url</div>
+                    <div>
+                        <strong>URL:</strong>
+                        <button type="button" class="page-url-detail-btn" @onclick="() => CopyUrlAsync(SelectedPage.Url)">
+                            @SelectedPage.Url
+                        </button>
+                    </div>
                     <div><strong>Type:</strong> @SelectedPage.PageTypeCode</div>
                     <div><strong>HTTP:</strong> @SelectedPage.HttpStatusCode</div>
                     <div><strong>Accessed:</strong> @SelectedPage.AccessedTime</div>
@@ -219,6 +251,18 @@
     private string SearchTerm { get; set; } = "";
     private string PageTypeFilter { get; set; } = "ALL";
     private int Total;
+    private bool ShowFilterDropdown;
+    private string? _copiedUrl;
+    private DateTime _copiedUrlAtUtc;
+
+    private static readonly IReadOnlyList<(string Value, string Label)> FilterOptions =
+    [
+        ("ALL", "All page types"),
+        ("HTML", "HTML"),
+        ("BINARY", "BINARY"),
+        ("DUPLICATE", "DUPLICATE"),
+        ("FRONTIER", "FRONTIER"),
+    ];
 
     private List<PageSearchDto> Rows = new();
     private Page? SelectedPage;
@@ -265,9 +309,15 @@
         }
     }
 
-    private async Task OnFilterChanged(ChangeEventArgs args)
+    private void ToggleFilterDropdown()
     {
-        PageTypeFilter = args.Value?.ToString() ?? "ALL";
+        ShowFilterDropdown = !ShowFilterDropdown;
+    }
+
+    private async Task SelectFilterOption(string value)
+    {
+        PageTypeFilter = string.IsNullOrWhiteSpace(value) ? "ALL" : value;
+        ShowFilterDropdown = false;
         await ReloadAsync(keepSelection: true);
     }
 
@@ -303,6 +353,52 @@
     {
         var seconds = Math.Max(0, (int)(DateTime.UtcNow - _lastUpdatedUtc).TotalSeconds);
         return $"{seconds}s ago";
+    }
+
+    private static string GetFilterLabel(string value)
+    {
+        var match = FilterOptions.FirstOrDefault(option => string.Equals(option.Value, value, StringComparison.OrdinalIgnoreCase));
+        return string.IsNullOrWhiteSpace(match.Value) ? "All page types" : match.Label;
+    }
+
+    private static string CompactUrl(string? rawUrl)
+    {
+        var url = rawUrl?.Trim() ?? string.Empty;
+        if (url.Length <= 128)
+        {
+            return url;
+        }
+
+        const int headLength = 90;
+        const int tailLength = 34;
+        if (url.Length <= headLength + tailLength + 1)
+        {
+            return url;
+        }
+
+        return $"{url[..headLength]}...{url[^tailLength..]}";
+    }
+
+    private async Task CopyUrlAsync(string? url)
+    {
+        if (string.IsNullOrWhiteSpace(url))
+        {
+            return;
+        }
+
+        await JS.InvokeVoidAsync("navigator.clipboard.writeText", url);
+        _copiedUrl = url;
+        _copiedUrlAtUtc = DateTime.UtcNow;
+    }
+
+    private bool IsCopiedUrl(string? url)
+    {
+        if (string.IsNullOrWhiteSpace(url) || !string.Equals(_copiedUrl, url, StringComparison.Ordinal))
+        {
+            return false;
+        }
+
+        return (DateTime.UtcNow - _copiedUrlAtUtc).TotalSeconds <= 3;
     }
 
     private static string GetImagePreviewUrl(int pageId, int imageId)

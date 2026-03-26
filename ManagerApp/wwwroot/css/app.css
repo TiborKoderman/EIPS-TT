@@ -981,6 +981,52 @@ textarea:focus {
     position: relative;
 }
 
+.pages-filter-dropdown {
+    position: relative;
+}
+
+.pages-filter-toggle {
+    min-height: 44px;
+    width: 220px;
+    justify-content: space-between;
+}
+
+.pages-filter-menu {
+    position: absolute;
+    top: calc(100% + 6px);
+    right: 0;
+    z-index: 12;
+    min-width: 220px;
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius-sm);
+    background: var(--color-bg-base);
+    box-shadow: var(--shadow-md);
+    padding: 4px;
+}
+
+.pages-filter-option {
+    width: 100%;
+    border: none;
+    background: transparent;
+    border-radius: var(--radius-sm);
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 6px 8px;
+    cursor: pointer;
+    color: var(--color-text-primary);
+    text-align: left;
+}
+
+.pages-filter-option:hover {
+    background: var(--color-bg-hover);
+}
+
+.pages-filter-option.active {
+    background: var(--color-primary-light);
+    color: var(--color-primary);
+}
+
 .pages-filter-shell select {
     min-height: 44px;
     padding-left: 34px;
@@ -1034,6 +1080,49 @@ textarea:focus {
     display: flex;
     align-items: center;
     gap: 6px;
+}
+
+.page-url-text-btn {
+    border: none;
+    background: transparent;
+    padding: 0;
+    color: var(--color-text-primary);
+    cursor: copy;
+    text-align: left;
+    font-weight: 500;
+    max-width: 100%;
+    display: -webkit-box;
+    -webkit-box-orient: vertical;
+    -webkit-line-clamp: 2;
+    overflow: hidden;
+}
+
+.page-url-text-btn:hover {
+    color: var(--color-primary);
+    text-decoration: underline;
+}
+
+.page-url-detail-btn {
+    border: none;
+    background: transparent;
+    cursor: copy;
+    color: var(--color-text-primary);
+    font-family: inherit;
+    font-size: inherit;
+    text-align: left;
+    padding: 0;
+    overflow-wrap: anywhere;
+}
+
+.page-url-detail-btn:hover {
+    color: var(--color-primary);
+    text-decoration: underline;
+}
+
+.copied-pill {
+    display: inline-block;
+    margin-top: 2px;
+    color: var(--color-success);
 }
 
 .page-url-open-btn {
@@ -1188,5 +1277,9 @@ textarea:focus {
 
     .pages-toolbar-row {
         grid-template-columns: 1fr;
+    }
+
+    .pages-filter-toggle {
+        width: 100%;
     }
 }

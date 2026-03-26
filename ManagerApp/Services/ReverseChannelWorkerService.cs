@@ -921,35 +921,58 @@ public sealed class ReverseChannelWorkerService : IWorkerService
 
     private IEnumerable<string> ResolvePythonCandidates(string repoRoot)
     {
+        var emitted = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        static bool TryAdd(HashSet<string> set, string? candidate)
+        {
+            return !string.IsNullOrWhiteSpace(candidate) && set.Add(candidate);
+        }
+
+        var venvPython = Path.Combine(repoRoot, ".venv", "bin", "python");
+        var hasVenvPython = File.Exists(venvPython);
+        if (hasVenvPython && TryAdd(emitted, venvPython))
+        {
+            yield return venvPython;
+        }
+
         var configured = _configuration["CrawlerApi:PythonExecutable"];
         if (!string.IsNullOrWhiteSpace(configured))
         {
+            string candidate;
             if (Path.IsPathRooted(configured))
             {
-                yield return configured;
+                candidate = configured;
             }
             else
             {
                 var configuredRelative = Path.Combine(repoRoot, configured);
                 if (File.Exists(configuredRelative))
                 {
-                    yield return configuredRelative;
+                    candidate = configuredRelative;
                 }
                 else
                 {
-                    yield return configured;
+                    candidate = configured;
                 }
+            }
+
+            if (TryAdd(emitted, candidate))
+            {
+                yield return candidate;
             }
         }
 
-        var venvPython = Path.Combine(repoRoot, ".venv", "bin", "python");
-        if (File.Exists(venvPython))
+        if (!hasVenvPython)
         {
-            yield return venvPython;
-        }
+            if (TryAdd(emitted, "python3"))
+            {
+                yield return "python3";
+            }
 
-        yield return "python3";
-        yield return "python";
+            if (TryAdd(emitted, "python"))
+            {
+                yield return "python";
+            }
+        }
     }
 
     private string ResolveManagerHttpBaseUrl()
