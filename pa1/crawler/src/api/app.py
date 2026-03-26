@@ -9,14 +9,14 @@ from flask import Flask, jsonify, request
 from flask_httpauth import HTTPTokenAuth
 
 from api.contracts import utc_now_iso
-from api.mock_worker_service import MockWorkerService
+from api.worker_service import DaemonWorkerService
 from api.service_protocol import WorkerControlService
 
 
 def create_app(service: WorkerControlService | None = None) -> Flask:
     """Create and configure Flask app with worker-management routes."""
     app = Flask(__name__)
-    worker_service = service or MockWorkerService()
+    worker_service = service or DaemonWorkerService()
 
     auth = HTTPTokenAuth(scheme="Bearer")
     configured_token = os.getenv("CRAWLER_API_TOKEN", "").strip()
@@ -44,8 +44,7 @@ def create_app(service: WorkerControlService | None = None) -> Flask:
             jsonify(
                 {
                     "ok": True,
-                    "isMock": True,
-                    "source": "mock",
+                    "source": "daemon",
                     "timestampUtc": utc_now_iso(),
                     "data": payload,
                 }
@@ -58,8 +57,7 @@ def create_app(service: WorkerControlService | None = None) -> Flask:
             jsonify(
                 {
                     "ok": False,
-                    "isMock": True,
-                    "source": "mock",
+                    "source": "daemon",
                     "timestampUtc": utc_now_iso(),
                     "error": message,
                 }
@@ -205,7 +203,7 @@ def create_app(service: WorkerControlService | None = None) -> Flask:
         try:
             worker = worker_service.spawn_worker(
                 name=payload.get("name"),
-                mode=str(payload.get("mode", "mock")),
+                mode=str(payload.get("mode", "thread")),
                 seed_url=payload.get("seedUrl"),
                 seed_urls=seed_urls,
                 group_id=payload.get("groupId"),

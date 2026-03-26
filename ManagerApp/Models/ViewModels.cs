@@ -65,7 +65,7 @@ public class PageSearchDto
 
 /// <summary>
 /// View model for worker status and metrics
-/// Currently uses mock data - will be populated from Python API when implemented
+/// Populated from crawler daemon API via manager service layer
 /// </summary>
 public class WorkerViewModel
 {

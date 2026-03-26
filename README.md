@@ -128,7 +128,7 @@ Optional environment variables:
 - `CRAWLER_API_DEBUG` (`true/false`, default `false`)
 - `CRAWLER_API_TOKEN` (if set, Bearer auth is required)
 
-The current implementation is mock-backed and marks responses with `isMock: true` and `source: "mock"` so the manager UI can clearly distinguish scaffold data from real crawler-backed data.
+The current implementation is daemon-backed and returns `source: "daemon"` in API envelopes.
 
 Typical flow:
 

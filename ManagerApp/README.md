@@ -6,7 +6,7 @@ This app provides:
 - Dashboard statistics from PostgreSQL (`crawldb`)
 - Page search and detail views
 - Link graph visualization (D3 via JS interop)
-- Worker monitoring controls (currently mock-backed)
+- Worker monitoring controls backed by crawler daemon API
 - SignalR hub endpoint for live updates (`/crawlerhub`)
 
 ## Tech Stack
@@ -103,7 +103,7 @@ The hub supports broadcasts for:
 ## Current Functional Status
 
 - DB-backed statistics/pages/graph services: implemented
-- Worker service: mock implementation (API integration pending)
+- Worker service: daemon API integration implemented
 - Graph page: interactive rendering via `wwwroot/js/graph.js`
 
 ## Troubleshooting

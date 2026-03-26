@@ -7,12 +7,12 @@ import threading
 import time
 
 from api.app import create_app
-from api.mock_worker_service import MockWorkerService
+from api.worker_service import DaemonWorkerService
 from api.reverse_channel import ReverseChannelClient, build_reverse_channel_url_from_env
 
 
 def main() -> int:
-    service = MockWorkerService()
+    service = DaemonWorkerService()
     app = create_app(service)
 
     host = os.getenv("CRAWLER_API_HOST", "127.0.0.1")
@@ -72,7 +72,7 @@ def _start_parent_watchdog_if_configured() -> None:
     threading.Thread(target=watch, daemon=True, name="daemon-parent-watchdog").start()
 
 
-def _handle_reverse_command(service: MockWorkerService, payload: dict[str, object]) -> tuple[bool, str | None]:
+def _handle_reverse_command(service: DaemonWorkerService, payload: dict[str, object]) -> tuple[bool, str | None]:
     command = str(payload.get("command", "")).strip().lower()
     worker_id_raw = payload.get("workerId")
     nested_payload = payload.get("payload")

@@ -50,9 +50,8 @@
                     }
                 </select>
                 <select @bind="SpawnMode">
-                    <option value="mock">Mock</option>
-                    <option value="local">Local Process</option>
                     <option value="thread">OS Thread</option>
+                    <option value="local">Local Process</option>
                 </select>
             </div>
             <div class="flex items-center gap-sm">
@@ -237,7 +236,7 @@
     private string SearchTerm { get; set; } = "";
     private string StatusFilter { get; set; } = "ALL";
     private int SpawnGroupId { get; set; } = 1;
-    private string SpawnMode { get; set; } = "mock";
+    private string SpawnMode { get; set; } = "thread";
     private string SpawnWorkerName { get; set; } = "";
     private string SpawnSeedUrlsText { get; set; } = "";
 

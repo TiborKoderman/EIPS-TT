@@ -1,8 +1,7 @@
-"""Mock worker-control service for API development and UI integration."""
+"""Daemon worker-control service with real queue and telemetry behavior."""
 
 from __future__ import annotations
 
-import random
 import subprocess
 import sys
 import threading
@@ -57,8 +56,8 @@ def _coerce_bool(value: object, default: bool) -> bool:
     return default
 
 
-class MockWorkerService(WorkerControlService):
-    """In-memory worker manager with optional local process spawning."""
+class DaemonWorkerService(WorkerControlService):
+    """Daemon worker manager with API-driven orchestration and telemetry."""
 
     def __init__(self) -> None:
         self._lock = threading.Lock()
@@ -123,7 +122,7 @@ class MockWorkerService(WorkerControlService):
         self._manager_event_url = os.getenv("MANAGER_EVENT_API_URL", "").strip() or None
         self._manager_api_token = os.getenv("MANAGER_INGEST_API_TOKEN", "").strip() or None
         self._allow_daemon_db_fallback = os.getenv(
-            "CRAWLER_DAEMON_ALLOW_DB_FALLBACK", "false"
+            "CRAWLER_DAEMON_ALLOW_DB_FALLBACK", "true"
         ).strip().lower() in {"1", "true", "yes", "on"}
 
         for worker in self._workers.values():
@@ -280,9 +279,9 @@ class MockWorkerService(WorkerControlService):
         seed_urls: list[str] | None,
         group_id: int | None,
     ) -> WorkerRecord:
-        requested_mode = (mode or "mock").strip().lower()
-        if requested_mode not in {"mock", "local", "thread"}:
-            requested_mode = "mock"
+        requested_mode = (mode or "thread").strip().lower()
+        if requested_mode not in {"local", "thread"}:
+            requested_mode = "thread"
 
         normalized_seed_urls = [url.strip() for url in (seed_urls or []) if url and url.strip()]
         if not normalized_seed_urls:
@@ -373,7 +372,7 @@ class MockWorkerService(WorkerControlService):
         return {
             "reloadedWorkers": reloaded,
             "timestampUtc": utc_now_iso(),
-            "note": "Mock reload applied. Active workers were reset to Idle.",
+            "note": "Reload applied. Active workers were reset to Idle.",
         }
 
     def get_worker_logs(self, worker_id: int, limit: int = 50) -> list[WorkerLogEntry]:
@@ -741,8 +740,7 @@ class MockWorkerService(WorkerControlService):
                 "statusCounts": dict(status_counts),
                 "totalPagesProcessed": total_pages,
                 "activeProcesses": len(self._local_processes),
-                "isMock": True,
-                "source": "mock",
+                "source": "daemon",
                 "parallelismModel": {
                     "instanceLevel": "single-daemon",
                     "workerLevel": "multi-worker",
@@ -793,15 +791,6 @@ class MockWorkerService(WorkerControlService):
             self._enqueue_frontier_url(seed_url)
 
         def run() -> None:
-            sample_urls = [
-                "https://example.com/thread/news",
-                "https://example.com/thread/about",
-                "https://gov.si/thread",
-                "https://e-uprava.gov.si/thread",
-            ]
-            if seed_url:
-                sample_urls.insert(0, seed_url)
-
             while not stop_event.is_set():
                 time.sleep(1.2)
                 with self._lock:
@@ -809,14 +798,12 @@ class MockWorkerService(WorkerControlService):
                     if current is None or current.status != "Active":
                         continue
                     lease = self._claim_next_frontier_url(worker_id)
+                    if lease is None:
+                        continue
                     current.pages_processed += 1
-                    current.current_url = lease.url if lease is not None else random.choice(sample_urls)
+                    current.current_url = lease.url
                     self._report_page_to_manager(current, current.current_url)
-                    if lease is not None:
-                        self._complete_frontier_claim(worker_id, lease.url, lease.token, "completed")
-                    if random.random() < 0.05:
-                        current.error_count += 1
-                        self._append_log(worker_id, "Warning", "Thread worker fetch retry scheduled.")
+                    self._complete_frontier_claim(worker_id, lease.url, lease.token, "completed")
 
         thread = threading.Thread(target=run, daemon=True, name=f"worker-thread-{worker_id}")
         self._thread_workers[worker_id] = (thread, stop_event)
@@ -850,40 +837,9 @@ class MockWorkerService(WorkerControlService):
         )
 
     def _simulation_loop(self) -> None:
-        sample_urls = [
-            "https://example.com/news",
-            "https://example.com/about",
-            "https://example.com/contact",
-            "https://gov.si/novice",
-            "https://e-uprava.gov.si/",
-        ]
         while True:
             time.sleep(1.5)
             with self._lock:
-                for worker in self._workers.values():
-                    if worker.status != "Active":
-                        continue
-                    if worker.mode == "thread":
-                        continue
-
-                    lease = self._claim_next_frontier_url(worker.id)
-                    worker.pages_processed += 1
-                    worker.current_url = lease.url if lease is not None else random.choice(sample_urls)
-                    self._report_page_to_manager(worker, worker.current_url)
-                    if lease is not None:
-                        self._complete_frontier_claim(worker.id, lease.url, lease.token, "completed")
-
-                    if random.random() < 0.03:
-                        worker.error_count += 1
-                        self._append_log(worker.id, "Warning", "Transient fetch failure, retry scheduled.")
-
-                    if random.random() < 0.12:
-                        self._append_log(
-                            worker.id,
-                            "Info",
-                            f"Fetched {worker.current_url} (pages={worker.pages_processed}).",
-                        )
-
                 for worker_id, process in list(self._local_processes.items()):
                     if process.poll() is not None:
                         worker = self._workers.get(worker_id)

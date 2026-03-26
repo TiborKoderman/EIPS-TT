@@ -24,9 +24,4 @@ public interface IGraphService
     /// Get incoming link counts for all pages (used for node sizing)
     /// </summary>
     Task<Dictionary<int, int>> GetIncomingLinkCountsAsync();
-
-    /// <summary>
-    /// Insert temporary mock pages and links for graph development.
-    /// </summary>
-    Task<int> AddMockGraphDataAsync(int nodeCount = 60);
 }

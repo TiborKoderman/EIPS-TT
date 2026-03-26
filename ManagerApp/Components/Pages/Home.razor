@@ -131,10 +131,6 @@
                 <div class="card-header-inline mb-md">
                     <h2 class="card-title mb-0">Node Graph Preview</h2>
                     <div class="flex items-center gap-sm">
-                        <button class="btn btn-sm" @onclick="AddMockGraphData">
-                            <span class="mdi mdi-database-plus-outline"></span>
-                            Add Mock Data
-                        </button>
                         <a href="/graph" class="btn btn-primary btn-sm">
                             <span class="mdi mdi-open-in-new"></span>
                             Full View
@@ -227,21 +223,6 @@
         finally
         {
             isGraphLoading = false;
-        }
-    }
-
-    private async Task AddMockGraphData()
-    {
-        try
-        {
-            await GraphService.AddMockGraphDataAsync(120);
-            await LoadGraphPreviewAsync();
-            stats = await StatisticsService.GetStatisticsAsync();
-            lastDashboardUpdateUtc = DateTime.UtcNow;
-        }
-        catch (Exception ex)
-        {
-            graphError = $"Unable to add mock graph data: {ex.Message}";
         }
     }
 

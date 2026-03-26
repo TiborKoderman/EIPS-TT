@@ -109,7 +109,7 @@ public class WorkerService : IWorkerService
         var payload = new
         {
             name,
-            mode = string.IsNullOrWhiteSpace(mode) ? "mock" : mode,
+            mode = string.IsNullOrWhiteSpace(mode) ? "thread" : mode,
             groupId = daemonGroupId,
             seedUrl = normalizedSeedUrls.FirstOrDefault(),
             seedUrls = normalizedSeedUrls,

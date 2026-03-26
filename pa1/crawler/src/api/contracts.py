@@ -37,7 +37,7 @@ class WorkerRecord:
     pages_processed: int = 0
     error_count: int = 0
     started_at: str | None = None
-    mode: str = "mock"
+    mode: str = "thread"
     pid: int | None = None
     runtime_config: dict[str, str] = field(default_factory=dict)
 
