@@ -280,8 +280,20 @@ public class WorkerService : IWorkerService
     {
         var workers = await GetAllWorkersAsync();
         return workers
-            .GroupBy(w => w.Status)
+            .Where(w => !string.IsNullOrWhiteSpace(w.Status))
+            .GroupBy(w => NormalizeStatus(w.Status))
             .ToDictionary(g => g.Key, g => g.Count());
+    }
+
+    private static string NormalizeStatus(string? status)
+    {
+        if (string.IsNullOrWhiteSpace(status))
+        {
+            return "Unknown";
+        }
+
+        var normalized = status.Trim();
+        return char.ToUpperInvariant(normalized[0]) + normalized[1..].ToLowerInvariant();
     }
 
     public async Task<WorkerDetailViewModel?> GetWorkerDetailAsync(int id)

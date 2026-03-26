@@ -140,6 +140,19 @@
                                     <span class="badge badge-error">@CountByStatus(daemonWorkers, "Error") errors</span>
                                 </div>
                             </button>
+                            @if (daemonWorkers.Count > 0)
+                            {
+                                <div class="flex items-center gap-sm">
+                                    <button class="btn btn-sm" @onclick="() => StartAllInDaemon(daemon)" type="button" title="Start all workers in this daemon">
+                                        <span class="mdi mdi-play"></span>
+                                        Start All
+                                    </button>
+                                    <button class="btn btn-sm" @onclick="() => StopAllInDaemon(daemon)" type="button" title="Stop all workers in this daemon">
+                                        <span class="mdi mdi-stop"></span>
+                                        Stop All
+                                    </button>
+                                </div>
+                            }
                             @if (daemon.Id > 0)
                             {
                                 <a class="btn btn-icon daemon-gear"
@@ -338,6 +351,56 @@
     private async Task Stop(int id)
     {
         await WorkerService.StopWorkerAsync(id);
+        await RefreshAsync();
+    }
+
+    private async Task StartAllInDaemon(WorkerGroupSettingsViewModel daemon)
+    {
+        var targets = GetFilteredWorkersForDaemon(daemon)
+            .Where(worker => !string.Equals(worker.Status, "Active", StringComparison.OrdinalIgnoreCase))
+            .ToList();
+
+        if (targets.Count == 0)
+        {
+            actionStatus = $"{daemon.Name}: no workers needed start.";
+            return;
+        }
+
+        var success = 0;
+        foreach (var worker in targets)
+        {
+            if (await WorkerService.StartWorkerAsync(worker.Id))
+            {
+                success++;
+            }
+        }
+
+        actionStatus = $"{daemon.Name}: started {success}/{targets.Count} workers.";
+        await RefreshAsync();
+    }
+
+    private async Task StopAllInDaemon(WorkerGroupSettingsViewModel daemon)
+    {
+        var targets = GetFilteredWorkersForDaemon(daemon)
+            .Where(worker => !string.Equals(worker.Status, "Stopped", StringComparison.OrdinalIgnoreCase))
+            .ToList();
+
+        if (targets.Count == 0)
+        {
+            actionStatus = $"{daemon.Name}: no workers needed stop.";
+            return;
+        }
+
+        var success = 0;
+        foreach (var worker in targets)
+        {
+            if (await WorkerService.StopWorkerAsync(worker.Id))
+            {
+                success++;
+            }
+        }
+
+        actionStatus = $"{daemon.Name}: stopped {success}/{targets.Count} workers.";
         await RefreshAsync();
     }
 

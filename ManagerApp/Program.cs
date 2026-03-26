@@ -23,6 +23,7 @@ builder.Services.AddScoped<IStatisticsService, StatisticsService>();
 builder.Services.AddScoped<IGraphService, GraphService>();
 builder.Services.AddScoped<IPageService, PageService>();
 builder.Services.AddSingleton<DaemonChannelService>();
+builder.Services.AddScoped<CrawlerRelayService>();
 builder.Services.AddHostedService<LocalDaemonHostedService>();
 builder.Services.AddHostedService<CommandDispatchHostedService>();
 builder.Services.AddHttpClient<IWorkerService, WorkerService>((sp, client) =>
@@ -68,6 +69,32 @@ app.MapHub<CrawlerHub>("/crawlerhub");
 app.Map("/api/daemon-channel", async (HttpContext context, DaemonChannelService daemonChannel) =>
 {
     await daemonChannel.HandleSocketAsync(context);
+});
+
+app.MapPost("/api/crawler/ingest", async (
+    CrawlerIngestRequest request,
+    CrawlerRelayService relay,
+    CancellationToken cancellationToken) =>
+{
+    var result = await relay.IngestAsync(request, cancellationToken);
+    return Results.Ok(new
+    {
+        ok = true,
+        data = new
+        {
+            pageId = result.PageId,
+            status = result.Status,
+            canonicalUrl = result.CanonicalUrl,
+            duplicateOfPageId = result.DuplicateOfPageId,
+            contentHash = result.ContentHash,
+        }
+    });
+});
+
+app.MapPost("/api/crawler/events", async (CrawlerEventMessage message, CrawlerRelayService relay) =>
+{
+    await relay.IngestEventAsync(message);
+    return Results.Ok(new { ok = true });
 });
 
 app.Run();

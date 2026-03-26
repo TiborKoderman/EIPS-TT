@@ -277,8 +277,8 @@
 
         try
         {
-            workerStatusCounts = await WorkerService.GetWorkerStatusCountsAsync();
             workers = await WorkerService.GetAllWorkersAsync();
+            workerStatusCounts = BuildStatusCounts(workers);
             lastDashboardUpdateUtc = DateTime.UtcNow;
         }
         catch (Exception ex)
@@ -314,6 +314,32 @@
             "paused" => "badge-warning",
             _ => "badge-info"
         };
+    }
+
+    private static Dictionary<string, int> BuildStatusCounts(IEnumerable<WorkerViewModel> source)
+    {
+        var counts = source
+            .Select(worker => NormalizeStatus(worker.Status))
+            .GroupBy(status => status)
+            .ToDictionary(group => group.Key, group => group.Count(), StringComparer.OrdinalIgnoreCase);
+
+        foreach (var status in DashboardStatuses)
+        {
+            counts.TryAdd(status, 0);
+        }
+
+        return counts;
+    }
+
+    private static string NormalizeStatus(string? status)
+    {
+        if (string.IsNullOrWhiteSpace(status))
+        {
+            return "Unknown";
+        }
+
+        var normalized = status.Trim();
+        return char.ToUpperInvariant(normalized[0]) + normalized[1..].ToLowerInvariant();
     }
 
     private static WorkerActivity GetWorkerActivity(WorkerViewModel worker)

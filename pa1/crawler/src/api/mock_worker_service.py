@@ -7,6 +7,7 @@ import subprocess
 import sys
 import threading
 import time
+from datetime import datetime, timezone
 from collections import defaultdict, deque
 import os
 from pathlib import Path
@@ -94,6 +95,9 @@ class MockWorkerService(WorkerControlService):
 
         self._frontier_relay_url = os.getenv("MANAGER_FRONTIER_INGEST_URL", "").strip() or None
         self._frontier_relay_token = os.getenv("MANAGER_FRONTIER_INGEST_TOKEN", "").strip() or None
+        self._manager_ingest_url = os.getenv("MANAGER_INGEST_API_URL", "").strip() or None
+        self._manager_event_url = os.getenv("MANAGER_EVENT_API_URL", "").strip() or None
+        self._manager_api_token = os.getenv("MANAGER_INGEST_API_TOKEN", "").strip() or None
         self._allow_daemon_db_fallback = os.getenv(
             "CRAWLER_DAEMON_ALLOW_DB_FALLBACK", "false"
         ).strip().lower() in {"1", "true", "yes", "on"}
@@ -140,6 +144,11 @@ class MockWorkerService(WorkerControlService):
                 if worker.status == "Stopped":
                     worker.status = "Idle"
                 self._append_log(worker.id, "Info", "Daemon started.")
+                self._emit_manager_event(
+                    "status-change",
+                    worker_id=worker.id,
+                    payload={"status": worker.status, "reason": "daemon-start"},
+                )
             return {
                 "running": True,
                 "alreadyRunning": False,
@@ -163,6 +172,11 @@ class MockWorkerService(WorkerControlService):
                 worker.current_url = None
                 worker.pid = None
                 self._append_log(worker.id, "Info", "Daemon stopped; worker transitioned to Stopped.")
+                self._emit_manager_event(
+                    "status-change",
+                    worker_id=worker.id,
+                    payload={"status": "Stopped", "reason": "daemon-stop"},
+                )
 
             for worker_id in list(self._local_processes):
                 self._terminate_process_if_running(worker_id)
@@ -198,6 +212,7 @@ class MockWorkerService(WorkerControlService):
             worker.status = "Active"
             worker.started_at = utc_now_iso()
             self._append_log(worker_id, "Info", "Worker started via API.")
+            self._emit_manager_event("status-change", worker_id=worker_id, payload={"status": "Active"})
             return True
 
     def pause_worker(self, worker_id: int) -> bool:
@@ -209,6 +224,7 @@ class MockWorkerService(WorkerControlService):
                 return False
             worker.status = "Paused"
             self._append_log(worker_id, "Info", "Worker paused via API.")
+            self._emit_manager_event("status-change", worker_id=worker_id, payload={"status": "Paused"})
             return True
 
     def stop_worker(self, worker_id: int) -> bool:
@@ -221,6 +237,7 @@ class MockWorkerService(WorkerControlService):
             self._terminate_process_if_running(worker_id)
             self._stop_thread_worker(worker_id)
             self._append_log(worker_id, "Info", "Worker stopped via API.")
+            self._emit_manager_event("status-change", worker_id=worker_id, payload={"status": "Stopped"})
             return True
 
     def spawn_worker(
@@ -288,6 +305,17 @@ class MockWorkerService(WorkerControlService):
                 self._launch_local_worker_process(worker_id, effective_seed_url)
             elif requested_mode == "thread":
                 self._launch_thread_worker(worker_id, effective_seed_url)
+
+            self._emit_manager_event(
+                "worker-spawned",
+                worker_id=worker_id,
+                payload={
+                    "name": worker.name,
+                    "mode": worker.mode,
+                    "groupId": target_group_id,
+                    "seedUrl": effective_seed_url,
+                },
+            )
 
             return self._copy_worker(worker)
 
@@ -681,6 +709,7 @@ class MockWorkerService(WorkerControlService):
                     current.pages_processed += 1
                     next_url = self._pop_frontier_url()
                     current.current_url = next_url or random.choice(sample_urls)
+                    self._report_page_to_manager(current, current.current_url)
                     if random.random() < 0.05:
                         current.error_count += 1
                         self._append_log(worker_id, "Warning", "Thread worker fetch retry scheduled.")
@@ -710,6 +739,11 @@ class MockWorkerService(WorkerControlService):
         self._logs[worker_id].append(
             WorkerLogEntry(timestamp_utc=utc_now_iso(), level=level, message=message)
         )
+        self._emit_manager_event(
+            "worker-log",
+            worker_id=worker_id,
+            payload={"level": level, "message": message},
+        )
 
     def _simulation_loop(self) -> None:
         sample_urls = [
@@ -731,6 +765,7 @@ class MockWorkerService(WorkerControlService):
                     worker.pages_processed += 1
                     next_url = self._pop_frontier_url()
                     worker.current_url = next_url or random.choice(sample_urls)
+                    self._report_page_to_manager(worker, worker.current_url)
 
                     if random.random() < 0.03:
                         worker.error_count += 1
@@ -771,12 +806,33 @@ class MockWorkerService(WorkerControlService):
         self._known_frontier_urls.add(candidate)
         if should_enqueue_local:
             self._frontier_queue.append(candidate)
+        self._emit_manager_event(
+            "queue-change",
+            payload={
+                "action": "enqueue",
+                "url": candidate,
+                "queueMode": queue_mode,
+                "inMemoryQueued": len(self._frontier_queue),
+                "knownUrls": len(self._known_frontier_urls),
+                "relayed": relayed,
+            },
+        )
         return True
 
     def _pop_frontier_url(self) -> str | None:
         if not self._frontier_queue:
             return None
-        return self._frontier_queue.popleft()
+        value = self._frontier_queue.popleft()
+        self._emit_manager_event(
+            "queue-change",
+            payload={
+                "action": "dequeue",
+                "url": value,
+                "inMemoryQueued": len(self._frontier_queue),
+                "knownUrls": len(self._known_frontier_urls),
+            },
+        )
+        return value
 
     def _relay_frontier_seed(self, url: str) -> bool:
         if self._frontier_relay_url is None:
@@ -796,6 +852,69 @@ class MockWorkerService(WorkerControlService):
                 return True
         except (error.URLError, TimeoutError, OSError) as exc:
             self._append_log(1, "Warning", f"Frontier relay failed, using daemon-local queue: {exc}")
+            return False
+
+    def _report_page_to_manager(self, worker: WorkerRecord, url: str | None) -> None:
+        if self._manager_ingest_url is None or not url:
+            return
+
+        payload = {
+            "rawUrl": url,
+            "siteId": None,
+            "sourcePageId": None,
+            "downloadResult": {
+                "requestedUrl": url,
+                "finalUrl": url,
+                "statusCode": 200,
+                "contentType": "text/html",
+                "dataTypeCode": None,
+                "pageTypeCode": "HTML",
+                "htmlContent": f"<html><body><h1>{worker.name}</h1><p>{url}</p></body></html>",
+                "usedRenderer": False,
+                "contentLength": None,
+            },
+        }
+
+        self._post_manager_json(self._manager_ingest_url, payload)
+        self._emit_manager_event(
+            "page-reported",
+            worker_id=worker.id,
+            payload={
+                "url": url,
+                "pagesProcessed": worker.pages_processed,
+                "status": worker.status,
+                "reportedAt": datetime.now(timezone.utc).isoformat(),
+            },
+        )
+
+    def _emit_manager_event(self, event_type: str, worker_id: int | None = None, payload: object | None = None) -> None:
+        if self._manager_event_url is None:
+            return
+
+        self._post_manager_json(
+            self._manager_event_url,
+            {
+                "type": event_type,
+                "daemonId": "local-default",
+                "workerId": worker_id,
+                "payload": payload,
+            },
+        )
+
+    def _post_manager_json(self, url: str, payload: object) -> bool:
+        data = json.dumps(payload).encode("utf-8")
+        headers = {
+            "Content-Type": "application/json",
+            "Accept": "application/json",
+        }
+        if self._manager_api_token:
+            headers["Authorization"] = f"Bearer {self._manager_api_token}"
+
+        req = request.Request(url, data=data, headers=headers, method="POST")
+        try:
+            with request.urlopen(req, timeout=2.5):
+                return True
+        except (error.URLError, TimeoutError, OSError):
             return False
 
     @staticmethod

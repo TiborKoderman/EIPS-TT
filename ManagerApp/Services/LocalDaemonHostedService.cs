@@ -66,11 +66,12 @@ public sealed class LocalDaemonHostedService : IHostedService
 
         var managerDir = Directory.GetCurrentDirectory();
         var repoRoot = Path.GetFullPath(Path.Combine(managerDir, ".."));
-        var wsUrl = ResolveManagerSocketUrl();
+        var managerHttpBaseUrl = ResolveManagerHttpBaseUrl();
+        var wsUrl = ResolveManagerSocketUrl(managerHttpBaseUrl);
 
         foreach (var pythonExe in ResolvePythonCandidates(repoRoot))
         {
-            if (TryStartDaemonProcess(pythonExe, daemonArgs, repoRoot, wsUrl))
+            if (TryStartDaemonProcess(pythonExe, daemonArgs, repoRoot, wsUrl, managerHttpBaseUrl))
             {
                 var ready = await WaitForApiReadyAsync(baseUrl, cancellationToken);
                 if (ready)
@@ -98,7 +99,7 @@ public sealed class LocalDaemonHostedService : IHostedService
         _logger.LogWarning("Failed to start local crawler daemon process with all configured Python candidates.");
     }
 
-    private bool TryStartDaemonProcess(string pythonExe, string daemonArgs, string repoRoot, string wsUrl)
+    private bool TryStartDaemonProcess(string pythonExe, string daemonArgs, string repoRoot, string wsUrl, string managerHttpBaseUrl)
     {
         try
         {
@@ -112,6 +113,8 @@ public sealed class LocalDaemonHostedService : IHostedService
                 RedirectStandardError = true,
             };
             startInfo.Environment["MANAGER_DAEMON_WS_URL"] = wsUrl;
+            startInfo.Environment["MANAGER_INGEST_API_URL"] = managerHttpBaseUrl.TrimEnd('/') + "/api/crawler/ingest";
+            startInfo.Environment["MANAGER_EVENT_API_URL"] = managerHttpBaseUrl.TrimEnd('/') + "/api/crawler/events";
             startInfo.Environment["MANAGER_PARENT_PID"] = Environment.ProcessId.ToString();
 
             _process = new Process
@@ -186,31 +189,64 @@ public sealed class LocalDaemonHostedService : IHostedService
         yield return "python";
     }
 
-    private string ResolveManagerSocketUrl()
+    private string ResolveManagerHttpBaseUrl()
     {
+        var configuredHttp = _configuration["CrawlerApi:ManagerBaseUrl"];
+        if (!string.IsNullOrWhiteSpace(configuredHttp))
+        {
+            return configuredHttp.TrimEnd('/');
+        }
+
         var configured = _configuration["CrawlerApi:ManagerSocketUrl"];
         if (!string.IsNullOrWhiteSpace(configured))
         {
-            return configured;
+            if (configured.StartsWith("ws://", StringComparison.OrdinalIgnoreCase))
+            {
+                return "http://" + configured[5..].TrimEnd('/').Replace("/api/daemon-channel", string.Empty);
+            }
+
+            if (configured.StartsWith("wss://", StringComparison.OrdinalIgnoreCase))
+            {
+                return "https://" + configured[6..].TrimEnd('/').Replace("/api/daemon-channel", string.Empty);
+            }
         }
 
         var urls = Environment.GetEnvironmentVariable("ASPNETCORE_URLS");
         if (!string.IsNullOrWhiteSpace(urls))
         {
-            var first = urls.Split(';', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
-                .FirstOrDefault();
-            if (!string.IsNullOrWhiteSpace(first))
+            var candidates = urls.Split(';', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+            var httpUrl = candidates.FirstOrDefault(u => u.StartsWith("http://", StringComparison.OrdinalIgnoreCase));
+            if (!string.IsNullOrWhiteSpace(httpUrl))
             {
-                if (first.StartsWith("https://", StringComparison.OrdinalIgnoreCase))
-                {
-                    return "wss://" + first[8..].TrimEnd('/') + "/api/daemon-channel?daemonId=local-default";
-                }
-
-                if (first.StartsWith("http://", StringComparison.OrdinalIgnoreCase))
-                {
-                    return "ws://" + first[7..].TrimEnd('/') + "/api/daemon-channel?daemonId=local-default";
-                }
+                return httpUrl.TrimEnd('/');
             }
+
+            var httpsUrl = candidates.FirstOrDefault(u => u.StartsWith("https://", StringComparison.OrdinalIgnoreCase));
+            if (!string.IsNullOrWhiteSpace(httpsUrl))
+            {
+                return httpsUrl.TrimEnd('/');
+            }
+        }
+
+        return "http://127.0.0.1:5160";
+    }
+
+    private string ResolveManagerSocketUrl(string managerHttpBaseUrl)
+    {
+        var configuredSocket = _configuration["CrawlerApi:ManagerSocketUrl"];
+        if (!string.IsNullOrWhiteSpace(configuredSocket))
+        {
+            return configuredSocket;
+        }
+
+        if (managerHttpBaseUrl.StartsWith("https://", StringComparison.OrdinalIgnoreCase))
+        {
+            return "wss://" + managerHttpBaseUrl[8..].TrimEnd('/') + "/api/daemon-channel?daemonId=local-default";
+        }
+
+        if (managerHttpBaseUrl.StartsWith("http://", StringComparison.OrdinalIgnoreCase))
+        {
+            return "ws://" + managerHttpBaseUrl[7..].TrimEnd('/') + "/api/daemon-channel?daemonId=local-default";
         }
 
         return "ws://127.0.0.1:5160/api/daemon-channel?daemonId=local-default";
