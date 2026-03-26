@@ -9,6 +9,11 @@ namespace ManagerApp.Services;
 public interface IWorkerService
 {
     /// <summary>
+    /// Last API error captured by worker service calls.
+    /// </summary>
+    string? LastError { get; }
+
+    /// <summary>
     /// Get current daemon status.
     /// </summary>
     Task<DaemonStatusViewModel?> GetDaemonStatusAsync();

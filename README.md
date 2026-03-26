@@ -118,6 +118,42 @@ Typical flow:
 5. Manager reads status/logs/statistics endpoints
 6. `POST /api/daemon/reload` or `POST /api/daemon/stop` as needed
 
+### Manager-controlled local daemon (default)
+
+`ManagerApp` can auto-start a local daemon process on app startup and terminate it on app shutdown.
+This is enabled by default for local development when `CrawlerApi:BaseUrl` points to localhost.
+
+Relevant `ManagerApp` settings:
+
+- `CrawlerApi:AutoStartLocalDaemon` (default `true`)
+- `CrawlerApi:LauncherMode` (`Process` or `Docker`)
+- `CrawlerApi:PythonExecutable`
+- `CrawlerApi:LocalDaemonArgs`
+- `CrawlerApi:DockerStartCommand`
+- `CrawlerApi:DockerStopCommand`
+
+### Reverse socket channel (no daemon-side port forwarding)
+
+Daemons can establish an outbound websocket connection to the manager server:
+
+- Manager endpoint: `/api/daemon-channel`
+- Daemon env var: `MANAGER_DAEMON_WS_URL=ws://<manager-host>/api/daemon-channel?daemonId=<id>`
+
+Because the daemon initiates the connection, the daemon host does not need inbound port forwarding.
+The manager/server side still needs to be reachable.
+
+### Command dispatch path
+
+Manager command actions (`start/pause/stop/reload`) are written to `manager.command` as queued rows.
+A background dispatcher in `ManagerApp` sends queued commands over websocket to connected daemons, then marks them as dispatched.
+
+Control flow:
+
+1. UI/API action inserts queued command in `manager.command`
+2. `CommandDispatchHostedService` polls queue
+3. `DaemonChannelService` pushes command over `/api/daemon-channel`
+4. Daemon executes command and reports via heartbeat/status APIs
+
 ## Optional Devcontainer Notes
 
 See `.devcontainer/NOTE.md`.

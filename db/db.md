@@ -15,6 +15,10 @@ What it does:
 - applies `0_initial_crawldb.sql` when needed
 - applies numbered migrations like `01_*.sql`
 
+Current migration highlights:
+- `01_canonical_urls_and_hashes.sql`: canonical URL + dedup support for crawler pages
+- `02_manager_control_plane.sql`: creates `manager` schema with daemon/worker/settings/token/command tables used by the manager control plane
+
 To save dependency updates back to `requirements.txt`:
 
 ```bash

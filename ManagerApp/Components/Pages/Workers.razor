@@ -150,6 +150,11 @@
     {
         daemonStatus = await WorkerService.GetDaemonStatusAsync();
         workerItems = await WorkerService.GetAllWorkersAsync();
+
+        if (daemonStatus == null && !string.IsNullOrWhiteSpace(WorkerService.LastError))
+        {
+            actionStatus = $"Daemon API unavailable: {WorkerService.LastError} Run: python pa1/crawler/src/main.py --run-api";
+        }
     }
 
     private async Task Start(int id)
@@ -180,7 +185,7 @@
 
         var spawned = await WorkerService.SpawnWorkerAsync();
         actionStatus = spawned == null
-            ? "Failed to spawn worker."
+            ? $"Failed to spawn worker. {WorkerService.LastError}"
             : $"Spawned {spawned.Name}.";
         await RefreshAsync();
     }
@@ -190,12 +195,14 @@
         if (daemonStatus?.Running == true)
         {
             var ok = await WorkerService.StopDaemonAsync();
-            actionStatus = ok ? "Daemon stopped." : "Failed to stop daemon.";
+            actionStatus = ok ? "Daemon stopped." : $"Failed to stop daemon. {WorkerService.LastError}";
         }
         else
         {
             var ok = await WorkerService.StartDaemonAsync();
-            actionStatus = ok ? "Daemon started." : "Failed to start daemon.";
+            actionStatus = ok
+                ? "Daemon started."
+                : $"Failed to start daemon. {WorkerService.LastError ?? "Ensure crawler API server is running."}";
         }
 
         await RefreshAsync();
@@ -204,7 +211,7 @@
     private async Task ReloadDaemon()
     {
         var ok = await WorkerService.ReloadDaemonAsync();
-        actionStatus = ok ? "Daemon reloaded." : "Failed to reload daemon.";
+        actionStatus = ok ? "Daemon reloaded." : $"Failed to reload daemon. {WorkerService.LastError}";
         await RefreshAsync();
     }
 

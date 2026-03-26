@@ -22,6 +22,9 @@ builder.Services.AddScoped(sp =>
 builder.Services.AddScoped<IStatisticsService, StatisticsService>();
 builder.Services.AddScoped<IGraphService, GraphService>();
 builder.Services.AddScoped<IPageService, PageService>();
+builder.Services.AddSingleton<DaemonChannelService>();
+builder.Services.AddHostedService<LocalDaemonHostedService>();
+builder.Services.AddHostedService<CommandDispatchHostedService>();
 builder.Services.AddHttpClient<IWorkerService, WorkerService>((sp, client) =>
 {
     var configuration = sp.GetRequiredService<IConfiguration>();
@@ -48,7 +51,11 @@ if (!app.Environment.IsDevelopment())
     app.UseHsts();
 }
 app.UseStatusCodePagesWithReExecute("/not-found", createScopeForStatusCodePages: true);
-app.UseHttpsRedirection();
+if (!app.Environment.IsDevelopment())
+{
+    app.UseHttpsRedirection();
+}
+app.UseWebSockets();
 
 app.UseAntiforgery();
 
@@ -58,5 +65,9 @@ app.MapRazorComponents<App>()
 
 // Map SignalR hub for real-time updates
 app.MapHub<CrawlerHub>("/crawlerhub");
+app.Map("/api/daemon-channel", async (HttpContext context, DaemonChannelService daemonChannel) =>
+{
+    await daemonChannel.HandleSocketAsync(context);
+});
 
 app.Run();
