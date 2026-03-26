@@ -110,6 +110,23 @@ public class WorkerGlobalConfigViewModel
     public bool RespectRobotsTxt { get; set; } = true;
     public string UserAgent { get; set; } = "EIPS-TT-Crawler/1.0";
     public string SeedUrlsText { get; set; } = "";
+    public List<SeedEntryViewModel> SeedEntries { get; set; } = new();
+    public string QueueMode { get; set; } = "both";
+    public string StrategyMode { get; set; } = "balanced";
+    public List<string> TopicKeywords { get; set; } = new();
+    public string TopicKeywordsText { get; set; } = "";
+    public int MaxFrontierInMemory { get; set; } = 50000;
+    public bool AvoidDuplicatePathsAcrossDaemons { get; set; } = true;
+}
+
+/// <summary>
+/// Seed URL configuration item.
+/// </summary>
+public class SeedEntryViewModel
+{
+    public string Url { get; set; } = "";
+    public bool Enabled { get; set; } = true;
+    public string Label { get; set; } = "";
 }
 
 /// <summary>
@@ -123,6 +140,11 @@ public class WorkerGroupSettingsViewModel
     public bool Enabled { get; set; } = true;
     public int? MaxPagesPerWorker { get; set; }
     public int? RateLimitPerMinute { get; set; }
+    public string? QueueMode { get; set; }
+    public string? StrategyMode { get; set; }
+    public List<string> TopicKeywords { get; set; } = new();
+    public string TopicKeywordsText { get; set; } = "";
+    public bool? AvoidDuplicatePathsAcrossDaemons { get; set; }
     public List<int> WorkerIds { get; set; } = new();
 }
 

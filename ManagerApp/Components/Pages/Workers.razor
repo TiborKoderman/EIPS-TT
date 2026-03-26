@@ -369,6 +369,15 @@
                 .ToList();
         }
 
+        if (seedUrls.Count == 0 && globalConfig?.SeedEntries?.Count > 0)
+        {
+            seedUrls = globalConfig.SeedEntries
+                .Where(entry => entry.Enabled && !string.IsNullOrWhiteSpace(entry.Url))
+                .Select(entry => entry.Url.Trim())
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .ToList();
+        }
+
         var spawned = await WorkerService.SpawnWorkerAsync(
             name: string.IsNullOrWhiteSpace(SpawnWorkerName) ? null : SpawnWorkerName.Trim(),
             daemonGroupId: SpawnGroupId,

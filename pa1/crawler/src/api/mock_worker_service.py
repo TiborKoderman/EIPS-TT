@@ -15,9 +15,11 @@ import json
 
 from api.contracts import (
     GlobalWorkerConfig,
+    SeedEntry,
     WorkerGroupSettings,
     WorkerLogEntry,
     WorkerRecord,
+    default_seed_entries,
     utc_now_iso,
 )
 from api.service_protocol import WorkerControlService
@@ -77,6 +79,10 @@ class MockWorkerService(WorkerControlService):
                 enabled=True,
                 max_pages_per_worker=5000,
                 rate_limit_per_minute=240,
+                queue_mode="both",
+                strategy_mode="balanced",
+                topic_keywords=["medicine", "health", "clinic"],
+                avoid_duplicate_paths_across_daemons=True,
                 worker_ids=[1],
             ),
         }
@@ -231,8 +237,12 @@ class MockWorkerService(WorkerControlService):
             requested_mode = "mock"
 
         normalized_seed_urls = [url.strip() for url in (seed_urls or []) if url and url.strip()]
-        if not normalized_seed_urls and self._global_config.seed_urls:
-            normalized_seed_urls = list(self._global_config.seed_urls)
+        if not normalized_seed_urls:
+            normalized_seed_urls = [
+                entry.url
+                for entry in self._global_config.seed_entries
+                if entry.enabled and entry.url.strip()
+            ]
         effective_seed_url = seed_url
         if not effective_seed_url and normalized_seed_urls:
             effective_seed_url = normalized_seed_urls[0]
@@ -353,10 +363,21 @@ class MockWorkerService(WorkerControlService):
                 crawl_delay_milliseconds=cfg.crawl_delay_milliseconds,
                 respect_robots_txt=cfg.respect_robots_txt,
                 user_agent=cfg.user_agent,
+                seed_urls=list(cfg.seed_urls),
+                seed_entries=[
+                    SeedEntry(url=entry.url, enabled=entry.enabled, label=entry.label)
+                    for entry in cfg.seed_entries
+                ],
+                queue_mode=cfg.queue_mode,
+                strategy_mode=cfg.strategy_mode,
+                topic_keywords=list(cfg.topic_keywords),
+                max_frontier_in_memory=cfg.max_frontier_in_memory,
+                avoid_duplicate_paths_across_daemons=cfg.avoid_duplicate_paths_across_daemons,
             )
 
     def update_global_config(self, payload: dict[str, object]) -> GlobalWorkerConfig:
         seed_urls: list[str] = []
+        seed_entries: list[SeedEntry] = []
         raw_seed_urls = payload.get("seedUrls")
         if isinstance(raw_seed_urls, list) and len(raw_seed_urls) > 0:
             seed_urls = [str(url).strip() for url in raw_seed_urls if str(url).strip()]
@@ -366,6 +387,49 @@ class MockWorkerService(WorkerControlService):
                 for line in str(payload.get("seedUrlsText", "")).splitlines()
                 if line.strip()
             ]
+
+        raw_seed_entries = payload.get("seedEntries")
+        if isinstance(raw_seed_entries, list):
+            for entry in raw_seed_entries:
+                if not isinstance(entry, dict):
+                    continue
+                url = str(entry.get("url", "")).strip()
+                if not url:
+                    continue
+                seed_entries.append(
+                    SeedEntry(
+                        url=url,
+                        enabled=_coerce_bool(entry.get("enabled"), True),
+                        label=str(entry.get("label", "")).strip(),
+                    )
+                )
+
+        if not seed_entries and seed_urls:
+            seed_entries = [SeedEntry(url=url, enabled=True, label="") for url in seed_urls]
+        if not seed_entries:
+            seed_entries = default_seed_entries()
+
+        queue_mode = str(payload.get("queueMode", self._global_config.queue_mode)).strip().lower()
+        if queue_mode not in {"local", "server", "both"}:
+            queue_mode = "both"
+
+        strategy_mode = str(payload.get("strategyMode", self._global_config.strategy_mode)).strip().lower()
+        if strategy_mode not in {"balanced", "coverage", "focused", "freshness"}:
+            strategy_mode = "balanced"
+
+        topic_keywords: list[str] = []
+        raw_topic_keywords = payload.get("topicKeywords")
+        if isinstance(raw_topic_keywords, list):
+            topic_keywords = [str(value).strip() for value in raw_topic_keywords if str(value).strip()]
+        elif "topicKeywordsText" in payload:
+            topic_keywords = [
+                line.strip()
+                for line in str(payload.get("topicKeywordsText", "")).splitlines()
+                if line.strip()
+            ]
+
+        if not topic_keywords:
+            topic_keywords = list(self._global_config.topic_keywords)
 
         with self._lock:
             self._global_config = GlobalWorkerConfig(
@@ -387,6 +451,18 @@ class MockWorkerService(WorkerControlService):
                 ),
                 user_agent=str(payload.get("userAgent", self._global_config.user_agent)),
                 seed_urls=seed_urls,
+                seed_entries=seed_entries,
+                queue_mode=queue_mode,
+                strategy_mode=strategy_mode,
+                topic_keywords=topic_keywords,
+                max_frontier_in_memory=_coerce_int(
+                    payload.get("maxFrontierInMemory"),
+                    self._global_config.max_frontier_in_memory,
+                ),
+                avoid_duplicate_paths_across_daemons=_coerce_bool(
+                    payload.get("avoidDuplicatePathsAcrossDaemons"),
+                    self._global_config.avoid_duplicate_paths_across_daemons,
+                ),
             )
             cfg = self._global_config
             return GlobalWorkerConfig(
@@ -396,6 +472,15 @@ class MockWorkerService(WorkerControlService):
                 respect_robots_txt=cfg.respect_robots_txt,
                 user_agent=cfg.user_agent,
                 seed_urls=list(cfg.seed_urls),
+                seed_entries=[
+                    SeedEntry(url=entry.url, enabled=entry.enabled, label=entry.label)
+                    for entry in cfg.seed_entries
+                ],
+                queue_mode=cfg.queue_mode,
+                strategy_mode=cfg.strategy_mode,
+                topic_keywords=list(cfg.topic_keywords),
+                max_frontier_in_memory=cfg.max_frontier_in_memory,
+                avoid_duplicate_paths_across_daemons=cfg.avoid_duplicate_paths_across_daemons,
             )
 
     def list_groups(self) -> list[WorkerGroupSettings]:
@@ -408,6 +493,10 @@ class MockWorkerService(WorkerControlService):
                     enabled=group.enabled,
                     max_pages_per_worker=group.max_pages_per_worker,
                     rate_limit_per_minute=group.rate_limit_per_minute,
+                    queue_mode=group.queue_mode,
+                    strategy_mode=group.strategy_mode,
+                    topic_keywords=list(group.topic_keywords),
+                    avoid_duplicate_paths_across_daemons=group.avoid_duplicate_paths_across_daemons,
                     worker_ids=list(group.worker_ids),
                 )
                 for group in self._groups.values()
@@ -435,6 +524,33 @@ class MockWorkerService(WorkerControlService):
                     payload["rateLimitPerMinute"],
                     group.rate_limit_per_minute or 0,
                 )
+            if "queueMode" in payload:
+                queue_mode = str(payload["queueMode"]).strip().lower()
+                if queue_mode in {"local", "server", "both"}:
+                    group.queue_mode = queue_mode
+            if "strategyMode" in payload:
+                strategy_mode = str(payload["strategyMode"]).strip().lower()
+                if strategy_mode in {"balanced", "coverage", "focused", "freshness"}:
+                    group.strategy_mode = strategy_mode
+            if "topicKeywords" in payload and isinstance(payload["topicKeywords"], list):
+                group.topic_keywords = [
+                    str(value).strip()
+                    for value in payload["topicKeywords"]
+                    if str(value).strip()
+                ]
+            elif "topicKeywordsText" in payload:
+                group.topic_keywords = [
+                    line.strip()
+                    for line in str(payload["topicKeywordsText"]).splitlines()
+                    if line.strip()
+                ]
+            if "avoidDuplicatePathsAcrossDaemons" in payload:
+                group.avoid_duplicate_paths_across_daemons = _coerce_bool(
+                    payload["avoidDuplicatePathsAcrossDaemons"],
+                    group.avoid_duplicate_paths_across_daemons
+                    if group.avoid_duplicate_paths_across_daemons is not None
+                    else True,
+                )
             if "workerIds" in payload and isinstance(payload["workerIds"], list):
                 group.worker_ids = [int(value) for value in payload["workerIds"]]
 
@@ -445,6 +561,10 @@ class MockWorkerService(WorkerControlService):
                 enabled=group.enabled,
                 max_pages_per_worker=group.max_pages_per_worker,
                 rate_limit_per_minute=group.rate_limit_per_minute,
+                queue_mode=group.queue_mode,
+                strategy_mode=group.strategy_mode,
+                topic_keywords=list(group.topic_keywords),
+                avoid_duplicate_paths_across_daemons=group.avoid_duplicate_paths_across_daemons,
                 worker_ids=list(group.worker_ids),
             )
 
@@ -639,9 +759,18 @@ class MockWorkerService(WorkerControlService):
         if candidate in self._known_frontier_urls:
             return False
 
+        queue_mode = self._global_config.queue_mode
+        relayed = False
+        if queue_mode in {"server", "both"}:
+            relayed = self._relay_frontier_seed(candidate)
+
+        should_enqueue_local = queue_mode in {"local", "both"}
+        if queue_mode == "server" and not relayed and self._allow_daemon_db_fallback:
+            should_enqueue_local = True
+
         self._known_frontier_urls.add(candidate)
-        self._frontier_queue.append(candidate)
-        self._relay_frontier_seed(candidate)
+        if should_enqueue_local:
+            self._frontier_queue.append(candidate)
         return True
 
     def _pop_frontier_url(self) -> str | None:
@@ -649,9 +778,9 @@ class MockWorkerService(WorkerControlService):
             return None
         return self._frontier_queue.popleft()
 
-    def _relay_frontier_seed(self, url: str) -> None:
+    def _relay_frontier_seed(self, url: str) -> bool:
         if self._frontier_relay_url is None:
-            return
+            return False
 
         payload = json.dumps({"url": url, "source": "daemon-frontier"}).encode("utf-8")
         headers = {
@@ -664,9 +793,10 @@ class MockWorkerService(WorkerControlService):
         req = request.Request(self._frontier_relay_url, data=payload, headers=headers, method="POST")
         try:
             with request.urlopen(req, timeout=2.0):
-                return
+                return True
         except (error.URLError, TimeoutError, OSError) as exc:
             self._append_log(1, "Warning", f"Frontier relay failed, using daemon-local queue: {exc}")
+            return False
 
     @staticmethod
     def _copy_worker(worker: WorkerRecord | None) -> WorkerRecord:

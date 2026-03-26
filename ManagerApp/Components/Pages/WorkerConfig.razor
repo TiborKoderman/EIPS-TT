@@ -46,6 +46,27 @@
                     <span class="text-small text-muted">User Agent</span>
                     <input type="text" @bind="config.UserAgent" />
                 </label>
+                <label>
+                    <span class="text-small text-muted">Queue Mode</span>
+                    <select @bind="config.QueueMode">
+                        <option value="local">Local</option>
+                        <option value="server">Server</option>
+                        <option value="both">Both</option>
+                    </select>
+                </label>
+                <label>
+                    <span class="text-small text-muted">Strategy Mode</span>
+                    <select @bind="config.StrategyMode">
+                        <option value="balanced">Balanced</option>
+                        <option value="coverage">Coverage</option>
+                        <option value="focused">Focused</option>
+                        <option value="freshness">Freshness</option>
+                    </select>
+                </label>
+                <label>
+                    <span class="text-small text-muted">Max Frontier In-Memory</span>
+                    <input type="number" min="100" step="100" @bind="config.MaxFrontierInMemory" />
+                </label>
             </div>
 
             <label class="mt-md">
@@ -53,9 +74,66 @@
                 <textarea rows="5" @bind="config.SeedUrlsText"></textarea>
             </label>
 
+            <div class="mt-md">
+                <div class="flex items-center justify-between gap-sm mb-sm">
+                    <span class="text-small text-muted">Seed List (enabled rows are active)</span>
+                    <div class="flex gap-sm">
+                        <button class="btn" type="button" @onclick="AddSeedRow">
+                            <span class="mdi mdi-plus"></span> Add Seed
+                        </button>
+                        <button class="btn" type="button" @onclick="GenerateRecommendedSeeds">
+                            <span class="mdi mdi-lightbulb-on-outline"></span> Generate Sensible Seeds
+                        </button>
+                    </div>
+                </div>
+                @if (config.SeedEntries.Count == 0)
+                {
+                    <p class="text-small text-muted">No seed entries configured.</p>
+                }
+                else
+                {
+                    <div class="list">
+                        @for (var i = 0; i < config.SeedEntries.Count; i++)
+                        {
+                            var seed = config.SeedEntries[i];
+                            var index = i;
+                            <div class="list-item">
+                                <div class="workers-config-grid" style="grid-template-columns: 100px 1fr 1fr 42px;">
+                                    <label class="flex items-center gap-sm" style="margin:0;">
+                                        <input type="checkbox" @bind="seed.Enabled" style="width:auto;" />
+                                        <span>Enabled</span>
+                                    </label>
+                                    <label style="margin:0;">
+                                        <span class="text-small text-muted">URL</span>
+                                        <input type="text" @bind="seed.Url" />
+                                    </label>
+                                    <label style="margin:0;">
+                                        <span class="text-small text-muted">Label</span>
+                                        <input type="text" @bind="seed.Label" />
+                                    </label>
+                                    <button class="btn btn-icon" type="button" title="Remove" aria-label="Remove" @onclick="() => RemoveSeedRow(index)">
+                                        <span class="mdi mdi-delete-outline"></span>
+                                    </button>
+                                </div>
+                            </div>
+                        }
+                    </div>
+                }
+            </div>
+
+            <label class="mt-md">
+                <span class="text-small text-muted">Topic Keywords (one per line)</span>
+                <textarea rows="5" @bind="config.TopicKeywordsText"></textarea>
+            </label>
+
             <label class="mt-md flex items-center gap-sm">
                 <input type="checkbox" @bind="config.RespectRobotsTxt" style="width:auto;" />
                 <span>Respect robots.txt</span>
+            </label>
+
+            <label class="mt-md flex items-center gap-sm">
+                <input type="checkbox" @bind="config.AvoidDuplicatePathsAcrossDaemons" style="width:auto;" />
+                <span>Avoid duplicate paths across daemons</span>
             </label>
 
             <div class="mt-md flex gap-sm">
@@ -75,8 +153,8 @@
                 <span class="mdi mdi-information-outline"></span> Integration note
             </div>
             <ul class="placeholder-note-list">
-                <li>These settings are currently mock-backed in ManagerApp service memory.</li>
-                <li>When Python worker API is available, save/apply will target the shared worker config endpoint.</li>
+                <li>Queue mode controls crawl queue ownership: local daemon queue, server queue, or hybrid.</li>
+                <li>Strategy mode tunes crawler behavior for coverage, freshness, focused crawling, or balanced operation.</li>
             </ul>
         </div>
     }
@@ -90,6 +168,27 @@
     protected override async Task OnInitializedAsync()
     {
         config = await WorkerService.GetGlobalConfigAsync();
+        if (config != null)
+        {
+            if (string.IsNullOrWhiteSpace(config.TopicKeywordsText) && config.TopicKeywords.Count > 0)
+            {
+                config.TopicKeywordsText = string.Join("\n", config.TopicKeywords);
+            }
+
+            if (config.SeedEntries.Count == 0 && !string.IsNullOrWhiteSpace(config.SeedUrlsText))
+            {
+                config.SeedEntries = config.SeedUrlsText
+                    .Split(new[] { '\r', '\n' }, StringSplitOptions.RemoveEmptyEntries)
+                    .Select(url => new SeedEntryViewModel
+                    {
+                        Url = url.Trim(),
+                        Enabled = true,
+                        Label = string.Empty,
+                    })
+                    .Where(entry => !string.IsNullOrWhiteSpace(entry.Url))
+                    .ToList();
+            }
+        }
         isLoading = false;
     }
 
@@ -100,7 +199,88 @@
             return;
         }
 
+        config.SeedEntries = config.SeedEntries
+            .Where(entry => !string.IsNullOrWhiteSpace(entry.Url))
+            .Select(entry => new SeedEntryViewModel
+            {
+                Url = entry.Url.Trim(),
+                Enabled = entry.Enabled,
+                Label = entry.Label?.Trim() ?? "",
+            })
+            .ToList();
+
+        config.SeedUrlsText = string.Join("\n", config.SeedEntries
+            .Where(entry => entry.Enabled)
+            .Select(entry => entry.Url));
+
+        config.TopicKeywords = config.TopicKeywordsText
+            .Split(new[] { '\r', '\n' }, StringSplitOptions.RemoveEmptyEntries)
+            .Select(value => value.Trim())
+            .Where(value => !string.IsNullOrWhiteSpace(value))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToList();
+
+        if (!new[] { "local", "server", "both" }.Contains(config.QueueMode))
+        {
+            config.QueueMode = "both";
+        }
+
+        if (!new[] { "balanced", "coverage", "focused", "freshness" }.Contains(config.StrategyMode))
+        {
+            config.StrategyMode = "balanced";
+        }
+
+        if (config.MaxFrontierInMemory < 100)
+        {
+            config.MaxFrontierInMemory = 100;
+        }
+
         await WorkerService.SaveGlobalConfigAsync(config);
         statusMessage = "Saved";
+    }
+
+    private void AddSeedRow()
+    {
+        if (config == null)
+        {
+            return;
+        }
+
+        config.SeedEntries.Add(new SeedEntryViewModel
+        {
+            Url = "",
+            Enabled = true,
+            Label = "",
+        });
+    }
+
+    private void RemoveSeedRow(int index)
+    {
+        if (config == null || index < 0 || index >= config.SeedEntries.Count)
+        {
+            return;
+        }
+
+        config.SeedEntries.RemoveAt(index);
+    }
+
+    private void GenerateRecommendedSeeds()
+    {
+        if (config == null)
+        {
+            return;
+        }
+
+        config.SeedEntries = new List<SeedEntryViewModel>
+        {
+            new() { Url = "https://www.gov.si/", Enabled = true, Label = "SI Government" },
+            new() { Url = "https://nijz.si/", Enabled = true, Label = "NIJZ Public Health" },
+            new() { Url = "https://www.kclj.si/", Enabled = true, Label = "UKC Ljubljana" },
+            new() { Url = "https://e-uprava.gov.si/", Enabled = true, Label = "eUprava" },
+            new() { Url = "https://www.who.int/", Enabled = false, Label = "WHO" },
+            new() { Url = "https://www.ema.europa.eu/", Enabled = false, Label = "EMA" },
+        };
+
+        config.SeedUrlsText = string.Join("\n", config.SeedEntries.Where(entry => entry.Enabled).Select(entry => entry.Url));
     }
 }

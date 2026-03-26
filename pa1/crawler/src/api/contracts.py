@@ -14,6 +14,18 @@ def utc_now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
+def default_seed_entries() -> list["SeedEntry"]:
+    """Provide sensible initial seeds for local development and crawling tests."""
+    return [
+        SeedEntry(url="https://www.gov.si/", enabled=True, label="SI Government"),
+        SeedEntry(url="https://nijz.si/", enabled=True, label="NIJZ Public Health"),
+        SeedEntry(url="https://zdravljenjenadom.si/", enabled=False, label="Health Info"),
+        SeedEntry(url="https://www.kclj.si/", enabled=True, label="UKC Ljubljana"),
+        SeedEntry(url="https://www.who.int/", enabled=False, label="WHO"),
+        SeedEntry(url="https://www.ema.europa.eu/", enabled=False, label="EMA"),
+    ]
+
+
 @dataclass
 class WorkerRecord:
     """Current worker state exposed to the manager GUI."""
@@ -60,6 +72,22 @@ class WorkerLogEntry:
 
 
 @dataclass
+class SeedEntry:
+    """One seed URL item with enable flag and optional metadata."""
+
+    url: str
+    enabled: bool = True
+    label: str = ""
+
+    def to_view_model(self) -> dict[str, object]:
+        return {
+            "url": self.url,
+            "enabled": self.enabled,
+            "label": self.label,
+        }
+
+
+@dataclass
 class GlobalWorkerConfig:
     """Global runtime settings shared by workers."""
 
@@ -69,16 +97,40 @@ class GlobalWorkerConfig:
     respect_robots_txt: bool = True
     user_agent: str = "EIPS-TT-Crawler/1.0"
     seed_urls: list[str] = field(default_factory=list)
+    seed_entries: list[SeedEntry] = field(default_factory=default_seed_entries)
+    queue_mode: str = "both"
+    strategy_mode: str = "balanced"
+    topic_keywords: list[str] = field(
+        default_factory=lambda: [
+            "medicine",
+            "health",
+            "doctor",
+            "clinic",
+            "hospital",
+            "treatment",
+            "disease",
+        ]
+    )
+    max_frontier_in_memory: int = 50000
+    avoid_duplicate_paths_across_daemons: bool = True
 
     def to_view_model(self) -> dict[str, object]:
+        enabled_seed_urls = [entry.url for entry in self.seed_entries if entry.enabled and entry.url.strip()]
         return {
             "maxConcurrentWorkers": self.max_concurrent_workers,
             "requestTimeoutSeconds": self.request_timeout_seconds,
             "crawlDelayMilliseconds": self.crawl_delay_milliseconds,
             "respectRobotsTxt": self.respect_robots_txt,
             "userAgent": self.user_agent,
-            "seedUrls": list(self.seed_urls),
-            "seedUrlsText": "\n".join(self.seed_urls),
+            "seedUrls": enabled_seed_urls,
+            "seedUrlsText": "\n".join(enabled_seed_urls),
+            "seedEntries": [entry.to_view_model() for entry in self.seed_entries],
+            "queueMode": self.queue_mode,
+            "strategyMode": self.strategy_mode,
+            "topicKeywords": list(self.topic_keywords),
+            "topicKeywordsText": "\n".join(self.topic_keywords),
+            "maxFrontierInMemory": self.max_frontier_in_memory,
+            "avoidDuplicatePathsAcrossDaemons": self.avoid_duplicate_paths_across_daemons,
         }
 
 
@@ -92,6 +144,10 @@ class WorkerGroupSettings:
     enabled: bool = True
     max_pages_per_worker: int | None = None
     rate_limit_per_minute: int | None = None
+    queue_mode: str | None = None
+    strategy_mode: str | None = None
+    topic_keywords: list[str] = field(default_factory=list)
+    avoid_duplicate_paths_across_daemons: bool | None = None
     worker_ids: list[int] = field(default_factory=list)
 
     def to_view_model(self) -> dict[str, object]:
@@ -102,5 +158,10 @@ class WorkerGroupSettings:
             "enabled": self.enabled,
             "maxPagesPerWorker": self.max_pages_per_worker,
             "rateLimitPerMinute": self.rate_limit_per_minute,
+            "queueMode": self.queue_mode,
+            "strategyMode": self.strategy_mode,
+            "topicKeywords": list(self.topic_keywords),
+            "topicKeywordsText": "\n".join(self.topic_keywords),
+            "avoidDuplicatePathsAcrossDaemons": self.avoid_duplicate_paths_across_daemons,
             "workerIds": list(self.worker_ids),
         }

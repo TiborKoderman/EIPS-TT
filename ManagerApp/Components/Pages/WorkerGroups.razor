@@ -94,11 +94,40 @@
                             <span class="text-small text-muted">Rate Limit / Minute</span>
                             <input type="number" min="0" @bind="selectedGroup.RateLimitPerMinute" />
                         </label>
+                        <label>
+                            <span class="text-small text-muted">Queue Mode Override</span>
+                            <select @bind="selectedGroup.QueueMode">
+                                <option value="">Use Global</option>
+                                <option value="local">Local</option>
+                                <option value="server">Server</option>
+                                <option value="both">Both</option>
+                            </select>
+                        </label>
+                        <label>
+                            <span class="text-small text-muted">Strategy Override</span>
+                            <select @bind="selectedGroup.StrategyMode">
+                                <option value="">Use Global</option>
+                                <option value="balanced">Balanced</option>
+                                <option value="coverage">Coverage</option>
+                                <option value="focused">Focused</option>
+                                <option value="freshness">Freshness</option>
+                            </select>
+                        </label>
                     </div>
 
                     <label class="mt-md flex items-center gap-sm">
                         <input type="checkbox" @bind="selectedGroup.Enabled" style="width:auto;" />
                         <span>Daemon enabled</span>
+                    </label>
+
+                    <label class="mt-md flex items-center gap-sm">
+                        <input type="checkbox" @bind="SelectedGroupAvoidDuplicates" style="width:auto;" />
+                        <span>Avoid duplicate paths across daemons (override)</span>
+                    </label>
+
+                    <label class="mt-md">
+                        <span class="text-small text-muted">Topic Keywords Override (one per line)</span>
+                        <textarea rows="4" @bind="selectedGroup.TopicKeywordsText"></textarea>
                     </label>
 
                     <label class="mt-md">
@@ -140,6 +169,13 @@
     protected override async Task OnInitializedAsync()
     {
         groups = await WorkerService.GetWorkerGroupsAsync();
+        foreach (var group in groups)
+        {
+            if (string.IsNullOrWhiteSpace(group.TopicKeywordsText) && group.TopicKeywords.Count > 0)
+            {
+                group.TopicKeywordsText = string.Join("\n", group.TopicKeywords);
+            }
+        }
         selectedGroup = SelectedDaemonId.HasValue
             ? groups.FirstOrDefault(group => group.Id == SelectedDaemonId.Value)
             : groups.FirstOrDefault();
@@ -151,6 +187,10 @@
     {
         selectedGroup = groups.FirstOrDefault(g => g.Id == id);
         workerIdsInput = selectedGroup == null ? "" : string.Join(",", selectedGroup.WorkerIds);
+        if (selectedGroup != null && string.IsNullOrWhiteSpace(selectedGroup.TopicKeywordsText) && selectedGroup.TopicKeywords.Count > 0)
+        {
+            selectedGroup.TopicKeywordsText = string.Join("\n", selectedGroup.TopicKeywords);
+        }
         statusMessage = null;
     }
 
@@ -160,6 +200,13 @@
         {
             return;
         }
+
+        selectedGroup.TopicKeywords = selectedGroup.TopicKeywordsText
+            .Split(new[] { '\r', '\n' }, StringSplitOptions.RemoveEmptyEntries)
+            .Select(v => v.Trim())
+            .Where(v => !string.IsNullOrWhiteSpace(v))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToList();
 
         selectedGroup.WorkerIds = workerIdsInput
             .Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
@@ -185,5 +232,17 @@
         }
 
         return Math.Round(rates.Average(), 1).ToString();
+    }
+
+    private bool SelectedGroupAvoidDuplicates
+    {
+        get => selectedGroup?.AvoidDuplicatePathsAcrossDaemons ?? true;
+        set
+        {
+            if (selectedGroup != null)
+            {
+                selectedGroup.AvoidDuplicatePathsAcrossDaemons = value;
+            }
+        }
     }
 }

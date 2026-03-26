@@ -300,6 +300,27 @@ public class WorkerService : IWorkerService
     public async Task SaveGlobalConfigAsync(WorkerGlobalConfigViewModel config)
     {
         LastError = null;
+        config.SeedEntries = config.SeedEntries
+            .Where(entry => !string.IsNullOrWhiteSpace(entry.Url))
+            .Select(entry => new SeedEntryViewModel
+            {
+                Url = entry.Url.Trim(),
+                Enabled = entry.Enabled,
+                Label = entry.Label?.Trim() ?? string.Empty,
+            })
+            .ToList();
+
+        config.SeedUrlsText = string.Join("\n", config.SeedEntries
+            .Where(entry => entry.Enabled)
+            .Select(entry => entry.Url));
+
+        config.TopicKeywords = config.TopicKeywordsText
+            .Split(new[] { '\r', '\n' }, StringSplitOptions.RemoveEmptyEntries)
+            .Select(value => value.Trim())
+            .Where(value => !string.IsNullOrWhiteSpace(value))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToList();
+
         _ = await PutAsync("api/config/global", config);
     }
 
@@ -313,6 +334,13 @@ public class WorkerService : IWorkerService
     public async Task<bool> SaveWorkerGroupAsync(WorkerGroupSettingsViewModel group)
     {
         LastError = null;
+        group.TopicKeywords = group.TopicKeywordsText
+            .Split(new[] { '\r', '\n' }, StringSplitOptions.RemoveEmptyEntries)
+            .Select(value => value.Trim())
+            .Where(value => !string.IsNullOrWhiteSpace(value))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToList();
+
         var response = await PutAsync($"api/config/groups/{group.Id}", group);
         return response?.Ok == true;
     }
