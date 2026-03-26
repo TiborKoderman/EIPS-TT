@@ -76,5 +76,20 @@ class WorkerControlService(Protocol):
     def add_seed(self, worker_id: int | None, url: str) -> dict[str, object]:
         ...
 
+    def claim_frontier_url(self, worker_id: int) -> dict[str, object]:
+        ...
+
+    def complete_frontier_url(
+        self,
+        worker_id: int,
+        url: str,
+        lease_token: str | None,
+        status: str = "completed",
+    ) -> dict[str, object]:
+        ...
+
+    def prune_local_frontier(self, worker_id: int, url: str, reason: str | None = None) -> dict[str, object]:
+        ...
+
     def get_statistics(self) -> dict[str, object]:
         ...

@@ -1,6 +1,7 @@
 @page "/workers/strategy"
 @using ManagerApp.Models
 @using ManagerApp.Services
+@implements IAsyncDisposable
 @inject IWorkerService WorkerService
 
 <div class="page-header">
@@ -56,6 +57,16 @@
             <StatCard Label="Daemons" Value="@groups.Count.ToString()" Footnote="Strategy segments" />
         </div>
 
+        @if (frontierStatus != null)
+        {
+            <div class="grid grid-cols-4 mb-lg">
+                <StatCard Label="Global Queue" Value="@frontierStatus.InMemoryQueued.ToString()" Footnote="Daemon in-memory" />
+                <StatCard Label="Local Queues" Value="@frontierStatus.LocalQueued.ToString()" Footnote="Worker-local queued" />
+                <StatCard Label="Active Leases" Value="@frontierStatus.ActiveLeases.ToString()" Footnote="Claim ownership" />
+                <StatCard Label="Tombstones" Value="@frontierStatus.Tombstones.ToString()" Footnote="Recent completions" />
+            </div>
+        }
+
         <div class="card mb-lg">
             <h2 class="card-title">Planned Seed Distribution</h2>
             @if (plannedAssignments.Count == 0)
@@ -99,6 +110,50 @@
                 }
             </ul>
         </div>
+
+        @if (lastRunResults.Count > 0)
+        {
+            <div class="card mb-lg">
+                <h2 class="card-title">Last Arbitration Run</h2>
+                <div class="text-small text-muted mb-sm">Completed: @lastRunCompleted | Conflicts: @lastRunConflicts | Pending: @lastRunPending</div>
+                <ul class="list">
+                    @foreach (var result in lastRunResults)
+                    {
+                        <li class="list-item">
+                            <div class="flex items-center justify-between gap-sm">
+                                <strong>@result.SeedUrl</strong>
+                                <span class="badge @(result.Outcome == "completed" ? "badge-success" : result.Outcome == "conflict" ? "badge-warning" : "badge-info")">@result.Outcome</span>
+                            </div>
+                            <div class="text-small text-muted">Worker @result.WorkerId (@result.WorkerName) · @(string.IsNullOrWhiteSpace(result.Note) ? "-" : result.Note)</div>
+                        </li>
+                    }
+                </ul>
+            </div>
+        }
+
+        <div class="card mb-lg">
+            <h2 class="card-title">Live Arbitration Events</h2>
+            @if (liveArbitrationEvents.Count == 0)
+            {
+                <p class="text-small text-muted">No recent frontier events yet.</p>
+            }
+            else
+            {
+                <ul class="list">
+                    @foreach (var evt in liveArbitrationEvents)
+                    {
+                        <li class="list-item">
+                            <div class="flex items-center justify-between gap-sm">
+                                <strong>@evt.Type</strong>
+                                <span class="text-small text-muted">@evt.TimestampUtc.ToLocalTime().ToString("HH:mm:ss")</span>
+                            </div>
+                            <div class="text-small text-muted">Daemon: @evt.DaemonId · Worker: @(evt.WorkerId?.ToString() ?? "-")</div>
+                            <div class="text-small text-muted">@evt.PayloadJson</div>
+                        </li>
+                    }
+                </ul>
+            }
+        </div>
     }
 </div>
 
@@ -108,12 +163,35 @@
     private List<WorkerViewModel> workers = new();
     private List<SeedEntryViewModel> enabledSeeds = new();
     private List<SeedAssignment> plannedAssignments = new();
+    private FrontierStatusViewModel? frontierStatus;
+    private List<ArbitrationResult> lastRunResults = new();
+    private List<CrawlerEventViewModel> liveArbitrationEvents = new();
+    private int lastRunCompleted;
+    private int lastRunConflicts;
+    private int lastRunPending;
     private bool isLoading = true;
     private string? statusMessage;
+    private PeriodicTimer? _refreshTimer;
+    private CancellationTokenSource? _refreshCts;
 
     protected override async Task OnInitializedAsync()
     {
         await RefreshAll();
+
+        _refreshCts = new CancellationTokenSource();
+        _refreshTimer = new PeriodicTimer(TimeSpan.FromSeconds(3));
+        _ = Task.Run(async () =>
+        {
+            while (_refreshTimer is not null && await _refreshTimer.WaitForNextTickAsync(_refreshCts.Token))
+            {
+                await InvokeAsync(async () =>
+                {
+                    await RefreshLiveEventsAsync();
+                    frontierStatus = await WorkerService.GetFrontierStatusAsync();
+                    StateHasChanged();
+                });
+            }
+        }, _refreshCts.Token);
     }
 
     private async Task RefreshAll()
@@ -124,6 +202,8 @@
         globalConfig = await WorkerService.GetGlobalConfigAsync();
         groups = await WorkerService.GetWorkerGroupsAsync();
         workers = await WorkerService.GetAllWorkersAsync();
+        frontierStatus = await WorkerService.GetFrontierStatusAsync();
+        await RefreshLiveEventsAsync();
 
         enabledSeeds = (globalConfig?.SeedEntries ?? new List<SeedEntryViewModel>())
             .Where(seed => seed.Enabled && !string.IsNullOrWhiteSpace(seed.Url))
@@ -157,16 +237,35 @@
             return;
         }
 
-        for (var i = 0; i < enabledSeeds.Count; i++)
+        foreach (var seed in enabledSeeds)
         {
-            var targetWorker = candidateWorkers[i % candidateWorkers.Count];
+            var targetWorker = candidateWorkers
+                .OrderByDescending(worker => RendezvousScore(seed.Url, worker.Id))
+                .ThenBy(worker => worker.Id)
+                .First();
             plannedAssignments.Add(new SeedAssignment
             {
-                SeedUrl = enabledSeeds[i].Url,
+                SeedUrl = seed.Url,
                 WorkerId = targetWorker.Id,
                 WorkerName = targetWorker.Name,
             });
         }
+    }
+
+    private static long RendezvousScore(string seedUrl, int workerId)
+    {
+        var input = $"{seedUrl}|{workerId}";
+        const long offsetBasis = unchecked((long)1469598103934665603);
+        const long prime = 1099511628211;
+
+        long hash = offsetBasis;
+        foreach (var ch in input)
+        {
+            hash ^= ch;
+            hash *= prime;
+        }
+
+        return hash;
     }
 
     private async Task EnforceServerQueueOnly()
@@ -192,17 +291,128 @@
             return;
         }
 
-        var success = 0;
+        var queued = 0;
+        var completed = 0;
+        var conflicts = 0;
+        var pending = 0;
+        var runResults = new List<ArbitrationResult>();
+
         foreach (var assignment in plannedAssignments)
         {
-            var ok = await WorkerService.AddSeedAsync(assignment.SeedUrl, assignment.WorkerId);
-            if (ok)
+            var queuedOk = await WorkerService.AddSeedAsync(assignment.SeedUrl, assignment.WorkerId);
+            if (!queuedOk)
             {
-                success++;
+                runResults.Add(new ArbitrationResult
+                {
+                    SeedUrl = assignment.SeedUrl,
+                    WorkerId = assignment.WorkerId,
+                    WorkerName = assignment.WorkerName,
+                    Outcome = "pending",
+                    Note = WorkerService.LastError,
+                });
+                pending++;
+                continue;
             }
+
+            queued++;
+            var claim = await WorkerService.ClaimFrontierUrlAsync(assignment.WorkerId);
+            if (claim?.Claimed != true || string.IsNullOrWhiteSpace(claim.Url))
+            {
+                runResults.Add(new ArbitrationResult
+                {
+                    SeedUrl = assignment.SeedUrl,
+                    WorkerId = assignment.WorkerId,
+                    WorkerName = assignment.WorkerName,
+                    Outcome = "pending",
+                    Note = "No claim returned yet.",
+                });
+                pending++;
+                continue;
+            }
+
+            if (string.Equals(claim.Url, assignment.SeedUrl, StringComparison.OrdinalIgnoreCase))
+            {
+                var completedOk = await WorkerService.CompleteFrontierUrlAsync(
+                    assignment.WorkerId,
+                    claim.Url,
+                    claim.LeaseToken,
+                    "completed");
+
+                if (completedOk)
+                {
+                    completed++;
+                    runResults.Add(new ArbitrationResult
+                    {
+                        SeedUrl = assignment.SeedUrl,
+                        WorkerId = assignment.WorkerId,
+                        WorkerName = assignment.WorkerName,
+                        Outcome = "completed",
+                        Note = $"Claimed from {claim.Source ?? "unknown"}.",
+                    });
+                }
+                else
+                {
+                    pending++;
+                    runResults.Add(new ArbitrationResult
+                    {
+                        SeedUrl = assignment.SeedUrl,
+                        WorkerId = assignment.WorkerId,
+                        WorkerName = assignment.WorkerName,
+                        Outcome = "pending",
+                        Note = WorkerService.LastError,
+                    });
+                }
+
+                continue;
+            }
+
+            conflicts++;
+            await WorkerService.PruneFrontierUrlAsync(assignment.WorkerId, assignment.SeedUrl, "claim-mismatch");
+            runResults.Add(new ArbitrationResult
+            {
+                SeedUrl = assignment.SeedUrl,
+                WorkerId = assignment.WorkerId,
+                WorkerName = assignment.WorkerName,
+                Outcome = "conflict",
+                Note = $"Claimed {claim.Url} instead; local queue pruned for assigned seed.",
+            });
         }
 
-        statusMessage = $"Rebalanced seeds: {success}/{plannedAssignments.Count} queued to server frontier.";
+        frontierStatus = await WorkerService.GetFrontierStatusAsync();
+        lastRunResults = runResults;
+        lastRunCompleted = completed;
+        lastRunConflicts = conflicts;
+        lastRunPending = pending;
+
+        statusMessage = $"Arbitration run complete. Queued {queued}/{plannedAssignments.Count}, completed {completed}, conflicts {conflicts}, pending {pending}.";
+    }
+
+    private async Task RefreshLiveEventsAsync()
+    {
+        var events = await WorkerService.GetRecentCrawlerEventsAsync(80);
+        liveArbitrationEvents = events
+            .Where(evt =>
+                evt.Type.StartsWith("frontier", StringComparison.OrdinalIgnoreCase)
+                || string.Equals(evt.Type, "queue-change", StringComparison.OrdinalIgnoreCase))
+            .OrderByDescending(evt => evt.TimestampUtc)
+            .Take(20)
+            .ToList();
+    }
+
+    public ValueTask DisposeAsync()
+    {
+        try
+        {
+            _refreshCts?.Cancel();
+        }
+        catch
+        {
+            // ignore cancellation race on page disposal
+        }
+
+        _refreshTimer?.Dispose();
+        _refreshCts?.Dispose();
+        return ValueTask.CompletedTask;
     }
 
     private sealed class SeedAssignment
@@ -210,5 +420,14 @@
         public required string SeedUrl { get; init; }
         public required int WorkerId { get; init; }
         public required string WorkerName { get; init; }
+    }
+
+    private sealed class ArbitrationResult
+    {
+        public required string SeedUrl { get; init; }
+        public required int WorkerId { get; init; }
+        public required string WorkerName { get; init; }
+        public required string Outcome { get; init; }
+        public string? Note { get; init; }
     }
 }

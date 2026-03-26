@@ -7,12 +7,14 @@ import subprocess
 import sys
 import threading
 import time
+import secrets
 from datetime import datetime, timezone
 from collections import defaultdict, deque
 import os
 from pathlib import Path
 from urllib import error, request
 import json
+from dataclasses import dataclass
 
 from api.contracts import (
     GlobalWorkerConfig,
@@ -24,6 +26,15 @@ from api.contracts import (
     utc_now_iso,
 )
 from api.service_protocol import WorkerControlService
+
+
+@dataclass
+class FrontierLease:
+    url: str
+    worker_id: int
+    token: str
+    expires_at_monotonic: float
+    source: str
 
 
 def _coerce_int(value: object, default: int) -> int:
@@ -92,6 +103,19 @@ class MockWorkerService(WorkerControlService):
         self._thread_workers: dict[int, tuple[threading.Thread, threading.Event]] = {}
         self._frontier_queue: deque[str] = deque()
         self._known_frontier_urls: set[str] = set()
+        self._worker_local_queues: dict[int, deque[str]] = defaultdict(deque)
+        self._worker_local_known_urls: dict[int, set[str]] = defaultdict(set)
+        self._active_claim_by_worker: dict[int, FrontierLease] = {}
+        self._frontier_leases: dict[str, FrontierLease] = {}
+        self._completed_tombstones: dict[str, float] = {}
+        self._lease_ttl_seconds = max(
+            5,
+            _coerce_int(os.getenv("CRAWLER_FRONTIER_LEASE_TTL_SECONDS", "30"), 30),
+        )
+        self._tombstone_ttl_seconds = max(
+            30,
+            _coerce_int(os.getenv("CRAWLER_FRONTIER_TOMBSTONE_TTL_SECONDS", "600"), 600),
+        )
 
         self._frontier_relay_url = os.getenv("MANAGER_FRONTIER_INGEST_URL", "").strip() or None
         self._frontier_relay_token = os.getenv("MANAGER_FRONTIER_INGEST_TOKEN", "").strip() or None
@@ -120,6 +144,10 @@ class MockWorkerService(WorkerControlService):
                 "frontier": {
                     "inMemoryQueued": len(self._frontier_queue),
                     "knownUrls": len(self._known_frontier_urls),
+                    "localQueued": sum(len(queue) for queue in self._worker_local_queues.values()),
+                    "activeLeases": len(self._frontier_leases),
+                    "tombstones": len(self._completed_tombstones),
+                    "leaseTtlSeconds": self._lease_ttl_seconds,
                     "relayEnabled": self._frontier_relay_url is not None,
                 },
                 "architecture": {
@@ -171,6 +199,7 @@ class MockWorkerService(WorkerControlService):
                 worker.status = "Stopped"
                 worker.current_url = None
                 worker.pid = None
+                self._release_claim_for_worker(worker.id, requeue=True, reason="daemon-stop")
                 self._append_log(worker.id, "Info", "Daemon stopped; worker transitioned to Stopped.")
                 self._emit_manager_event(
                     "status-change",
@@ -223,6 +252,7 @@ class MockWorkerService(WorkerControlService):
             if worker is None:
                 return False
             worker.status = "Paused"
+            self._release_claim_for_worker(worker_id, requeue=True, reason="worker-paused")
             self._append_log(worker_id, "Info", "Worker paused via API.")
             self._emit_manager_event("status-change", worker_id=worker_id, payload={"status": "Paused"})
             return True
@@ -234,6 +264,7 @@ class MockWorkerService(WorkerControlService):
                 return False
             worker.status = "Stopped"
             worker.current_url = None
+            self._release_claim_for_worker(worker_id, requeue=True, reason="worker-stopped")
             self._terminate_process_if_running(worker_id)
             self._stop_thread_worker(worker_id)
             self._append_log(worker_id, "Info", "Worker stopped via API.")
@@ -332,6 +363,7 @@ class MockWorkerService(WorkerControlService):
                 if worker.status == "Active":
                     worker.status = "Idle"
                     worker.current_url = None
+                    self._release_claim_for_worker(worker.id, requeue=True, reason="reload")
                     reloaded += 1
                     self._append_log(worker.id, "Info", "Reload: worker state set to Idle.")
             for worker_id in list(self._local_processes):
@@ -603,6 +635,7 @@ class MockWorkerService(WorkerControlService):
             if not self._daemon_running:
                 raise RuntimeError("Crawler daemon is not running.")
 
+            queue_mode = self._global_config.queue_mode
             queued = self._enqueue_frontier_url(url)
             if worker_id is None:
                 return {
@@ -611,18 +644,87 @@ class MockWorkerService(WorkerControlService):
                     "url": url,
                     "queued": queued,
                     "inMemoryQueued": len(self._frontier_queue),
+                    "localQueued": sum(len(queue) for queue in self._worker_local_queues.values()),
                 }
 
             worker = self._workers.get(worker_id)
             if worker is None:
                 raise KeyError(f"Worker {worker_id} was not found.")
-            self._append_log(worker_id, "Info", f"Seed routed to daemon frontier: {url}")
+
+            local_queued = False
+            if queue_mode in {"local", "both"}:
+                local_queued = self._enqueue_local_frontier_url(worker_id, url)
+
+            self._append_log(
+                worker_id,
+                "Info",
+                f"Seed routed (global={queued}, local={local_queued}) for worker {worker_id}: {url}",
+            )
             return {
-                "appliedTo": "daemon-frontier",
+                "appliedTo": "daemon-frontier+worker-local" if local_queued else "daemon-frontier",
                 "workerId": worker_id,
                 "url": url,
-                "queued": queued,
+                "queued": queued or local_queued,
+                "queuedGlobal": queued,
+                "queuedLocal": local_queued,
                 "inMemoryQueued": len(self._frontier_queue),
+                "inMemoryWorkerQueued": len(self._worker_local_queues.get(worker_id, [])),
+            }
+
+    def claim_frontier_url(self, worker_id: int) -> dict[str, object]:
+        with self._lock:
+            worker = self._workers.get(worker_id)
+            if worker is None:
+                raise KeyError(f"Worker {worker_id} was not found.")
+
+            lease = self._claim_next_frontier_url(worker_id)
+            if lease is None:
+                return {
+                    "claimed": False,
+                    "workerId": worker_id,
+                    "url": None,
+                }
+
+            return {
+                "claimed": True,
+                "workerId": worker_id,
+                "url": lease.url,
+                "leaseToken": lease.token,
+                "leaseTtlSeconds": self._lease_ttl_seconds,
+                "source": lease.source,
+            }
+
+    def complete_frontier_url(
+        self,
+        worker_id: int,
+        url: str,
+        lease_token: str | None,
+        status: str = "completed",
+    ) -> dict[str, object]:
+        with self._lock:
+            worker = self._workers.get(worker_id)
+            if worker is None:
+                raise KeyError(f"Worker {worker_id} was not found.")
+
+            completed = self._complete_frontier_claim(worker_id, url, lease_token, status)
+            return {
+                "completed": completed,
+                "workerId": worker_id,
+                "url": url,
+                "status": status,
+            }
+
+    def prune_local_frontier(self, worker_id: int, url: str, reason: str | None = None) -> dict[str, object]:
+        with self._lock:
+            worker = self._workers.get(worker_id)
+            if worker is None:
+                raise KeyError(f"Worker {worker_id} was not found.")
+            pruned = self._prune_worker_local_url(worker_id, url, reason or "server-conflict")
+            return {
+                "pruned": pruned,
+                "workerId": worker_id,
+                "url": url,
+                "reason": reason or "server-conflict",
             }
 
     def get_statistics(self) -> dict[str, object]:
@@ -706,10 +808,12 @@ class MockWorkerService(WorkerControlService):
                     current = self._workers.get(worker_id)
                     if current is None or current.status != "Active":
                         continue
+                    lease = self._claim_next_frontier_url(worker_id)
                     current.pages_processed += 1
-                    next_url = self._pop_frontier_url()
-                    current.current_url = next_url or random.choice(sample_urls)
+                    current.current_url = lease.url if lease is not None else random.choice(sample_urls)
                     self._report_page_to_manager(current, current.current_url)
+                    if lease is not None:
+                        self._complete_frontier_claim(worker_id, lease.url, lease.token, "completed")
                     if random.random() < 0.05:
                         current.error_count += 1
                         self._append_log(worker_id, "Warning", "Thread worker fetch retry scheduled.")
@@ -762,10 +866,12 @@ class MockWorkerService(WorkerControlService):
                     if worker.mode == "thread":
                         continue
 
+                    lease = self._claim_next_frontier_url(worker.id)
                     worker.pages_processed += 1
-                    next_url = self._pop_frontier_url()
-                    worker.current_url = next_url or random.choice(sample_urls)
+                    worker.current_url = lease.url if lease is not None else random.choice(sample_urls)
                     self._report_page_to_manager(worker, worker.current_url)
+                    if lease is not None:
+                        self._complete_frontier_claim(worker.id, lease.url, lease.token, "completed")
 
                     if random.random() < 0.03:
                         worker.error_count += 1
@@ -791,7 +897,8 @@ class MockWorkerService(WorkerControlService):
         candidate = raw_url.strip()
         if not candidate:
             return False
-        if candidate in self._known_frontier_urls:
+        self._purge_expired_frontier_state()
+        if candidate in self._known_frontier_urls or self._is_tombstoned(candidate):
             return False
 
         queue_mode = self._global_config.queue_mode
@@ -813,26 +920,255 @@ class MockWorkerService(WorkerControlService):
                 "url": candidate,
                 "queueMode": queue_mode,
                 "inMemoryQueued": len(self._frontier_queue),
+                "localQueued": sum(len(queue) for queue in self._worker_local_queues.values()),
                 "knownUrls": len(self._known_frontier_urls),
                 "relayed": relayed,
             },
         )
         return True
 
-    def _pop_frontier_url(self) -> str | None:
-        if not self._frontier_queue:
-            return None
-        value = self._frontier_queue.popleft()
+    def _enqueue_local_frontier_url(self, worker_id: int, raw_url: str) -> bool:
+        candidate = raw_url.strip()
+        if not candidate:
+            return False
+        self._purge_expired_frontier_state()
+        local_known = self._worker_local_known_urls[worker_id]
+        if candidate in local_known or self._is_tombstoned(candidate):
+            return False
+
+        self._worker_local_queues[worker_id].append(candidate)
+        local_known.add(candidate)
         self._emit_manager_event(
             "queue-change",
+            worker_id=worker_id,
             payload={
-                "action": "dequeue",
-                "url": value,
-                "inMemoryQueued": len(self._frontier_queue),
-                "knownUrls": len(self._known_frontier_urls),
+                "action": "enqueue-local",
+                "url": candidate,
+                "workerId": worker_id,
+                "inMemoryWorkerQueued": len(self._worker_local_queues[worker_id]),
             },
         )
-        return value
+        return True
+
+    def _claim_next_frontier_url(self, worker_id: int) -> FrontierLease | None:
+        self._purge_expired_frontier_state()
+
+        active = self._active_claim_by_worker.get(worker_id)
+        if active is not None:
+            active.expires_at_monotonic = time.monotonic() + self._lease_ttl_seconds
+            self._frontier_leases[active.url] = active
+            return active
+
+        local_lease = self._claim_from_worker_local_queue(worker_id)
+        if local_lease is not None:
+            return local_lease
+
+        while self._frontier_queue:
+            candidate = self._frontier_queue.popleft()
+            if self._is_tombstoned(candidate):
+                continue
+
+            lease = self._frontier_leases.get(candidate)
+            if lease is not None and lease.expires_at_monotonic > time.monotonic():
+                continue
+
+            self._known_frontier_urls.discard(candidate)
+            created = self._create_lease(candidate, worker_id, "global")
+            self._emit_manager_event(
+                "queue-change",
+                worker_id=worker_id,
+                payload={
+                    "action": "claim-global",
+                    "url": candidate,
+                    "workerId": worker_id,
+                    "inMemoryQueued": len(self._frontier_queue),
+                },
+            )
+            return created
+
+        return None
+
+    def _claim_from_worker_local_queue(self, worker_id: int) -> FrontierLease | None:
+        queue = self._worker_local_queues.get(worker_id)
+        if queue is None:
+            return None
+
+        while queue:
+            candidate = queue.popleft()
+            if self._is_tombstoned(candidate):
+                self._worker_local_known_urls[worker_id].discard(candidate)
+                continue
+
+            lease = self._frontier_leases.get(candidate)
+            if lease is not None and lease.expires_at_monotonic > time.monotonic() and lease.worker_id != worker_id:
+                self._worker_local_known_urls[worker_id].discard(candidate)
+                self._emit_manager_event(
+                    "frontier-prune",
+                    worker_id=worker_id,
+                    payload={
+                        "url": candidate,
+                        "reason": "lease-owned-by-other-worker",
+                        "ownerWorkerId": lease.worker_id,
+                    },
+                )
+                continue
+
+            self._worker_local_known_urls[worker_id].discard(candidate)
+            created = self._create_lease(candidate, worker_id, "local")
+            self._emit_manager_event(
+                "queue-change",
+                worker_id=worker_id,
+                payload={
+                    "action": "claim-local",
+                    "url": candidate,
+                    "workerId": worker_id,
+                    "inMemoryWorkerQueued": len(queue),
+                },
+            )
+            return created
+
+        return None
+
+    def _create_lease(self, url: str, worker_id: int, source: str) -> FrontierLease:
+        token = secrets.token_hex(12)
+        lease = FrontierLease(
+            url=url,
+            worker_id=worker_id,
+            token=token,
+            expires_at_monotonic=time.monotonic() + self._lease_ttl_seconds,
+            source=source,
+        )
+        self._frontier_leases[url] = lease
+        self._active_claim_by_worker[worker_id] = lease
+        self._emit_manager_event(
+            "frontier-lease",
+            worker_id=worker_id,
+            payload={
+                "url": url,
+                "workerId": worker_id,
+                "source": source,
+                "leaseTtlSeconds": self._lease_ttl_seconds,
+            },
+        )
+        return lease
+
+    def _complete_frontier_claim(
+        self,
+        worker_id: int,
+        url: str,
+        lease_token: str | None,
+        status: str,
+    ) -> bool:
+        self._purge_expired_frontier_state()
+        lease = self._frontier_leases.get(url)
+        if lease is None or lease.worker_id != worker_id:
+            return False
+        if lease_token and lease.token != lease_token:
+            return False
+
+        self._frontier_leases.pop(url, None)
+        active = self._active_claim_by_worker.get(worker_id)
+        if active is not None and active.url == url:
+            self._active_claim_by_worker.pop(worker_id, None)
+
+        self._completed_tombstones[url] = time.monotonic() + self._tombstone_ttl_seconds
+        self._emit_manager_event(
+            "frontier-complete",
+            worker_id=worker_id,
+            payload={
+                "url": url,
+                "workerId": worker_id,
+                "status": status,
+                "tombstoneTtlSeconds": self._tombstone_ttl_seconds,
+            },
+        )
+        return True
+
+    def _prune_worker_local_url(self, worker_id: int, url: str, reason: str) -> bool:
+        queue = self._worker_local_queues.get(worker_id)
+        if queue is None:
+            return False
+
+        removed = False
+        filtered = deque()
+        for item in queue:
+            if item == url:
+                removed = True
+                continue
+            filtered.append(item)
+        self._worker_local_queues[worker_id] = filtered
+        self._worker_local_known_urls[worker_id].discard(url)
+        if removed:
+            self._emit_manager_event(
+                "frontier-prune",
+                worker_id=worker_id,
+                payload={
+                    "url": url,
+                    "workerId": worker_id,
+                    "reason": reason,
+                },
+            )
+        return removed
+
+    def _release_claim_for_worker(self, worker_id: int, requeue: bool, reason: str) -> None:
+        active = self._active_claim_by_worker.pop(worker_id, None)
+        if active is None:
+            return
+
+        self._frontier_leases.pop(active.url, None)
+        if requeue and not self._is_tombstoned(active.url) and active.url not in self._known_frontier_urls:
+            self._known_frontier_urls.add(active.url)
+            self._frontier_queue.appendleft(active.url)
+
+        self._emit_manager_event(
+            "frontier-release",
+            worker_id=worker_id,
+            payload={
+                "url": active.url,
+                "workerId": worker_id,
+                "requeued": requeue,
+                "reason": reason,
+            },
+        )
+
+    def _purge_expired_frontier_state(self) -> None:
+        now = time.monotonic()
+
+        expired_leases = [
+            (url, lease)
+            for url, lease in self._frontier_leases.items()
+            if lease.expires_at_monotonic <= now
+        ]
+        for url, lease in expired_leases:
+            self._frontier_leases.pop(url, None)
+            active = self._active_claim_by_worker.get(lease.worker_id)
+            if active is not None and active.url == url:
+                self._active_claim_by_worker.pop(lease.worker_id, None)
+            if url not in self._known_frontier_urls and not self._is_tombstoned(url):
+                self._known_frontier_urls.add(url)
+                self._frontier_queue.appendleft(url)
+                self._emit_manager_event(
+                    "frontier-lease-expired",
+                    worker_id=lease.worker_id,
+                    payload={
+                        "url": url,
+                        "workerId": lease.worker_id,
+                        "action": "requeued",
+                    },
+                )
+
+        expired_tombstones = [url for url, expiry in self._completed_tombstones.items() if expiry <= now]
+        for url in expired_tombstones:
+            self._completed_tombstones.pop(url, None)
+
+    def _is_tombstoned(self, url: str) -> bool:
+        expiry = self._completed_tombstones.get(url)
+        if expiry is None:
+            return False
+        if expiry <= time.monotonic():
+            self._completed_tombstones.pop(url, None)
+            return False
+        return True
 
     def _relay_frontier_seed(self, url: str) -> bool:
         if self._frontier_relay_url is None:

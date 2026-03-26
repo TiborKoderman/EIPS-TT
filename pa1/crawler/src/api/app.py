@@ -105,6 +105,10 @@ def create_app(service: WorkerControlService | None = None) -> Flask:
                     "GET/PUT /api/config/global",
                     "GET/PUT /api/config/groups/<id>",
                     "POST /api/frontier/seed",
+                    "POST /api/frontier/claim",
+                    "POST /api/frontier/complete",
+                    "POST /api/frontier/prune",
+                    "GET /api/frontier/status",
                     "GET /api/statistics",
                 ],
             }
@@ -284,6 +288,56 @@ def create_app(service: WorkerControlService | None = None) -> Flask:
             return error_response(str(exc), status_code=409)
         except ValueError as exc:
             return error_response(str(exc), status_code=400)
+
+    @app.post("/api/frontier/claim")
+    @maybe_auth
+    def claim_frontier_url():
+        payload = request.get_json(silent=True) or {}
+        worker_id = payload.get("workerId")
+        if worker_id is None:
+            return error_response("Payload must include 'workerId'.", status_code=400)
+        try:
+            result = worker_service.claim_frontier_url(int(worker_id))
+            return envelope(result)
+        except KeyError as exc:
+            return error_response(str(exc), status_code=404)
+
+    @app.post("/api/frontier/complete")
+    @maybe_auth
+    def complete_frontier_url():
+        payload = request.get_json(silent=True) or {}
+        worker_id = payload.get("workerId")
+        url = str(payload.get("url", "")).strip()
+        lease_token = payload.get("leaseToken")
+        status = str(payload.get("status", "completed")).strip().lower() or "completed"
+        if worker_id is None or not url:
+            return error_response("Payload must include 'workerId' and non-empty 'url'.", status_code=400)
+        try:
+            result = worker_service.complete_frontier_url(int(worker_id), url, str(lease_token) if lease_token else None, status)
+            return envelope(result)
+        except KeyError as exc:
+            return error_response(str(exc), status_code=404)
+
+    @app.post("/api/frontier/prune")
+    @maybe_auth
+    def prune_frontier_url():
+        payload = request.get_json(silent=True) or {}
+        worker_id = payload.get("workerId")
+        url = str(payload.get("url", "")).strip()
+        reason = str(payload.get("reason", "server-conflict")).strip() or "server-conflict"
+        if worker_id is None or not url:
+            return error_response("Payload must include 'workerId' and non-empty 'url'.", status_code=400)
+        try:
+            result = worker_service.prune_local_frontier(int(worker_id), url, reason)
+            return envelope(result)
+        except KeyError as exc:
+            return error_response(str(exc), status_code=404)
+
+    @app.get("/api/frontier/status")
+    @maybe_auth
+    def frontier_status():
+        daemon = worker_service.get_daemon_status()
+        return envelope(daemon.get("frontier", {}))
 
     @app.get("/api/statistics")
     @maybe_auth

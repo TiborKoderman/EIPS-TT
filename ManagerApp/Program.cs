@@ -23,7 +23,7 @@ builder.Services.AddScoped<IStatisticsService, StatisticsService>();
 builder.Services.AddScoped<IGraphService, GraphService>();
 builder.Services.AddScoped<IPageService, PageService>();
 builder.Services.AddSingleton<DaemonChannelService>();
-builder.Services.AddScoped<CrawlerRelayService>();
+builder.Services.AddSingleton<CrawlerRelayService>();
 builder.Services.AddHostedService<LocalDaemonHostedService>();
 builder.Services.AddHostedService<CommandDispatchHostedService>();
 builder.Services.AddHttpClient<IWorkerService, WorkerService>((sp, client) =>
@@ -95,6 +95,23 @@ app.MapPost("/api/crawler/events", async (CrawlerEventMessage message, CrawlerRe
 {
     await relay.IngestEventAsync(message);
     return Results.Ok(new { ok = true });
+});
+
+app.MapGet("/api/crawler/events", (int? limit, CrawlerRelayService relay) =>
+{
+    var events = relay.GetRecentEvents(limit ?? 80);
+    return Results.Ok(new
+    {
+        ok = true,
+        data = events.Select(evt => new
+        {
+            timestampUtc = evt.TimestampUtc,
+            type = evt.Type,
+            daemonId = evt.DaemonId,
+            workerId = evt.WorkerId,
+            payloadJson = evt.PayloadJson,
+        })
+    });
 });
 
 app.Run();

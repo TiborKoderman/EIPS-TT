@@ -378,6 +378,72 @@ public class WorkerService : IWorkerService
         return response?.Ok == true;
     }
 
+    public async Task<FrontierClaimViewModel?> ClaimFrontierUrlAsync(int workerId)
+    {
+        LastError = null;
+        var response = await PostAsync<FrontierClaimViewModel>("api/frontier/claim", new
+        {
+            workerId,
+        });
+        return response?.Data;
+    }
+
+    public async Task<bool> CompleteFrontierUrlAsync(int workerId, string url, string? leaseToken, string status = "completed")
+    {
+        LastError = null;
+        var normalizedUrl = (url ?? string.Empty).Trim();
+        if (string.IsNullOrWhiteSpace(normalizedUrl))
+        {
+            LastError = "Frontier completion requires a non-empty URL.";
+            return false;
+        }
+
+        var normalizedStatus = string.IsNullOrWhiteSpace(status) ? "completed" : status.Trim().ToLowerInvariant();
+        var response = await PostAsync("api/frontier/complete", new
+        {
+            workerId,
+            url = normalizedUrl,
+            leaseToken,
+            status = normalizedStatus,
+        });
+        return response?.Ok == true;
+    }
+
+    public async Task<bool> PruneFrontierUrlAsync(int workerId, string url, string reason = "server-conflict")
+    {
+        LastError = null;
+        var normalizedUrl = (url ?? string.Empty).Trim();
+        if (string.IsNullOrWhiteSpace(normalizedUrl))
+        {
+            LastError = "Frontier prune requires a non-empty URL.";
+            return false;
+        }
+
+        var normalizedReason = string.IsNullOrWhiteSpace(reason) ? "server-conflict" : reason.Trim();
+        var response = await PostAsync("api/frontier/prune", new
+        {
+            workerId,
+            url = normalizedUrl,
+            reason = normalizedReason,
+        });
+        return response?.Ok == true;
+    }
+
+    public async Task<FrontierStatusViewModel?> GetFrontierStatusAsync()
+    {
+        LastError = null;
+        var response = await GetAsync<FrontierStatusViewModel>("api/frontier/status");
+        return response?.Data;
+    }
+
+    public async Task<List<CrawlerEventViewModel>> GetRecentCrawlerEventsAsync(int limit = 40)
+    {
+        LastError = null;
+        var boundedLimit = Math.Clamp(limit, 1, 200);
+        var response = await GetAsync<List<CrawlerEventViewModel>>($"api/crawler/events?limit={boundedLimit}");
+        return response?.Data ?? new List<CrawlerEventViewModel>();
+    }
+
     public async Task<CommandQueueDiagnosticsViewModel> GetCommandQueueDiagnosticsAsync()
     {
         var diagnostics = new CommandQueueDiagnosticsViewModel();

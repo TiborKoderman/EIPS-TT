@@ -173,3 +173,42 @@ public class CommandQueueDiagnosticsViewModel
     public int Failed { get; set; }
     public string? LastFailure { get; set; }
 }
+
+/// <summary>
+/// Frontier claim response model.
+/// </summary>
+public class FrontierClaimViewModel
+{
+    public bool Claimed { get; set; }
+    public int WorkerId { get; set; }
+    public string? Url { get; set; }
+    public string? LeaseToken { get; set; }
+    public int LeaseTtlSeconds { get; set; }
+    public string? Source { get; set; }
+}
+
+/// <summary>
+/// Frontier queue diagnostics returned by daemon API.
+/// </summary>
+public class FrontierStatusViewModel
+{
+    public int InMemoryQueued { get; set; }
+    public int KnownUrls { get; set; }
+    public int LocalQueued { get; set; }
+    public int ActiveLeases { get; set; }
+    public int Tombstones { get; set; }
+    public int LeaseTtlSeconds { get; set; }
+    public bool RelayEnabled { get; set; }
+}
+
+/// <summary>
+/// Manager-relayed crawler telemetry event.
+/// </summary>
+public class CrawlerEventViewModel
+{
+    public DateTime TimestampUtc { get; set; }
+    public string Type { get; set; } = "info";
+    public string DaemonId { get; set; } = "local-default";
+    public int? WorkerId { get; set; }
+    public string PayloadJson { get; set; } = "{}";
+}

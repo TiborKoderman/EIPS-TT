@@ -1,5 +1,6 @@
 using System.Security.Cryptography;
 using System.Text;
+using System.Text.Json;
 using ManagerApp.Data;
 using Microsoft.EntityFrameworkCore;
 
@@ -9,6 +10,9 @@ public sealed class CrawlerRelayService
 {
     private readonly IDbContextFactory<CrawldbContext> _contextFactory;
     private readonly ILogger<CrawlerRelayService> _logger;
+    private readonly object _eventLock = new();
+    private readonly LinkedList<CrawlerEventEnvelope> _recentEvents = new();
+    private const int MaxRecentEvents = 400;
 
     public CrawlerRelayService(
         IDbContextFactory<CrawldbContext> contextFactory,
@@ -112,13 +116,57 @@ public sealed class CrawlerRelayService
 
     public Task IngestEventAsync(CrawlerEventMessage message)
     {
+        var envelope = new CrawlerEventEnvelope
+        {
+            TimestampUtc = DateTime.UtcNow,
+            Type = string.IsNullOrWhiteSpace(message.Type) ? "info" : message.Type,
+            DaemonId = string.IsNullOrWhiteSpace(message.DaemonId) ? "local-default" : message.DaemonId,
+            WorkerId = message.WorkerId,
+            PayloadJson = SerializePayload(message.Payload),
+        };
+
+        lock (_eventLock)
+        {
+            _recentEvents.AddFirst(envelope);
+            while (_recentEvents.Count > MaxRecentEvents)
+            {
+                _recentEvents.RemoveLast();
+            }
+        }
+
         _logger.LogInformation(
             "[crawler-event] type={Type} daemon={DaemonId} worker={WorkerId} payload={Payload}",
-            message.Type,
-            message.DaemonId,
-            message.WorkerId,
-            message.Payload);
+            envelope.Type,
+            envelope.DaemonId,
+            envelope.WorkerId,
+            envelope.PayloadJson);
         return Task.CompletedTask;
+    }
+
+    public IReadOnlyList<CrawlerEventEnvelope> GetRecentEvents(int limit = 80)
+    {
+        var capped = Math.Clamp(limit, 1, MaxRecentEvents);
+        lock (_eventLock)
+        {
+            return _recentEvents.Take(capped).ToList();
+        }
+    }
+
+    private static string SerializePayload(object? payload)
+    {
+        if (payload is null)
+        {
+            return "{}";
+        }
+
+        try
+        {
+            return JsonSerializer.Serialize(payload);
+        }
+        catch
+        {
+            return payload.ToString() ?? "{}";
+        }
     }
 
     private static string Sha256Hex(string input)
@@ -198,4 +246,13 @@ public sealed class CrawlerEventMessage
     public string DaemonId { get; set; } = "local-default";
     public int? WorkerId { get; set; }
     public object? Payload { get; set; }
+}
+
+public sealed class CrawlerEventEnvelope
+{
+    public DateTime TimestampUtc { get; set; }
+    public string Type { get; set; } = "info";
+    public string DaemonId { get; set; } = "local-default";
+    public int? WorkerId { get; set; }
+    public string PayloadJson { get; set; } = "{}";
 }

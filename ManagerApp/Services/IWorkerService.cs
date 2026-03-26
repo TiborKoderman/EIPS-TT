@@ -107,6 +107,31 @@ public interface IWorkerService
     Task<bool> AddSeedAsync(string url, int? workerId = null);
 
     /// <summary>
+    /// Claim one URL from frontier for a worker.
+    /// </summary>
+    Task<FrontierClaimViewModel?> ClaimFrontierUrlAsync(int workerId);
+
+    /// <summary>
+    /// Complete claimed frontier URL processing.
+    /// </summary>
+    Task<bool> CompleteFrontierUrlAsync(int workerId, string url, string? leaseToken, string status = "completed");
+
+    /// <summary>
+    /// Prune URL from worker-local frontier queue.
+    /// </summary>
+    Task<bool> PruneFrontierUrlAsync(int workerId, string url, string reason = "server-conflict");
+
+    /// <summary>
+    /// Get frontier diagnostics snapshot.
+    /// </summary>
+    Task<FrontierStatusViewModel?> GetFrontierStatusAsync();
+
+    /// <summary>
+    /// Get recent daemon crawler telemetry events relayed by manager.
+    /// </summary>
+    Task<List<CrawlerEventViewModel>> GetRecentCrawlerEventsAsync(int limit = 40);
+
+    /// <summary>
     /// Get command queue dispatch diagnostics.
     /// </summary>
     Task<CommandQueueDiagnosticsViewModel> GetCommandQueueDiagnosticsAsync();
