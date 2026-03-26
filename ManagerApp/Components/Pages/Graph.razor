@@ -73,10 +73,10 @@
 
     private IReadOnlyList<string> GraphPending =>
     [
-        "Current view renders a stable graph snapshot from persisted pages and links.",
-        "Next step: add optional real-time overlays from daemon/server worker events.",
-        "Node size currently reflects backlink count from stored link graph.",
-        "Graph export currently supports SVG output."
+        "Graph now keeps zoom and simulation state between reloads instead of resetting the camera.",
+        "Zoomed-out view groups island components; zooming in progressively reveals more edges.",
+        "Seeds start centered and spread out, and newly discovered nodes spawn near active worker markers.",
+        "Graph export supports SVG output."
     ];
 
     protected override async Task OnInitializedAsync()
@@ -141,7 +141,14 @@
     {
         if (_graphModule != null)
         {
-            await _graphModule.DisposeAsync();
+            try
+            {
+                await _graphModule.DisposeAsync();
+            }
+            catch (JSDisconnectedException)
+            {
+                // Safe to ignore when browser circuit is already disconnected.
+            }
         }
     }
 }

@@ -629,6 +629,16 @@ textarea:focus {
     flex-wrap: wrap;
 }
 
+.workers-inline-spawn {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+}
+
+.workers-inline-spawn input {
+    width: 72px;
+}
+
 .worker-row-main {
     min-width: 0;
 }
@@ -642,6 +652,12 @@ textarea:focus {
     align-items: center;
     gap: var(--spacing-xs);
     flex-wrap: wrap;
+    transition: opacity 120ms ease;
+}
+
+.worker-row-actions .badge {
+    min-width: 74px;
+    text-align: center;
 }
 
 .daemon-item {
@@ -653,6 +669,16 @@ textarea:focus {
     align-items: center;
     gap: var(--spacing-xs);
     padding-right: 8px;
+}
+
+.daemon-inline-spawn {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+}
+
+.daemon-inline-spawn input {
+    width: 64px;
 }
 
 .daemon-header {

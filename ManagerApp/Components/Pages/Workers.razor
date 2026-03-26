@@ -59,14 +59,17 @@
                 </select>
             </div>
             <div class="flex items-center gap-sm">
-                <input type="text" placeholder="Worker name (optional)" @bind="SpawnWorkerName" />
                 <button class="btn btn-primary" @onclick="QuickStartCrawling">
                     <span class="mdi mdi-rocket-launch-outline"></span> Quick Start
                 </button>
-                <button class="btn btn-primary" @onclick="SpawnWorker" disabled="@(daemonStatus?.Running != true)">
-                    <span class="mdi mdi-plus"></span> Add Worker
+                <div class="workers-inline-spawn">
+                    <label class="text-small text-muted" for="spawn-count-input">Count</label>
+                    <input id="spawn-count-input" type="number" min="1" max="20" value="@SpawnCount" @onchange="OnSpawnCountChanged" />
+                </div>
+                <button class="btn btn-primary" @onclick="SpawnWorker" disabled="@(daemonStatus?.Running != true || daemonBulkInProgress)">
+                    <span class="mdi mdi-plus"></span> Spawn
                 </button>
-                <button class="btn" @onclick="ReloadDaemon" disabled="@(daemonStatus?.Running != true)">
+                <button class="btn" @onclick="ReloadDaemon" disabled="@(daemonStatus?.Running != true || daemonBulkInProgress)">
                     <span class="mdi mdi-refresh"></span> Reload
                 </button>
             </div>
@@ -165,12 +168,31 @@
                             @if (daemonWorkers.Count > 0)
                             {
                                 <div class="flex items-center gap-sm">
-                                    <button class="btn btn-icon" @onclick="() => StartAllInDaemon(daemon)" type="button" title="Start all workers in this daemon" aria-label="Start all workers in this daemon">
+                                    <button class="btn btn-icon" @onclick="() => StartAllInDaemon(daemon)" type="button" title="Start all workers in this daemon" aria-label="Start all workers in this daemon" disabled="@daemonBulkInProgress">
                                         <span class="mdi mdi-play-network"></span>
                                     </button>
-                                    <button class="btn btn-icon" @onclick="() => StopAllInDaemon(daemon)" type="button" title="Stop all workers in this daemon" aria-label="Stop all workers in this daemon">
+                                    <button class="btn btn-icon" @onclick="() => StartAllThreadsInDaemon(daemon)" type="button" title="Start all thread workers in this daemon" aria-label="Start all thread workers in this daemon" disabled="@daemonBulkInProgress">
+                                        <span class="mdi mdi-play-box-multiple-outline"></span>
+                                    </button>
+                                    <button class="btn btn-icon" @onclick="() => StopAllInDaemon(daemon)" type="button" title="Stop all workers in this daemon" aria-label="Stop all workers in this daemon" disabled="@daemonBulkInProgress">
                                         <span class="mdi mdi-stop-circle-outline"></span>
                                     </button>
+                                    <div class="daemon-inline-spawn">
+                                        <input type="number"
+                                               min="1"
+                                               max="20"
+                                               value="@GetDaemonSpawnCount(daemon.Id)"
+                                               @onchange="(e) => OnDaemonSpawnCountChanged(daemon.Id, e)"
+                                               aria-label="Spawn count" />
+                                        <button class="btn btn-icon"
+                                                type="button"
+                                                @onclick="() => SpawnWorkersForDaemon(daemon)"
+                                                title="Spawn workers in this daemon"
+                                                aria-label="Spawn workers in this daemon"
+                                                disabled="@(daemonStatus?.Running != true || daemonBulkInProgress)">
+                                            <span class="mdi mdi-plus-circle-outline"></span>
+                                        </button>
+                                    </div>
                                 </div>
                             }
                             @if (daemon.Id > 0)
@@ -229,13 +251,17 @@
                                                 <button class="btn btn-icon" title="Metrics" aria-label="Metrics" @onclick='() => OpenWorkerSection(worker.Id, "metrics")' type="button">
                                                     <span class="mdi mdi-chart-line"></span>
                                                 </button>
-                                                <button class="btn btn-icon" title="Start" aria-label="Start" @onclick="() => Start(worker.Id)" type="button">
+                                                @if (workerActionInProgress.Contains(worker.Id))
+                                                {
+                                                    <span class="badge badge-info">Working...</span>
+                                                }
+                                                <button class="btn btn-icon" title="Start" aria-label="Start" @onclick="() => Start(worker.Id)" type="button" disabled="@workerActionInProgress.Contains(worker.Id)">
                                                     <span class="mdi mdi-play"></span>
                                                 </button>
-                                                <button class="btn btn-icon" title="Pause" aria-label="Pause" @onclick="() => Pause(worker.Id)" type="button">
+                                                <button class="btn btn-icon" title="Pause" aria-label="Pause" @onclick="() => Pause(worker.Id)" type="button" disabled="@workerActionInProgress.Contains(worker.Id)">
                                                     <span class="mdi mdi-pause"></span>
                                                 </button>
-                                                <button class="btn btn-icon" title="Stop" aria-label="Stop" @onclick="() => Stop(worker.Id)" type="button">
+                                                <button class="btn btn-icon" title="Stop" aria-label="Stop" @onclick="() => Stop(worker.Id)" type="button" disabled="@workerActionInProgress.Contains(worker.Id)">
                                                     <span class="mdi mdi-stop"></span>
                                                 </button>
                                             </div>
@@ -359,7 +385,7 @@
     private string StatusFilter { get; set; } = "ALL";
     private int SpawnGroupId { get; set; } = 1;
     private string SpawnMode { get; set; } = "thread";
-    private string SpawnWorkerName { get; set; } = "";
+    private int SpawnCount { get; set; } = 1;
     private string SpawnSeedUrlsText { get; set; } = "";
     private string CombinedSeverityFilter { get; set; } = "all";
     private string CombinedLogSearch { get; set; } = "";
@@ -367,6 +393,9 @@
     private bool combinedThroughputUsingFallback;
     private bool daemonActionInProgress;
     private string? daemonActionType;
+    private bool daemonBulkInProgress;
+    private readonly HashSet<int> workerActionInProgress = new();
+    private readonly Dictionary<int, int> daemonSpawnCounts = new();
 
     private IReadOnlyList<string> WorkerApiPending =>
     [
@@ -421,24 +450,41 @@
 
     private async Task RefreshAsync()
     {
-        daemonStatus = await WorkerService.GetDaemonStatusAsync();
-        workerItems = await WorkerService.GetAllWorkersAsync();
-        daemonGroups = await WorkerService.GetWorkerGroupsAsync();
-        var recentEvents = await WorkerService.GetRecentCrawlerEventsAsync(2000);
-        daemonConnections = DaemonChannel.GetConnectionInfos().ToList();
-        commandDiagnostics = await WorkerService.GetCommandQueueDiagnosticsAsync();
-        combinedLogs = await WorkerService.GetPersistedWorkerLogsAsync(
+        var daemonStatusTask = WorkerService.GetDaemonStatusAsync();
+        var workersTask = WorkerService.GetAllWorkersAsync();
+        var daemonGroupsTask = WorkerService.GetWorkerGroupsAsync();
+        var recentEventsTask = WorkerService.GetRecentCrawlerEventsAsync(2000);
+        var diagnosticsTask = WorkerService.GetCommandQueueDiagnosticsAsync();
+        var persistedLogsTask = WorkerService.GetPersistedWorkerLogsAsync(
             workerId: null,
             limit: 160,
             severity: CombinedSeverityFilter,
             search: CombinedLogSearch);
+        var throughputTask = WorkerService.GetThroughputSeriesAsync(workerId: null, windowMinutes: 60, bucketSeconds: 30);
+
+        await Task.WhenAll(
+            daemonStatusTask,
+            workersTask,
+            daemonGroupsTask,
+            recentEventsTask,
+            diagnosticsTask,
+            persistedLogsTask,
+            throughputTask);
+
+        daemonStatus = daemonStatusTask.Result;
+        workerItems = workersTask.Result;
+        daemonGroups = daemonGroupsTask.Result;
+        var recentEvents = recentEventsTask.Result;
+        daemonConnections = DaemonChannel.GetConnectionInfos().ToList();
+        commandDiagnostics = diagnosticsTask.Result;
+        combinedLogs = persistedLogsTask.Result;
         combinedLogsUsingFallback = false;
         if (combinedLogs.Count == 0)
         {
             combinedLogs = BuildLogsFromCrawlerEvents(recentEvents, 160, CombinedSeverityFilter, CombinedLogSearch);
             combinedLogsUsingFallback = true;
         }
-        combinedThroughputSeries = await WorkerService.GetThroughputSeriesAsync(workerId: null, windowMinutes: 60, bucketSeconds: 30);
+        combinedThroughputSeries = throughputTask.Result;
         combinedThroughputUsingFallback = false;
         if (combinedThroughputSeries.Count == 0)
         {
@@ -484,33 +530,27 @@
 
     private async Task Start(int id)
     {
-        var ok = await WorkerService.StartWorkerAsync(id);
-        actionStatus = ok
-            ? $"Worker {id} start requested successfully."
-            : $"Worker {id} start failed. {WorkerService.LastError}";
-        await RefreshAsync();
+        await ExecuteWorkerAction(id, "start", () => WorkerService.StartWorkerAsync(id));
     }
 
     private async Task Pause(int id)
     {
-        var ok = await WorkerService.PauseWorkerAsync(id);
-        actionStatus = ok
-            ? $"Worker {id} pause requested successfully."
-            : $"Worker {id} pause failed. {WorkerService.LastError}";
-        await RefreshAsync();
+        await ExecuteWorkerAction(id, "pause", () => WorkerService.PauseWorkerAsync(id));
     }
 
     private async Task Stop(int id)
     {
-        var ok = await WorkerService.StopWorkerAsync(id);
-        actionStatus = ok
-            ? $"Worker {id} stop requested successfully."
-            : $"Worker {id} stop failed. {WorkerService.LastError}";
-        await RefreshAsync();
+        await ExecuteWorkerAction(id, "stop", () => WorkerService.StopWorkerAsync(id));
     }
 
     private async Task StartAllInDaemon(WorkerGroupSettingsViewModel daemon)
     {
+        if (daemonBulkInProgress)
+        {
+            return;
+        }
+
+        daemonBulkInProgress = true;
         var targets = GetAllWorkersForDaemon(daemon)
             .Where(worker => !string.Equals(worker.Status, "Active", StringComparison.OrdinalIgnoreCase))
             .ToList();
@@ -518,24 +558,51 @@
         if (targets.Count == 0)
         {
             actionStatus = $"{daemon.Name}: no workers needed start.";
+            daemonBulkInProgress = false;
             return;
         }
 
-        var success = 0;
-        foreach (var worker in targets)
-        {
-            if (await WorkerService.StartWorkerAsync(worker.Id))
-            {
-                success++;
-            }
-        }
+        var success = await ExecuteBatchWorkerAction(targets.Select(worker => worker.Id), WorkerService.StartWorkerAsync);
 
         actionStatus = $"{daemon.Name}: started {success}/{targets.Count} workers.";
         await RefreshAsync();
+        daemonBulkInProgress = false;
+    }
+
+    private async Task StartAllThreadsInDaemon(WorkerGroupSettingsViewModel daemon)
+    {
+        if (daemonBulkInProgress)
+        {
+            return;
+        }
+
+        daemonBulkInProgress = true;
+        var targets = GetAllWorkersForDaemon(daemon)
+            .Where(worker => string.Equals(worker.Mode, "thread", StringComparison.OrdinalIgnoreCase))
+            .Where(worker => !string.Equals(worker.Status, "Active", StringComparison.OrdinalIgnoreCase))
+            .ToList();
+
+        if (targets.Count == 0)
+        {
+            actionStatus = $"{daemon.Name}: no thread workers needed start.";
+            daemonBulkInProgress = false;
+            return;
+        }
+
+        var success = await ExecuteBatchWorkerAction(targets.Select(worker => worker.Id), WorkerService.StartWorkerAsync);
+        actionStatus = $"{daemon.Name}: started {success}/{targets.Count} thread workers.";
+        await RefreshAsync();
+        daemonBulkInProgress = false;
     }
 
     private async Task StopAllInDaemon(WorkerGroupSettingsViewModel daemon)
     {
+        if (daemonBulkInProgress)
+        {
+            return;
+        }
+
+        daemonBulkInProgress = true;
         var targets = GetAllWorkersForDaemon(daemon)
             .Where(worker => !string.Equals(worker.Status, "Stopped", StringComparison.OrdinalIgnoreCase))
             .ToList();
@@ -543,20 +610,15 @@
         if (targets.Count == 0)
         {
             actionStatus = $"{daemon.Name}: no workers needed stop.";
+            daemonBulkInProgress = false;
             return;
         }
 
-        var success = 0;
-        foreach (var worker in targets)
-        {
-            if (await WorkerService.StopWorkerAsync(worker.Id))
-            {
-                success++;
-            }
-        }
+        var success = await ExecuteBatchWorkerAction(targets.Select(worker => worker.Id), WorkerService.StopWorkerAsync);
 
         actionStatus = $"{daemon.Name}: stopped {success}/{targets.Count} workers.";
         await RefreshAsync();
+        daemonBulkInProgress = false;
     }
 
     private async Task SpawnWorker()
@@ -573,6 +635,69 @@
             return;
         }
 
+        var count = Math.Clamp(SpawnCount, 1, 20);
+        var success = 0;
+        var seeds = GetSeedUrlsForSpawn();
+        for (var i = 0; i < count; i++)
+        {
+            var spawned = await WorkerService.SpawnWorkerAsync(
+                name: $"Worker-{DateTime.Now:HHmmss}-{i + 1}",
+                daemonGroupId: SpawnGroupId,
+                mode: SpawnMode,
+                seedUrls: seeds);
+
+            if (spawned != null)
+            {
+                success++;
+            }
+        }
+
+        actionStatus = success == 0
+            ? $"Failed to spawn workers. {WorkerService.LastError}"
+            : $"Spawned {success}/{count} workers in {SpawnMode} mode.";
+
+        if (success > 0)
+        {
+            SpawnSeedUrlsText = "";
+        }
+
+        await RefreshAsync();
+    }
+
+    private async Task SpawnWorkersForDaemon(WorkerGroupSettingsViewModel daemon)
+    {
+        if (daemonStatus?.Running != true || daemonBulkInProgress)
+        {
+            return;
+        }
+
+        daemonBulkInProgress = true;
+        var count = Math.Clamp(GetDaemonSpawnCount(daemon.Id), 1, 20);
+        var seeds = GetSeedUrlsForSpawn();
+        var success = 0;
+
+        for (var i = 0; i < count; i++)
+        {
+            var spawned = await WorkerService.SpawnWorkerAsync(
+                name: $"{daemon.Name}-w-{DateTime.Now:HHmmss}-{i + 1}",
+                daemonGroupId: daemon.Id,
+                mode: SpawnMode,
+                seedUrls: seeds);
+            if (spawned != null)
+            {
+                success++;
+            }
+        }
+
+        actionStatus = success == 0
+            ? $"{daemon.Name}: spawn failed. {WorkerService.LastError}"
+            : $"{daemon.Name}: spawned {success}/{count} worker(s).";
+        await RefreshAsync();
+        daemonBulkInProgress = false;
+    }
+
+    private List<string> GetSeedUrlsForSpawn()
+    {
         var seedUrls = SpawnSeedUrlsText
             .Split(new[] { '\r', '\n' }, StringSplitOptions.RemoveEmptyEntries)
             .Select(url => url.Trim())
@@ -599,23 +724,77 @@
                 .ToList();
         }
 
-        var spawned = await WorkerService.SpawnWorkerAsync(
-            name: string.IsNullOrWhiteSpace(SpawnWorkerName) ? null : SpawnWorkerName.Trim(),
-            daemonGroupId: SpawnGroupId,
-            mode: SpawnMode,
-            seedUrls: seedUrls);
+        return seedUrls;
+    }
 
-        actionStatus = spawned == null
-            ? $"Failed to spawn worker. {WorkerService.LastError}"
-            : $"Spawned {spawned.Name} ({SpawnMode}) with {seedUrls.Count} seed URL(s).";
-
-        if (spawned != null)
+    private async Task ExecuteWorkerAction(int workerId, string actionName, Func<Task<bool>> action)
+    {
+        if (workerActionInProgress.Contains(workerId))
         {
-            SpawnWorkerName = "";
-            SpawnSeedUrlsText = "";
+            return;
         }
 
-        await RefreshAsync();
+        workerActionInProgress.Add(workerId);
+        actionStatus = $"Worker {workerId}: {actionName}...";
+        StateHasChanged();
+
+        try
+        {
+            var ok = await action();
+            actionStatus = ok
+                ? $"Worker {workerId} {actionName} requested successfully."
+                : $"Worker {workerId} {actionName} failed. {WorkerService.LastError}";
+            await RefreshAsync();
+        }
+        finally
+        {
+            workerActionInProgress.Remove(workerId);
+        }
+    }
+
+    private async Task<int> ExecuteBatchWorkerAction(IEnumerable<int> workerIds, Func<int, Task<bool>> action)
+    {
+        var ids = workerIds.Distinct().ToList();
+        var tasks = ids.Select(async id =>
+        {
+            workerActionInProgress.Add(id);
+            try
+            {
+                return await action(id) ? 1 : 0;
+            }
+            finally
+            {
+                workerActionInProgress.Remove(id);
+            }
+        }).ToList();
+
+        var results = await Task.WhenAll(tasks);
+        return results.Sum();
+    }
+
+    private void OnSpawnCountChanged(ChangeEventArgs args)
+    {
+        if (int.TryParse(args.Value?.ToString(), out var parsed))
+        {
+            SpawnCount = Math.Clamp(parsed, 1, 20);
+        }
+    }
+
+    private int GetDaemonSpawnCount(int daemonId)
+    {
+        return daemonSpawnCounts.TryGetValue(daemonId, out var count)
+            ? Math.Clamp(count, 1, 20)
+            : 1;
+    }
+
+    private void OnDaemonSpawnCountChanged(int daemonId, ChangeEventArgs args)
+    {
+        if (!int.TryParse(args.Value?.ToString(), out var parsed))
+        {
+            return;
+        }
+
+        daemonSpawnCounts[daemonId] = Math.Clamp(parsed, 1, 20);
     }
 
     private async Task QuickStartCrawling()
