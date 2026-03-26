@@ -46,7 +46,7 @@ def main() -> int:
     return 0
 
 
-def _handle_reverse_command(service: MockWorkerService, payload: dict[str, object]) -> None:
+def _handle_reverse_command(service: MockWorkerService, payload: dict[str, object]) -> tuple[bool, str | None]:
     command = str(payload.get("command", "")).strip().lower()
     worker_id_raw = payload.get("workerId")
     nested_payload = payload.get("payload")
@@ -61,16 +61,21 @@ def _handle_reverse_command(service: MockWorkerService, payload: dict[str, objec
 
     if command == "start-daemon":
         service.start_daemon()
+        return True, None
     elif command == "stop-daemon":
         service.stop_daemon()
+        return True, None
     elif command == "reload-daemon":
         service.reload_workers()
+        return True, None
     elif command == "start-worker" and worker_id is not None:
-        service.start_worker(worker_id)
+        return service.start_worker(worker_id), None
     elif command == "pause-worker" and worker_id is not None:
-        service.pause_worker(worker_id)
+        return service.pause_worker(worker_id), None
     elif command == "stop-worker" and worker_id is not None:
-        service.stop_worker(worker_id)
+        return service.stop_worker(worker_id), None
+
+    return False, f"Unsupported or invalid command: {command}"
 
 
 if __name__ == "__main__":

@@ -1,5 +1,6 @@
 using ManagerApp.Models;
 using Npgsql;
+using System.Diagnostics;
 using System.Net.Http.Json;
 using System.Text.Json;
 
@@ -15,6 +16,7 @@ public class WorkerService : IWorkerService
     private readonly IConfiguration _configuration;
     private readonly ILogger<WorkerService> _logger;
     private readonly bool _useReverseChannelCommands;
+    private static readonly SemaphoreSlim _daemonStartGate = new(1, 1);
     public string? LastError { get; private set; }
     private static readonly JsonSerializerOptions _jsonOptions = new()
     {
@@ -218,6 +220,10 @@ public class WorkerService : IWorkerService
         try
         {
             var response = await _httpClient.GetAsync(path);
+            if (!response.IsSuccessStatusCode && await TryAutoStartDaemonAndRetryAsync())
+            {
+                response = await _httpClient.GetAsync(path);
+            }
             if (!response.IsSuccessStatusCode)
             {
                 LastError = await ReadErrorAsync(response);
@@ -228,8 +234,130 @@ public class WorkerService : IWorkerService
         }
         catch
         {
+            if (await TryAutoStartDaemonAndRetryAsync())
+            {
+                try
+                {
+                    var retryResponse = await _httpClient.GetAsync(path);
+                    if (retryResponse.IsSuccessStatusCode)
+                    {
+                        LastError = null;
+                        return await retryResponse.Content.ReadFromJsonAsync<ApiEnvelope<T>>(_jsonOptions);
+                    }
+
+                    LastError = await ReadErrorAsync(retryResponse);
+                    return default;
+                }
+                catch
+                {
+                    // keep default unreachable message below
+                }
+            }
             LastError = "Crawler API is unreachable. Start the API server and verify CrawlerApi:BaseUrl.";
             return default;
+        }
+    }
+
+    private async Task<bool> TryAutoStartDaemonAndRetryAsync()
+    {
+        var baseUrl = _configuration["CrawlerApi:BaseUrl"] ?? "http://127.0.0.1:8090";
+        if (!baseUrl.Contains("127.0.0.1") && !baseUrl.Contains("localhost"))
+        {
+            return false;
+        }
+
+        await _daemonStartGate.WaitAsync();
+        try
+        {
+            if (await IsApiReachableAsync())
+            {
+                return true;
+            }
+
+            var managerDir = Directory.GetCurrentDirectory();
+            var repoRoot = Path.GetFullPath(Path.Combine(managerDir, ".."));
+            var daemonArgs = _configuration["CrawlerApi:LocalDaemonArgs"]
+                ?? "pa1/crawler/src/main.py --run-api --api-host 127.0.0.1 --api-port 8090";
+
+            var candidates = new List<string>();
+            var configured = _configuration["CrawlerApi:PythonExecutable"];
+            var venvPython = Path.Combine(repoRoot, ".venv", "bin", "python");
+            if (File.Exists(venvPython))
+            {
+                candidates.Add(venvPython);
+            }
+            candidates.Add(".venv/bin/python");
+            if (!string.IsNullOrWhiteSpace(configured))
+            {
+                candidates.Add(configured);
+            }
+            candidates.Add("python3");
+            candidates.Add("python");
+
+            foreach (var pythonExe in candidates.Distinct(StringComparer.OrdinalIgnoreCase))
+            {
+                try
+                {
+                    var process = Process.Start(new ProcessStartInfo
+                    {
+                        FileName = pythonExe,
+                        Arguments = daemonArgs,
+                        WorkingDirectory = repoRoot,
+                        UseShellExecute = false,
+                    });
+
+                    _logger.LogInformation("Triggered on-demand daemon startup using {PythonExe}", pythonExe);
+                    for (var i = 0; i < 10; i++)
+                    {
+                        if (await IsApiReachableAsync())
+                        {
+                            LastError = null;
+                            return true;
+                        }
+
+                        await Task.Delay(300);
+                    }
+
+                    if (process?.HasExited == true)
+                    {
+                        continue;
+                    }
+                }
+                catch
+                {
+                    // try next candidate
+                }
+            }
+
+            for (var i = 0; i < 10; i++)
+            {
+                if (await IsApiReachableAsync())
+                {
+                    LastError = null;
+                    return true;
+                }
+
+                await Task.Delay(400);
+            }
+
+            return false;
+        }
+        finally
+        {
+            _daemonStartGate.Release();
+        }
+    }
+
+    private async Task<bool> IsApiReachableAsync()
+    {
+        try
+        {
+            using var response = await _httpClient.GetAsync("api/health");
+            return response.IsSuccessStatusCode;
+        }
+        catch
+        {
+            return false;
         }
     }
 

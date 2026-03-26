@@ -65,7 +65,7 @@ public sealed class CommandDispatchHostedService : BackgroundService
         foreach (var command in commands)
         {
             var payload = BuildOutgoingPayload(command);
-            var sent = await _daemonChannel.SendCommandAsync(command.DaemonIdentifier, command.CommandType, payload);
+            var sent = await _daemonChannel.SendCommandAsync(command.DaemonIdentifier, command.Id, command.CommandType, payload);
 
             if (sent)
             {
