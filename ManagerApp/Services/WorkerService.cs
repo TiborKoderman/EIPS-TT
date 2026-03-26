@@ -436,6 +436,24 @@ public class WorkerService : IWorkerService
         return response?.Data;
     }
 
+    public async Task<FrontierDequeueBatchViewModel?> DequeueFrontierAsync(
+        IReadOnlyList<int>? workerIds = null,
+        int limit = 20,
+        string? daemonId = null)
+    {
+        LastError = null;
+        var boundedLimit = Math.Clamp(limit, 1, 100);
+        var payload = new
+        {
+            workerIds = workerIds?.Distinct().ToArray() ?? Array.Empty<int>(),
+            limit = boundedLimit,
+            daemonId,
+        };
+
+        var response = await PostAsync<FrontierDequeueBatchViewModel>("api/frontier/dequeue", payload);
+        return response?.Data;
+    }
+
     public async Task<List<CrawlerEventViewModel>> GetRecentCrawlerEventsAsync(int limit = 40)
     {
         LastError = null;

@@ -127,6 +127,14 @@ public interface IWorkerService
     Task<FrontierStatusViewModel?> GetFrontierStatusAsync();
 
     /// <summary>
+    /// Dequeue a chunk of frontier claims for specific workers.
+    /// </summary>
+    Task<FrontierDequeueBatchViewModel?> DequeueFrontierAsync(
+        IReadOnlyList<int>? workerIds = null,
+        int limit = 20,
+        string? daemonId = null);
+
+    /// <summary>
     /// Get recent daemon crawler telemetry events relayed by manager.
     /// </summary>
     Task<List<CrawlerEventViewModel>> GetRecentCrawlerEventsAsync(int limit = 40);

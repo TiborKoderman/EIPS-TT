@@ -79,6 +79,15 @@ class WorkerControlService(Protocol):
     def claim_frontier_url(self, worker_id: int) -> dict[str, object]:
         ...
 
+    def dequeue_frontier_urls(
+        self,
+        worker_ids: list[int] | None,
+        *,
+        limit: int = 1,
+        daemon_id: str | None = None,
+    ) -> dict[str, object]:
+        ...
+
     def complete_frontier_url(
         self,
         worker_id: int,

@@ -13,14 +13,14 @@ else
         @foreach (var point in RenderPoints)
         {
             <circle cx="@point.X" cy="@point.Y" r="2.6" class="throughput-point">
-                <title>@$"{point.Timestamp:HH:mm:ss} -> {point.Value:0.##}"</title>
+                <title>@($"{point.Timestamp:HH:mm:ss} -> {point.Value:0.##}")</title>
             </circle>
         }
     </svg>
 }
 
 @code {
-    [Parameter] public List<WorkerThroughputPointViewModel> Points { get; set; } = new();
+    [Parameter] public IReadOnlyList<WorkerThroughputPointViewModel> Points { get; set; } = [];
 
     private List<RenderPoint> RenderPoints
     {
@@ -28,7 +28,7 @@ else
         {
             if (Points.Count == 0)
             {
-                return new List<RenderPoint>();
+                return [];
             }
 
             var ordered = Points.OrderBy(item => item.TimestampUtc).ToList();
@@ -37,13 +37,15 @@ else
             var spanSeconds = Math.Max(1.0, (maxTs - minTs).TotalSeconds);
             var maxValue = Math.Max(1.0, ordered.Max(item => item.Value));
 
-            return ordered.Select(item => new RenderPoint
-            {
-                Timestamp = item.TimestampUtc,
-                Value = item.Value,
-                X = 36 + ((item.TimestampUtc - minTs).TotalSeconds / spanSeconds) * 504,
-                Y = 152 - ((item.Value / maxValue) * 128),
-            }).ToList();
+            return ordered
+                .Select(item => new RenderPoint
+                {
+                    Timestamp = item.TimestampUtc,
+                    Value = item.Value,
+                    X = 36 + ((item.TimestampUtc - minTs).TotalSeconds / spanSeconds) * 504,
+                    Y = 152 - ((item.Value / maxValue) * 128),
+                })
+                .ToList();
         }
     }
 

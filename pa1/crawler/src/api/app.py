@@ -104,6 +104,7 @@ def create_app(service: WorkerControlService | None = None) -> Flask:
                     "GET/PUT /api/config/groups/<id>",
                     "POST /api/frontier/seed",
                     "POST /api/frontier/claim",
+                    "POST /api/frontier/dequeue",
                     "POST /api/frontier/complete",
                     "POST /api/frontier/prune",
                     "GET /api/frontier/status",
@@ -297,6 +298,27 @@ def create_app(service: WorkerControlService | None = None) -> Flask:
         try:
             result = worker_service.claim_frontier_url(int(worker_id))
             return envelope(result)
+        except KeyError as exc:
+            return error_response(str(exc), status_code=404)
+
+    @app.post("/api/frontier/dequeue")
+    @maybe_auth
+    def dequeue_frontier_urls():
+        payload = request.get_json(silent=True) or {}
+        try:
+            raw_worker_ids = payload.get("workerIds")
+            worker_ids: list[int] | None = None
+            if isinstance(raw_worker_ids, list):
+                worker_ids = [int(item) for item in raw_worker_ids]
+            elif payload.get("workerId") is not None:
+                worker_ids = [int(payload.get("workerId"))]
+
+            limit = int(payload.get("limit", 1))
+            daemon_id = payload.get("daemonId")
+            result = worker_service.dequeue_frontier_urls(worker_ids, limit=limit, daemon_id=str(daemon_id) if daemon_id else None)
+            return envelope(result)
+        except ValueError:
+            return error_response("Payload fields workerId/workerIds/limit must be integers.", status_code=400)
         except KeyError as exc:
             return error_response(str(exc), status_code=404)
 

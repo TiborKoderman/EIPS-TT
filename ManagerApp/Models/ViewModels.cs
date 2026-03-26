@@ -224,6 +224,24 @@ public class FrontierStatusViewModel
     public bool RelayEnabled { get; set; }
 }
 
+public class FrontierDequeueItemViewModel
+{
+    public int WorkerId { get; set; }
+    public string? Url { get; set; }
+    public string? LeaseToken { get; set; }
+    public int LeaseTtlSeconds { get; set; }
+    public string? Source { get; set; }
+}
+
+public class FrontierDequeueBatchViewModel
+{
+    public string DaemonId { get; set; } = "local-default";
+    public List<int> RequestedWorkerIds { get; set; } = new();
+    public List<FrontierDequeueItemViewModel> Items { get; set; } = new();
+    public int RemainingInMemory { get; set; }
+    public int ActiveLeases { get; set; }
+}
+
 /// <summary>
 /// Manager-relayed crawler telemetry event.
 /// </summary>

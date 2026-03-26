@@ -27,7 +27,10 @@ from api.contracts import (
 )
 from api.service_protocol import WorkerControlService
 from core.downloader import DownloadResult, Downloader
+from core.frontier import FrontierEntry
 from core.link_extractor import LinkExtractor
+from db.frontier_store import PostgresFrontierSwapStore
+from db.pg_connect import get_connection
 
 
 @dataclass
@@ -132,10 +135,21 @@ class DaemonWorkerService(WorkerControlService):
             5,
             _coerce_int(os.getenv("CRAWLER_MAX_EXTRACTED_LINKS_PER_PAGE", "30"), 30),
         )
+        self._frontier_swap_refill_batch_size = max(
+            20,
+            _coerce_int(os.getenv("CRAWLER_FRONTIER_SWAP_REFILL_BATCH_SIZE", "250"), 250),
+        )
+        self._frontier_db_sync_enabled = _coerce_bool(
+            os.getenv("CRAWLER_FRONTIER_DB_SYNC_ENABLED", "true"),
+            True,
+        )
+        self._frontier_swap_conn = None
+        self._frontier_swap_store: PostgresFrontierSwapStore | None = None
         self._link_extractor = LinkExtractor()
 
         for worker in self._workers.values():
             self._append_log(worker.id, "Info", f"{worker.name} initialized in {worker.mode} mode.")
+        self._init_frontier_swap_store()
 
         self._simulator_thread = threading.Thread(target=self._simulation_loop, daemon=True)
         self._simulator_thread.start()
@@ -729,6 +743,64 @@ class DaemonWorkerService(WorkerControlService):
                 "source": lease.source,
             }
 
+    def dequeue_frontier_urls(
+        self,
+        worker_ids: list[int] | None,
+        *,
+        limit: int = 1,
+        daemon_id: str | None = None,
+    ) -> dict[str, object]:
+        bounded_limit = max(1, min(limit, 100))
+
+        with self._lock:
+            requested_ids = worker_ids or []
+            if requested_ids:
+                missing = [wid for wid in requested_ids if wid not in self._workers]
+                if missing:
+                    raise KeyError(f"Worker(s) not found: {', '.join(str(item) for item in missing)}")
+                candidates = list(dict.fromkeys(requested_ids))
+            else:
+                candidates = [worker.id for worker in self._workers.values()]
+
+            if not candidates:
+                return {
+                    "daemonId": daemon_id or "local-default",
+                    "requestedWorkerIds": requested_ids,
+                    "items": [],
+                    "remainingInMemory": len(self._frontier_queue),
+                }
+
+            claims: list[dict[str, object]] = []
+            misses = 0
+            cursor = 0
+            while len(claims) < bounded_limit and misses < len(candidates):
+                worker_id = candidates[cursor % len(candidates)]
+                cursor += 1
+
+                lease = self._claim_next_frontier_url(worker_id)
+                if lease is None:
+                    misses += 1
+                    continue
+
+                misses = 0
+                claims.append(
+                    {
+                        "workerId": worker_id,
+                        "url": lease.url,
+                        "leaseToken": lease.token,
+                        "leaseTtlSeconds": self._lease_ttl_seconds,
+                        "source": lease.source,
+                    }
+                )
+
+            return {
+                "daemonId": daemon_id or "local-default",
+                "requestedWorkerIds": requested_ids,
+                "items": claims,
+                "remainingInMemory": len(self._frontier_queue),
+                "activeLeases": len(self._frontier_leases),
+            }
+
     def complete_frontier_url(
         self,
         worker_id: int,
@@ -857,9 +929,14 @@ class DaemonWorkerService(WorkerControlService):
                             f"Fetched {current.current_url} (status={processing['downloadResult'].get('statusCode')}, links={len(processing['discoveredLinks'])}).",
                         )
                     else:
-                        current.status_reason = "fetch-failed"
+                        failure_stage = str(processing.get("stage") or "fetch")
+                        current.status_reason = f"{failure_stage}-failed"
                         current.error_count += 1
-                        self._append_log(worker_id, "Warning", f"Fetch failed for {lease.url}: {processing['error']}")
+                        self._append_log(
+                            worker_id,
+                            "Warning",
+                            f"{failure_stage.capitalize()} failed for {lease.url}: {processing['error']}",
+                        )
 
                     for link in processing["discoveredLinks"]:
                         self._enqueue_frontier_url(link)
@@ -931,12 +1008,138 @@ class DaemonWorkerService(WorkerControlService):
                             self._append_log(worker_id, "Info", "Local process finished (reason=process-exit).")
                         self._local_processes.pop(worker_id, None)
 
+    def _init_frontier_swap_store(self) -> None:
+        if not self._frontier_db_sync_enabled:
+            return
+        try:
+            self._frontier_swap_conn = get_connection()
+            self._frontier_swap_store = PostgresFrontierSwapStore(self._frontier_swap_conn)
+            self._append_log(1, "Info", "Frontier DB swap/log enabled.")
+        except Exception as exc:
+            self._frontier_swap_store = None
+            self._frontier_swap_conn = None
+            self._append_log(1, "Warning", f"Frontier DB swap unavailable; using memory-only queue: {exc}")
+
+    def _persist_frontier_row(
+        self,
+        *,
+        url: str,
+        priority: int = 0,
+        source_url: str | None = None,
+        depth: int = 0,
+        state: str = "queued",
+    ) -> None:
+        if self._frontier_swap_conn is None:
+            return
+        try:
+            with self._frontier_swap_conn.cursor() as cur:
+                cur.execute(
+                    """
+                    INSERT INTO crawldb.frontier_queue (
+                        canonical_url,
+                        priority,
+                        source_url,
+                        depth,
+                        state,
+                        discovered_at,
+                        dequeued_at
+                    )
+                    VALUES (%s, %s, %s, %s, %s, NOW(), CASE WHEN %s = 'queued' THEN NULL ELSE NOW() END)
+                    ON CONFLICT (canonical_url)
+                    DO UPDATE
+                        SET priority = GREATEST(crawldb.frontier_queue.priority, EXCLUDED.priority),
+                            source_url = COALESCE(EXCLUDED.source_url, crawldb.frontier_queue.source_url),
+                            depth = LEAST(crawldb.frontier_queue.depth, EXCLUDED.depth),
+                            state = EXCLUDED.state,
+                            dequeued_at = CASE WHEN EXCLUDED.state = 'queued' THEN NULL ELSE NOW() END;
+                    """,
+                    (url, priority, source_url, depth, state, state),
+                )
+            self._frontier_swap_conn.commit()
+        except Exception:
+            try:
+                self._frontier_swap_conn.rollback()
+            except Exception:
+                pass
+
+    def _mark_frontier_state(self, *, url: str, state: str) -> None:
+        if self._frontier_swap_conn is None:
+            return
+        try:
+            with self._frontier_swap_conn.cursor() as cur:
+                cur.execute(
+                    """
+                    UPDATE crawldb.frontier_queue
+                    SET state = %s,
+                        dequeued_at = CASE WHEN %s = 'queued' THEN NULL ELSE NOW() END
+                    WHERE canonical_url = %s;
+                    """,
+                    (state, state, url),
+                )
+            self._frontier_swap_conn.commit()
+        except Exception:
+            try:
+                self._frontier_swap_conn.rollback()
+            except Exception:
+                pass
+
+    def _hydrate_frontier_from_swap_store_if_needed(self) -> None:
+        if self._frontier_swap_store is None or self._frontier_queue:
+            return
+        try:
+            refill = self._frontier_swap_store.dequeue_batch(limit=self._frontier_swap_refill_batch_size)
+        except Exception:
+            return
+
+        loaded = 0
+        for entry in refill:
+            if self._is_tombstoned(entry.url):
+                continue
+            if self._is_url_active_any_queue(entry.url):
+                continue
+            self._known_frontier_urls.add(entry.url)
+            self._frontier_queue.append(entry.url)
+            loaded += 1
+
+        if loaded > 0:
+            self._emit_manager_event(
+                "queue-change",
+                payload={
+                    "action": "swap-refill",
+                    "loaded": loaded,
+                    "inMemoryQueued": len(self._frontier_queue),
+                },
+            )
+
+    def _is_url_active_any_queue(self, url: str) -> bool:
+        if url in self._known_frontier_urls:
+            return True
+        if url in self._frontier_leases:
+            return True
+        return any(url in known for known in self._worker_local_known_urls.values())
+
+    def _collision_prevention_enabled_for_worker(self, worker_id: int) -> bool:
+        for group in self._groups.values():
+            if worker_id in group.worker_ids and group.avoid_duplicate_paths_across_daemons is not None:
+                return bool(group.avoid_duplicate_paths_across_daemons)
+        return bool(self._global_config.avoid_duplicate_paths_across_daemons)
+
     def _enqueue_frontier_url(self, raw_url: str) -> bool:
         candidate = raw_url.strip()
         if not candidate:
             return False
         self._purge_expired_frontier_state()
-        if candidate in self._known_frontier_urls or self._is_tombstoned(candidate):
+        prevent_collisions = bool(self._global_config.avoid_duplicate_paths_across_daemons)
+        if self._is_tombstoned(candidate):
+            return False
+        if prevent_collisions and self._is_url_active_any_queue(candidate):
+            self._emit_manager_event(
+                "frontier-prune",
+                payload={
+                    "url": candidate,
+                    "reason": "already-active",
+                },
+            )
             return False
 
         queue_mode = self._global_config.queue_mode
@@ -949,8 +1152,32 @@ class DaemonWorkerService(WorkerControlService):
             should_enqueue_local = True
 
         self._known_frontier_urls.add(candidate)
+        spilled_to_db = False
         if should_enqueue_local:
-            self._frontier_queue.append(candidate)
+            entry = FrontierEntry(
+                url=candidate,
+                priority=0,
+                source_url=None,
+                depth=0,
+            )
+            max_in_memory = max(1, self._global_config.max_frontier_in_memory)
+            if len(self._frontier_queue) >= max_in_memory and self._frontier_swap_store is not None:
+                try:
+                    self._frontier_swap_store.enqueue(entry)
+                    spilled_to_db = True
+                except Exception:
+                    self._frontier_queue.append(candidate)
+            else:
+                self._frontier_queue.append(candidate)
+
+        if self._frontier_db_sync_enabled:
+            self._persist_frontier_row(
+                url=candidate,
+                priority=0,
+                source_url=None,
+                depth=0,
+                state="queued",
+            )
         self._emit_manager_event(
             "queue-change",
             payload={
@@ -961,6 +1188,7 @@ class DaemonWorkerService(WorkerControlService):
                 "localQueued": sum(len(queue) for queue in self._worker_local_queues.values()),
                 "knownUrls": len(self._known_frontier_urls),
                 "relayed": relayed,
+                "spilledToDb": spilled_to_db,
             },
         )
         return True
@@ -971,11 +1199,33 @@ class DaemonWorkerService(WorkerControlService):
             return False
         self._purge_expired_frontier_state()
         local_known = self._worker_local_known_urls[worker_id]
-        if candidate in local_known or self._is_tombstoned(candidate):
+        prevent_collisions = self._collision_prevention_enabled_for_worker(worker_id)
+        if self._is_tombstoned(candidate):
+            return False
+        if candidate in local_known:
+            return False
+        if prevent_collisions and self._is_url_active_any_queue(candidate):
+            self._emit_manager_event(
+                "frontier-prune",
+                worker_id=worker_id,
+                payload={
+                    "url": candidate,
+                    "reason": "already-active",
+                    "workerId": worker_id,
+                },
+            )
             return False
 
         self._worker_local_queues[worker_id].append(candidate)
         local_known.add(candidate)
+        if self._frontier_db_sync_enabled:
+            self._persist_frontier_row(
+                url=candidate,
+                priority=0,
+                source_url=None,
+                depth=0,
+                state="queued",
+            )
         self._emit_manager_event(
             "queue-change",
             worker_id=worker_id,
@@ -1000,6 +1250,8 @@ class DaemonWorkerService(WorkerControlService):
         local_lease = self._claim_from_worker_local_queue(worker_id)
         if local_lease is not None:
             return local_lease
+
+        self._hydrate_frontier_from_swap_store_if_needed()
 
         while self._frontier_queue:
             candidate = self._frontier_queue.popleft()
@@ -1078,6 +1330,8 @@ class DaemonWorkerService(WorkerControlService):
         )
         self._frontier_leases[url] = lease
         self._active_claim_by_worker[worker_id] = lease
+        if self._frontier_db_sync_enabled:
+            self._mark_frontier_state(url=url, state="processing")
         self._emit_manager_event(
             "frontier-lease",
             worker_id=worker_id,
@@ -1110,6 +1364,9 @@ class DaemonWorkerService(WorkerControlService):
             self._active_claim_by_worker.pop(worker_id, None)
 
         self._completed_tombstones[url] = time.monotonic() + self._tombstone_ttl_seconds
+        if self._frontier_db_sync_enabled:
+            db_state = "done" if status == "completed" else "failed"
+            self._mark_frontier_state(url=url, state=db_state)
         self._emit_manager_event(
             "frontier-complete",
             worker_id=worker_id,
@@ -1157,6 +1414,10 @@ class DaemonWorkerService(WorkerControlService):
         if requeue and not self._is_tombstoned(active.url) and active.url not in self._known_frontier_urls:
             self._known_frontier_urls.add(active.url)
             self._frontier_queue.appendleft(active.url)
+            if self._frontier_db_sync_enabled:
+                self._mark_frontier_state(url=active.url, state="queued")
+        elif self._frontier_db_sync_enabled:
+            self._mark_frontier_state(url=active.url, state="failed")
 
         self._emit_manager_event(
             "frontier-release",
@@ -1185,6 +1446,8 @@ class DaemonWorkerService(WorkerControlService):
             if url not in self._known_frontier_urls and not self._is_tombstoned(url):
                 self._known_frontier_urls.add(url)
                 self._frontier_queue.appendleft(url)
+                if self._frontier_db_sync_enabled:
+                    self._mark_frontier_state(url=url, state="queued")
                 self._emit_manager_event(
                     "frontier-lease-expired",
                     worker_id=lease.worker_id,
@@ -1229,8 +1492,8 @@ class DaemonWorkerService(WorkerControlService):
             return False
 
     def _download_and_extract_links(self, url: str) -> dict[str, Any]:
+        downloader = Downloader(user_agent=self._global_config.user_agent)
         try:
-            downloader = Downloader(user_agent=self._global_config.user_agent)
             download = downloader.fetch(
                 url,
                 render_html=False,
@@ -1238,21 +1501,10 @@ class DaemonWorkerService(WorkerControlService):
                 download_binary_content=False,
                 store_large_binary_content=False,
             )
-            discovered_links: list[str] = []
-            if download.html_content:
-                extracted = self._link_extractor.extract(download.html_content, download.final_url)
-                discovered_links = extracted.links[: self._max_extracted_links_per_page]
-
-            return {
-                "ok": True,
-                "error": None,
-                "finalUrl": download.final_url,
-                "downloadResult": self._to_download_payload(download),
-                "discoveredLinks": discovered_links,
-            }
         except Exception as exc:
             return {
                 "ok": False,
+                "stage": "fetch",
                 "error": str(exc),
                 "finalUrl": url,
                 "downloadResult": {
@@ -1266,6 +1518,30 @@ class DaemonWorkerService(WorkerControlService):
                     "usedRenderer": False,
                     "contentLength": None,
                 },
+                "discoveredLinks": [],
+            }
+
+        try:
+            discovered_links: list[str] = []
+            if download.html_content:
+                extracted = self._link_extractor.extract(download.html_content, download.final_url)
+                discovered_links = extracted.links[: self._max_extracted_links_per_page]
+
+            return {
+                "ok": True,
+                "stage": "complete",
+                "error": None,
+                "finalUrl": download.final_url,
+                "downloadResult": self._to_download_payload(download),
+                "discoveredLinks": discovered_links,
+            }
+        except Exception as exc:
+            return {
+                "ok": False,
+                "stage": "parse",
+                "error": str(exc),
+                "finalUrl": download.final_url,
+                "downloadResult": self._to_download_payload(download),
                 "discoveredLinks": [],
             }
 

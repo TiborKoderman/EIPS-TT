@@ -255,6 +255,18 @@
             <StatCard Label="Warnings+Errors" Value="@combinedLogs.Count(log => IsWarnOrError(log.Level)).ToString()" Footnote="recent rows" />
         </div>
 
+        <div class="mb-md">
+            <h3 class="card-title">Throughput Trend</h3>
+            @if (combinedThroughputSeries.Count == 0)
+            {
+                <p class="text-small text-muted">No throughput points yet.</p>
+            }
+            else
+            {
+                <ThroughputLineChart Points="combinedThroughputSeries" />
+            }
+        </div>
+
         <div class="workers-log-table-wrap">
             <table class="workers-log-table">
                 <thead>
