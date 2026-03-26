@@ -1,4 +1,4 @@
-﻿@page "/"
+@page "/"
 @using System.Text.Json
 @using ManagerApp.Services
 @using ManagerApp.Models
@@ -64,9 +64,11 @@
                 @if (workerStatusCounts != null && WorkerStatusTotal > 0)
                 {
                     <div class="dashboard-worker-status">
-                        <WorkerStatusPieChart StatusCounts="workerStatusCounts"
-                                              SelectedStatus="selectedWorkerStatus"
-                                              OnSliceClick="OnWorkerSliceClick" />
+                        <div style="flex: 0 0 auto;">
+                            <WorkerStatusPieChart StatusCounts="workerStatusCounts"
+                                                  SelectedStatus="selectedWorkerStatus"
+                                                  OnSliceClick="OnWorkerSliceClick" />
+                        </div>
                         <div class="dashboard-worker-status-list">
                             @foreach (var status in DashboardStatuses)
                             {
@@ -80,35 +82,51 @@
                                 </button>
                             }
                         </div>
-                        <div class="dashboard-queue-widget">
-                            <div class="text-small text-muted mb-sm">Queue</div>
-                            @if (daemonQueueSnapshots.Count == 0)
-                            {
-                                <div class="text-small text-muted">No daemon queue data yet.</div>
-                            }
-                            else
-                            {
-                                <ul class="list dashboard-queue-list">
-                                    @foreach (var snapshot in daemonQueueSnapshots.OrderBy(item => item.DaemonId))
-                                    {
-                                        <li class="list-item dashboard-queue-row">
-                                            <div class="flex items-center justify-between gap-sm">
-                                                <strong>@snapshot.DaemonId</strong>
-                                                <span class="badge badge-info">q @snapshot.InMemoryQueued</span>
-                                            </div>
-                                            <div class="text-small text-muted">
-                                                local @snapshot.LocalQueued | leases @snapshot.ActiveLeases | known @snapshot.KnownUrls
-                                            </div>
-                                        </li>
-                                    }
-                                </ul>
-                            }
-                        </div>
                     </div>
                 }
                 else
                 {
                     <p class="text-muted">No workers currently running</p>
+                }
+            </div>
+
+            <div class="card">
+                <div class="card-header-inline mb-sm">
+                    <h2 class="card-title mb-0">Frontier Queue</h2>
+                    <span class="live-pill"><span class="live-dot"></span> Live</span>
+                </div>
+                @if (daemonQueueSnapshots.Count == 0)
+                {
+                    <p class="text-small text-muted">No daemon queue data yet.</p>
+                }
+                else
+                {
+                    <div class="grid grid-cols-2 gap-md">
+                        @foreach (var snapshot in daemonQueueSnapshots.OrderBy(item => item.DaemonId))
+                        {
+                            <div>
+                                <div class="text-small font-semibold">@snapshot.DaemonId</div>
+                                <div class="grid grid-cols-2 gap-sm mt-sm text-small">
+                                    <div>
+                                        <div class="text-muted">In Memory</div>
+                                        <div class="font-semibold">@snapshot.InMemoryQueued</div>
+                                    </div>
+                                    <div>
+                                        <div class="text-muted">Local</div>
+                                        <div class="font-semibold">@snapshot.LocalQueued</div>
+                                    </div>
+                                    <div>
+                                        <div class="text-muted">Leases</div>
+                                        <div class="font-semibold">@snapshot.ActiveLeases</div>
+                                    </div>
+                                    <div>
+                                        <div class="text-muted">Known URLs</div>
+                                        <div class="font-semibold">@snapshot.KnownUrls</div>
+                                    </div>
+                                </div>
+                            </div>
+                        }
+                    </div>
                 }
             </div>
 
@@ -152,6 +170,46 @@
                 }
             </div>
 
+            <div class="card">
+                <div class="card-header-inline mb-md">
+                    <h2 class="card-title mb-0">Recent Events</h2>
+                    <div class="flex items-center gap-sm">
+                        <span class="live-pill"><span class="live-dot"></span> Live</span>
+                        <span class="text-small text-muted">@GetRecentEventSourceLabel()</span>
+                    </div>
+                </div>
+                @if (recentLogs.Count == 0)
+                {
+                    <p class="text-small text-muted">No recent events yet.</p>
+                }
+                else
+                {
+                    <div class="workers-log-table-wrap">
+                        <table class="workers-log-table">
+                            <thead>
+                                <tr>
+                                    <th>SEV</th>
+                                    <th>TS</th>
+                                    <th>Scope</th>
+                                    <th>Message</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                @foreach (var log in recentLogs.OrderByDescending(l => l.TimestampUtc).Take(15))
+                                {
+                                    <tr>
+                                        <td><span class="badge @GetLogLevelClass(log.Level)">@log.Level</span></td>
+                                        <td class="workers-log-ts">@log.TimestampUtc.ToLocalTime().ToString("HH:mm:ss")</td>
+                                        <td class="text-small text-muted">@((log.DaemonId ?? "local-default") + " / w" + (log.WorkerId?.ToString() ?? "-"))</td>
+                                        <td>@log.Message</td>
+                                    </tr>
+                                }
+                            </tbody>
+                        </table>
+                    </div>
+                }
+            </div>
+
             <div class="card dashboard-graph-card">
                 <div class="card-header-inline mb-md">
                     <h2 class="card-title mb-0">Node Graph Preview</h2>
@@ -184,7 +242,10 @@
             <div class="card">
                 <div class="card-header-inline mb-md">
                     <h2 class="card-title mb-0">Cluster Throughput Trend</h2>
-                    <span class="live-pill"><span class="live-dot"></span> Live</span>
+                    <div class="flex items-center gap-sm">
+                        <span class="live-pill"><span class="live-dot"></span> Live</span>
+                        <span class="text-small text-muted">@GetThroughputSourceLabel()</span>
+                    </div>
                 </div>
                 @if (dashboardThroughputSeries.Count == 0)
                 {
@@ -211,6 +272,7 @@
     private List<WorkerViewModel> workers = new();
     private List<DaemonQueueSnapshot> daemonQueueSnapshots = new();
     private List<WorkerThroughputPointViewModel> dashboardThroughputSeries = new();
+    private List<WorkerLogEntryViewModel> recentLogs = new();
     private GraphDataDto graphPreview = new();
     private string? graphError;
     private string? selectedWorkerStatus;
@@ -221,6 +283,8 @@
     private readonly SemaphoreSlim workerRefreshLock = new(1, 1);
     private static readonly string[] DashboardStatuses = ["Active", "Idle", "Paused", "Error", "Stopped"];
     private DateTime lastDashboardUpdateUtc = DateTime.UtcNow;
+    private bool recentLogsUsingFallback;
+    private bool dashboardThroughputUsingFallback;
 
     private int WorkerStatusTotal => workerStatusCounts?.Values.Sum() ?? 0;
 
@@ -306,9 +370,22 @@
             workerStatusCounts = BuildStatusCounts(workers);
 
             var daemonStatus = await WorkerService.GetDaemonStatusAsync();
-            var events = await WorkerService.GetRecentCrawlerEventsAsync(200);
+            var events = await WorkerService.GetRecentCrawlerEventsAsync(2000);
             daemonQueueSnapshots = BuildDaemonQueueSnapshots(daemonStatus, events);
             dashboardThroughputSeries = await WorkerService.GetThroughputSeriesAsync(workerId: null, windowMinutes: 60, bucketSeconds: 30);
+            dashboardThroughputUsingFallback = false;
+            if (dashboardThroughputSeries.Count == 0)
+            {
+                dashboardThroughputSeries = BuildThroughputSeriesFromCrawlerEvents(events, windowMinutes: 60, bucketSeconds: 30);
+                dashboardThroughputUsingFallback = dashboardThroughputSeries.Count > 0;
+            }
+            recentLogs = await WorkerService.GetPersistedWorkerLogsAsync(workerId: null, limit: 50);
+            recentLogsUsingFallback = false;
+            if (recentLogs.Count == 0)
+            {
+                recentLogs = BuildLogsFromCrawlerEvents(events, 50);
+                recentLogsUsingFallback = true;
+            }
 
             lastDashboardUpdateUtc = DateTime.UtcNow;
         }
@@ -345,6 +422,26 @@
             "paused" => "badge-warning",
             _ => "badge-info"
         };
+    }
+
+    private string GetLogLevelClass(string level) =>
+        (level ?? "").ToLowerInvariant() switch
+        {
+            "error" => "badge-error",
+            "warn" or "warning" => "badge-warning",
+            "info" => "badge-info",
+            "debug" => "badge-secondary",
+            _ => "badge-secondary"
+        };
+
+    private string GetRecentEventSourceLabel()
+    {
+        return recentLogsUsingFallback ? "source: live event fallback" : "source: persisted worker_log";
+    }
+
+    private string GetThroughputSourceLabel()
+    {
+        return dashboardThroughputUsingFallback ? "source: live event fallback" : "source: persisted worker_metric";
     }
 
     private static Dictionary<string, int> BuildStatusCounts(IEnumerable<WorkerViewModel> source)
@@ -508,6 +605,378 @@
         return new WorkerActivity("mdi-cog-outline", "Processing", "activity-processing", true);
     }
 
+    private static List<WorkerLogEntryViewModel> BuildLogsFromCrawlerEvents(
+        IReadOnlyList<CrawlerEventViewModel> events,
+        int limit)
+    {
+        var bounded = Math.Clamp(limit, 1, 200);
+        return events
+            .OrderByDescending(evt => evt.TimestampUtc)
+            .Take(bounded)
+            .Select(evt => new WorkerLogEntryViewModel
+            {
+                TimestampUtc = evt.TimestampUtc,
+                Level = ResolveEventLevel(evt.Type, evt.PayloadJson),
+                Message = FormatEventMessage(evt.Type, evt.PayloadJson),
+                DaemonId = string.IsNullOrWhiteSpace(evt.DaemonId) ? "local-default" : evt.DaemonId,
+                WorkerId = evt.WorkerId,
+            })
+            .ToList();
+    }
+
+    private static string InferLevelFromEventType(string eventType)
+    {
+        var normalized = (eventType ?? string.Empty).Trim().ToLowerInvariant();
+        if (normalized.Contains("error") || normalized.Contains("failed"))
+        {
+            return "Error";
+        }
+
+        if (normalized.Contains("warn"))
+        {
+            return "Warning";
+        }
+
+        return "Info";
+    }
+
+    private static string ResolveEventLevel(string eventType, string payloadJson)
+    {
+        try
+        {
+            using var document = JsonDocument.Parse(payloadJson);
+            if (document.RootElement.ValueKind == JsonValueKind.Object
+                && document.RootElement.TryGetProperty("level", out var levelElement)
+                && levelElement.ValueKind == JsonValueKind.String)
+            {
+                var level = levelElement.GetString();
+                if (!string.IsNullOrWhiteSpace(level))
+                {
+                    return level.Trim();
+                }
+            }
+        }
+        catch
+        {
+            // fall back to event type inference below
+        }
+
+        return InferLevelFromEventType(eventType);
+    }
+
+    private static string FormatEventMessage(string eventType, string payloadJson)
+    {
+        try
+        {
+            using var document = JsonDocument.Parse(payloadJson);
+            if (document.RootElement.ValueKind != JsonValueKind.Object)
+            {
+                return $"[{eventType}] {payloadJson}";
+            }
+
+            if (document.RootElement.TryGetProperty("message", out var messageElement)
+                && messageElement.ValueKind == JsonValueKind.String)
+            {
+                var message = messageElement.GetString();
+                if (!string.IsNullOrWhiteSpace(message))
+                {
+                    if ((string.Equals(eventType, "worker-metric", StringComparison.OrdinalIgnoreCase)
+                        || (string.Equals(eventType, "worker-log", StringComparison.OrdinalIgnoreCase)
+                            && message.Contains("[worker-metric]", StringComparison.OrdinalIgnoreCase)))
+                        && TryFormatMetricMessage(message.Trim(), out var metricMessage))
+                    {
+                        return metricMessage;
+                    }
+
+                    return string.Equals(eventType, "worker-log", StringComparison.OrdinalIgnoreCase)
+                        ? message.Trim()
+                        : $"[{eventType}] {message.Trim()}";
+                }
+            }
+
+            var parts = new List<string>();
+            AppendPayloadPart(parts, document.RootElement, "status");
+            AppendPayloadPart(parts, document.RootElement, "reason");
+            AppendPayloadPart(parts, document.RootElement, "url");
+            AppendPayloadPart(parts, document.RootElement, "name");
+            AppendPayloadPart(parts, document.RootElement, "inMemoryQueued");
+            AppendPayloadPart(parts, document.RootElement, "localQueued");
+            AppendPayloadPart(parts, document.RootElement, "activeLeases");
+            AppendPayloadPart(parts, document.RootElement, "knownUrls");
+            AppendPayloadPart(parts, document.RootElement, "error");
+            AppendPayloadPart(parts, document.RootElement, "pages_processed_total");
+            AppendPayloadPart(parts, document.RootElement, "errors_total");
+            AppendPayloadPart(parts, document.RootElement, "page_processed");
+            AppendPayloadPart(parts, document.RootElement, "page_error");
+
+            if (parts.Count > 0)
+            {
+                return $"[{eventType}] {string.Join(" | ", parts)}";
+            }
+        }
+        catch
+        {
+            // keep raw payload if parsing fails
+        }
+
+        return $"[{eventType}] {payloadJson}";
+    }
+
+    private static void AppendPayloadPart(List<string> parts, JsonElement root, string key)
+    {
+        if (!root.TryGetProperty(key, out var value))
+        {
+            return;
+        }
+
+        var text = value.ValueKind switch
+        {
+            JsonValueKind.String => value.GetString(),
+            JsonValueKind.Number => value.GetRawText(),
+            JsonValueKind.True => "true",
+            JsonValueKind.False => "false",
+            _ => null,
+        };
+
+        if (!string.IsNullOrWhiteSpace(text))
+        {
+            parts.Add($"{key}={text}");
+        }
+    }
+
+    private static List<WorkerThroughputPointViewModel> BuildThroughputSeriesFromCrawlerEvents(
+        IReadOnlyList<CrawlerEventViewModel> events,
+        int windowMinutes,
+        int bucketSeconds)
+    {
+        var windowStart = DateTime.UtcNow.AddMinutes(-Math.Clamp(windowMinutes, 5, 24 * 60));
+        var boundedBucket = Math.Clamp(bucketSeconds, 10, 600);
+        var bucketSums = new Dictionary<DateTime, double>();
+
+        foreach (var evt in events)
+        {
+            if (evt.TimestampUtc < windowStart)
+            {
+                continue;
+            }
+
+            if (!TryParseMetricIncrement(evt.PayloadJson, out var increment) || increment <= 0)
+            {
+                continue;
+            }
+
+            var bucket = FloorToBucketUtc(evt.TimestampUtc, boundedBucket);
+            bucketSums[bucket] = bucketSums.TryGetValue(bucket, out var current) ? current + increment : increment;
+        }
+
+        return bucketSums
+            .OrderBy(item => item.Key)
+            .Select(item => new WorkerThroughputPointViewModel
+            {
+                TimestampUtc = item.Key,
+                Value = item.Value,
+            })
+            .ToList();
+    }
+
+    private static bool TryParseMetricIncrement(string payloadJson, out double value)
+    {
+        value = 0;
+
+        if (string.IsNullOrWhiteSpace(payloadJson))
+        {
+            return false;
+        }
+
+        try
+        {
+            using var document = JsonDocument.Parse(payloadJson);
+            if (document.RootElement.ValueKind != JsonValueKind.Object)
+            {
+                return false;
+            }
+
+            if (document.RootElement.TryGetProperty("type", out var typeElement)
+                && typeElement.ValueKind == JsonValueKind.String
+                && string.Equals(typeElement.GetString(), "page-reported", StringComparison.OrdinalIgnoreCase))
+            {
+                value = 1;
+                return true;
+            }
+
+            if (document.RootElement.TryGetProperty("page_processed", out var pageProcessed)
+                && TryReadNumericValue(pageProcessed, out var parsedIncrement))
+            {
+                value = parsedIncrement;
+                return true;
+            }
+
+            if (document.RootElement.TryGetProperty("metric_value", out var metricValue)
+                && TryReadNumericValue(metricValue, out var parsedMetricValue))
+            {
+                value = parsedMetricValue;
+                return true;
+            }
+
+            if (document.RootElement.TryGetProperty("event_type", out var eventType)
+                && eventType.ValueKind == JsonValueKind.String
+                && string.Equals(eventType.GetString(), "page-reported", StringComparison.OrdinalIgnoreCase))
+            {
+                value = 1;
+                return true;
+            }
+
+            if (document.RootElement.TryGetProperty("status", out var statusElement)
+                && statusElement.ValueKind == JsonValueKind.String
+                && string.Equals(statusElement.GetString(), "Active", StringComparison.OrdinalIgnoreCase)
+                && document.RootElement.TryGetProperty("url", out var urlElement)
+                && urlElement.ValueKind == JsonValueKind.String)
+            {
+                value = 1;
+                return true;
+            }
+
+            if (document.RootElement.TryGetProperty("message", out var messageElement)
+                && messageElement.ValueKind == JsonValueKind.String)
+            {
+                return TryParseMetricIncrementFromString(messageElement.GetString(), out value);
+            }
+        }
+        catch
+        {
+            return false;
+        }
+
+        return false;
+    }
+
+    private static bool TryParseMetricIncrementFromString(string? metricText, out double value)
+    {
+        value = 0;
+        if (string.IsNullOrWhiteSpace(metricText))
+        {
+            return false;
+        }
+
+        var candidate = metricText.Trim();
+        var firstBrace = candidate.IndexOf('{');
+        if (firstBrace >= 0)
+        {
+            candidate = candidate[firstBrace..];
+        }
+
+        try
+        {
+            using var nestedDoc = JsonDocument.Parse(candidate);
+            if (nestedDoc.RootElement.ValueKind != JsonValueKind.Object)
+            {
+                return false;
+            }
+
+            if (nestedDoc.RootElement.TryGetProperty("page_processed", out var pageProcessed)
+                && TryReadNumericValue(pageProcessed, out var parsedIncrement))
+            {
+                value = parsedIncrement;
+                return true;
+            }
+
+            if (nestedDoc.RootElement.TryGetProperty("metric_value", out var metricValue)
+                && TryReadNumericValue(metricValue, out var parsedMetricValue))
+            {
+                value = parsedMetricValue;
+                return true;
+            }
+
+            if (nestedDoc.RootElement.TryGetProperty("type", out var typeElement)
+                && typeElement.ValueKind == JsonValueKind.String
+                && string.Equals(typeElement.GetString(), "page-reported", StringComparison.OrdinalIgnoreCase))
+            {
+                value = 1;
+                return true;
+            }
+
+            if (nestedDoc.RootElement.TryGetProperty("event_type", out var eventType)
+                && eventType.ValueKind == JsonValueKind.String
+                && string.Equals(eventType.GetString(), "page-reported", StringComparison.OrdinalIgnoreCase))
+            {
+                value = 1;
+                return true;
+            }
+        }
+        catch
+        {
+            return false;
+        }
+
+        return false;
+    }
+
+    private static bool TryReadNumericValue(JsonElement element, out double value)
+    {
+        value = 0;
+        if (element.ValueKind == JsonValueKind.Number)
+        {
+            return element.TryGetDouble(out value);
+        }
+
+        if (element.ValueKind == JsonValueKind.String)
+        {
+            return double.TryParse(element.GetString(), out value);
+        }
+
+        return false;
+    }
+
+    private static bool TryFormatMetricMessage(string metricText, out string formatted)
+    {
+        formatted = string.Empty;
+        var candidate = metricText;
+        var firstBrace = candidate.IndexOf('{');
+        if (firstBrace >= 0)
+        {
+            candidate = candidate[firstBrace..];
+        }
+
+        try
+        {
+            using var document = JsonDocument.Parse(candidate);
+            if (document.RootElement.ValueKind != JsonValueKind.Object)
+            {
+                return false;
+            }
+
+            var parts = new List<string>();
+            AppendPayloadPart(parts, document.RootElement, "pages_processed_total");
+            AppendPayloadPart(parts, document.RootElement, "errors_total");
+            AppendPayloadPart(parts, document.RootElement, "page_processed");
+            AppendPayloadPart(parts, document.RootElement, "page_error");
+            AppendPayloadPart(parts, document.RootElement, "frontier_in_memory");
+            AppendPayloadPart(parts, document.RootElement, "frontier_leases");
+
+            if (parts.Count == 0)
+            {
+                return false;
+            }
+
+            formatted = $"[worker-metric] {string.Join(" | ", parts)}";
+            return true;
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
+    private static DateTime FloorToBucketUtc(DateTime timestampUtc, int bucketSeconds)
+    {
+        var normalized = timestampUtc.Kind == DateTimeKind.Utc
+            ? timestampUtc
+            : DateTime.SpecifyKind(timestampUtc, DateTimeKind.Utc);
+        var ticksPerBucket = TimeSpan.FromSeconds(bucketSeconds).Ticks;
+        var flooredTicks = normalized.Ticks - (normalized.Ticks % ticksPerBucket);
+        return new DateTime(flooredTicks, DateTimeKind.Utc);
+    }
+
     private readonly record struct WorkerActivity(string IconClass, string Label, string CssClass, bool IsProcessing);
 
     private sealed class DaemonQueueSnapshot
@@ -545,4 +1014,3 @@
         return ValueTask.CompletedTask;
     }
 }
-

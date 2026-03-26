@@ -19,7 +19,7 @@ public sealed class CrawlerRelayService
     private readonly int _workerMetricRetentionDays;
     private readonly TimeSpan _cleanupInterval;
     private DateTime _lastCleanupUtc = DateTime.MinValue;
-    private const int MaxRecentEvents = 400;
+    private const int MaxRecentEvents = 5000;
 
     public CrawlerRelayService(
         IDbContextFactory<CrawldbContext> contextFactory,

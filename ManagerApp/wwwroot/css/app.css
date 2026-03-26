@@ -426,7 +426,8 @@ textarea:focus {
 .dashboard-worker-status {
     display: flex;
     gap: var(--spacing-md);
-    align-items: flex-start;
+    align-items: center;
+    justify-content: flex-start;
 }
 
 .dashboard-worker-status-list {
@@ -935,13 +936,84 @@ textarea:focus {
     overflow: auto;
 }
 
+.pages-toolbar-card {
+    background: linear-gradient(180deg, #ffffff 0%, #f8fcfa 100%);
+}
+
+.pages-toolbar-row {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) 220px auto auto auto;
+    gap: var(--spacing-sm);
+    align-items: center;
+}
+
+.pages-search-shell {
+    position: relative;
+}
+
+.pages-search-icon {
+    position: absolute;
+    left: 12px;
+    top: 50%;
+    transform: translateY(-50%);
+    color: var(--color-text-tertiary);
+    font-size: 18px;
+    pointer-events: none;
+}
+
+.pages-search-input {
+    min-height: 44px;
+    padding-left: 40px;
+    font-size: var(--font-size-lg);
+    border-radius: var(--radius-md);
+}
+
+.pages-filter-shell {
+    position: relative;
+}
+
+.pages-filter-shell select {
+    min-height: 44px;
+    padding-left: 34px;
+    border-radius: var(--radius-md);
+}
+
+.pages-filter-icon {
+    position: absolute;
+    left: 10px;
+    top: 50%;
+    transform: translateY(-50%);
+    color: var(--color-text-tertiary);
+    pointer-events: none;
+}
+
+.pages-search-button {
+    min-height: 44px;
+    min-width: 130px;
+}
+
+.page-results-table-wrap {
+    max-height: 620px;
+    overflow: auto;
+    border: 1px solid var(--color-border-light);
+    border-radius: var(--radius-sm);
+}
+
+.page-results-table {
+    width: 100%;
+    border-collapse: collapse;
+}
+
 .page-row {
     cursor: pointer;
 }
 
-.page-row.selected {
-    border-left: 3px solid var(--color-primary);
+.page-results-table .page-row.selected {
     background: var(--color-primary-light);
+}
+
+.page-results-table .page-row.selected td:first-child {
+    box-shadow: inset 3px 0 0 0 var(--color-primary);
 }
 
 .page-url {
@@ -1056,5 +1128,9 @@ textarea:focus {
 
     .graph-toolbar {
         flex-wrap: wrap;
+    }
+
+    .pages-toolbar-row {
+        grid-template-columns: 1fr;
     }
 }

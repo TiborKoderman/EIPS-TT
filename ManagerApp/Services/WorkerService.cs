@@ -463,7 +463,7 @@ public class WorkerService : IWorkerService
     public Task<List<CrawlerEventViewModel>> GetRecentCrawlerEventsAsync(int limit = 40)
     {
         LastError = null;
-        var boundedLimit = Math.Clamp(limit, 1, 200);
+        var boundedLimit = Math.Clamp(limit, 1, 5000);
         var events = _crawlerRelay
             .GetRecentEvents(boundedLimit)
             .Select(evt => new CrawlerEventViewModel

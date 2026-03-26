@@ -241,6 +241,11 @@ public sealed class LocalDaemonHostedService : IHostedService
         }
 
         var urls = Environment.GetEnvironmentVariable("ASPNETCORE_URLS");
+        if (string.IsNullOrWhiteSpace(urls))
+        {
+            // `dotnet run --urls ...` is exposed via configuration even when env var is unset.
+            urls = _configuration["urls"];
+        }
         if (!string.IsNullOrWhiteSpace(urls))
         {
             var candidates = urls.Split(';', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
@@ -257,7 +262,8 @@ public sealed class LocalDaemonHostedService : IHostedService
             }
         }
 
-        return "http://127.0.0.1:5160";
+        // Fallback to the default `dotnet run` Kestrel HTTP port.
+        return "http://127.0.0.1:5000";
     }
 
     private string ResolveManagerSocketUrl(string managerHttpBaseUrl)

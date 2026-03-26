@@ -1,4 +1,5 @@
 @page "/workers"
+@using System.Text.Json
 @using ManagerApp.Models
 @using ManagerApp.Services
 @implements IAsyncDisposable
@@ -236,7 +237,11 @@
     <div class="card mb-lg">
         <div class="card-header-inline mb-sm">
             <h2 class="card-title mb-0">Daemon Combined Logs and Metrics</h2>
-            <span class="live-pill"><span class="live-dot"></span> Live</span>
+            <div class="flex items-center gap-sm">
+                <span class="live-pill"><span class="live-dot"></span> Live</span>
+                <span class="text-small text-muted">@GetCombinedLogSourceLabel()</span>
+                <span class="text-small text-muted">@GetChannelStatusLabel()</span>
+            </div>
         </div>
         <div class="workers-observability-toolbar mb-sm">
             <select @bind="CombinedSeverityFilter">
@@ -256,7 +261,10 @@
         </div>
 
         <div class="mb-md">
-            <h3 class="card-title">Throughput Trend</h3>
+            <div class="card-header-inline mb-xs">
+                <h3 class="card-title mb-0">Throughput Trend</h3>
+                <span class="text-small text-muted">@GetCombinedThroughputSourceLabel()</span>
+            </div>
             @if (combinedThroughputSeries.Count == 0)
             {
                 <p class="text-small text-muted">No throughput points yet.</p>
@@ -293,7 +301,7 @@
                                 <td>
                                     @if (log.WorkerId.HasValue)
                                     {
-                                        <span class="text-small text-muted">w@log.WorkerId · </span>
+                                        <span class="text-small text-muted">@($"w{log.WorkerId} · ")</span>
                                     }
                                     @log.Message
                                 </td>
@@ -339,6 +347,8 @@
     private string SpawnSeedUrlsText { get; set; } = "";
     private string CombinedSeverityFilter { get; set; } = "all";
     private string CombinedLogSearch { get; set; } = "";
+    private bool combinedLogsUsingFallback;
+    private bool combinedThroughputUsingFallback;
 
     private IReadOnlyList<string> WorkerApiPending =>
     [
@@ -396,6 +406,7 @@
         daemonStatus = await WorkerService.GetDaemonStatusAsync();
         workerItems = await WorkerService.GetAllWorkersAsync();
         daemonGroups = await WorkerService.GetWorkerGroupsAsync();
+        var recentEvents = await WorkerService.GetRecentCrawlerEventsAsync(2000);
         daemonConnections = DaemonChannel.GetConnectionInfos().ToList();
         commandDiagnostics = await WorkerService.GetCommandQueueDiagnosticsAsync();
         combinedLogs = await WorkerService.GetPersistedWorkerLogsAsync(
@@ -403,7 +414,19 @@
             limit: 160,
             severity: CombinedSeverityFilter,
             search: CombinedLogSearch);
+        combinedLogsUsingFallback = false;
+        if (combinedLogs.Count == 0)
+        {
+            combinedLogs = BuildLogsFromCrawlerEvents(recentEvents, 160, CombinedSeverityFilter, CombinedLogSearch);
+            combinedLogsUsingFallback = true;
+        }
         combinedThroughputSeries = await WorkerService.GetThroughputSeriesAsync(workerId: null, windowMinutes: 60, bucketSeconds: 30);
+        combinedThroughputUsingFallback = false;
+        if (combinedThroughputSeries.Count == 0)
+        {
+            combinedThroughputSeries = BuildThroughputSeriesFromCrawlerEvents(recentEvents, windowMinutes: 60, bucketSeconds: 30);
+            combinedThroughputUsingFallback = combinedThroughputSeries.Count > 0;
+        }
 
         var groupedWorkerIds = daemonGroups
             .SelectMany(group => group.WorkerIds)
@@ -773,6 +796,410 @@
             "debug" => "badge-info",
             _ => "badge-success",
         };
+    }
+
+    private string GetCombinedLogSourceLabel()
+    {
+        return combinedLogsUsingFallback ? "source: live event fallback" : "source: persisted worker_log";
+    }
+
+    private string GetCombinedThroughputSourceLabel()
+    {
+        return combinedThroughputUsingFallback ? "source: live event fallback" : "source: persisted worker_metric";
+    }
+
+    private string GetChannelStatusLabel()
+    {
+        return daemonConnections.Count > 0 ? "channel: connected" : "channel: disconnected";
+    }
+
+    private static List<WorkerLogEntryViewModel> BuildLogsFromCrawlerEvents(
+        IReadOnlyList<CrawlerEventViewModel> events,
+        int limit,
+        string? severity,
+        string? search)
+    {
+        var normalizedSeverity = string.IsNullOrWhiteSpace(severity)
+            || string.Equals(severity, "all", StringComparison.OrdinalIgnoreCase)
+            ? null
+            : severity.Trim();
+        var normalizedSearch = string.IsNullOrWhiteSpace(search) ? null : search.Trim();
+
+        var rows = events
+            .OrderByDescending(evt => evt.TimestampUtc)
+            .Select(evt => new WorkerLogEntryViewModel
+            {
+                TimestampUtc = evt.TimestampUtc,
+                Level = ResolveEventLevel(evt.Type, evt.PayloadJson),
+                Message = FormatEventMessage(evt.Type, evt.PayloadJson),
+                DaemonId = string.IsNullOrWhiteSpace(evt.DaemonId) ? "local-default" : evt.DaemonId,
+                WorkerId = evt.WorkerId,
+            });
+
+        if (!string.IsNullOrWhiteSpace(normalizedSeverity))
+        {
+            rows = rows.Where(log => string.Equals(log.Level, normalizedSeverity, StringComparison.OrdinalIgnoreCase));
+        }
+
+        if (!string.IsNullOrWhiteSpace(normalizedSearch))
+        {
+            rows = rows.Where(log => log.Message.Contains(normalizedSearch, StringComparison.OrdinalIgnoreCase));
+        }
+
+        return rows.Take(Math.Clamp(limit, 1, 400)).ToList();
+    }
+
+    private static string InferLevelFromEventType(string eventType)
+    {
+        var normalized = (eventType ?? string.Empty).Trim().ToLowerInvariant();
+        if (normalized.Contains("error") || normalized.Contains("failed"))
+        {
+            return "Error";
+        }
+
+        if (normalized.Contains("warn"))
+        {
+            return "Warning";
+        }
+
+        return "Info";
+    }
+
+    private static string ResolveEventLevel(string eventType, string payloadJson)
+    {
+        try
+        {
+            using var document = JsonDocument.Parse(payloadJson);
+            if (document.RootElement.ValueKind == JsonValueKind.Object
+                && document.RootElement.TryGetProperty("level", out var levelElement)
+                && levelElement.ValueKind == JsonValueKind.String)
+            {
+                var level = levelElement.GetString();
+                if (!string.IsNullOrWhiteSpace(level))
+                {
+                    return level.Trim();
+                }
+            }
+        }
+        catch
+        {
+            // fall back to event type inference below
+        }
+
+        return InferLevelFromEventType(eventType);
+    }
+
+    private static string FormatEventMessage(string eventType, string payloadJson)
+    {
+        try
+        {
+            using var document = JsonDocument.Parse(payloadJson);
+            if (document.RootElement.ValueKind != JsonValueKind.Object)
+            {
+                return $"[{eventType}] {payloadJson}";
+            }
+
+            if (document.RootElement.TryGetProperty("message", out var messageElement)
+                && messageElement.ValueKind == JsonValueKind.String)
+            {
+                var message = messageElement.GetString();
+                if (!string.IsNullOrWhiteSpace(message))
+                {
+                    if ((string.Equals(eventType, "worker-metric", StringComparison.OrdinalIgnoreCase)
+                        || (string.Equals(eventType, "worker-log", StringComparison.OrdinalIgnoreCase)
+                            && message.Contains("[worker-metric]", StringComparison.OrdinalIgnoreCase)))
+                        && TryFormatMetricMessage(message.Trim(), out var metricMessage))
+                    {
+                        return metricMessage;
+                    }
+
+                    return string.Equals(eventType, "worker-log", StringComparison.OrdinalIgnoreCase)
+                        ? message.Trim()
+                        : $"[{eventType}] {message.Trim()}";
+                }
+            }
+
+            var parts = new List<string>();
+            AppendPayloadPart(parts, document.RootElement, "status");
+            AppendPayloadPart(parts, document.RootElement, "reason");
+            AppendPayloadPart(parts, document.RootElement, "url");
+            AppendPayloadPart(parts, document.RootElement, "name");
+            AppendPayloadPart(parts, document.RootElement, "inMemoryQueued");
+            AppendPayloadPart(parts, document.RootElement, "localQueued");
+            AppendPayloadPart(parts, document.RootElement, "activeLeases");
+            AppendPayloadPart(parts, document.RootElement, "knownUrls");
+            AppendPayloadPart(parts, document.RootElement, "error");
+            AppendPayloadPart(parts, document.RootElement, "pages_processed_total");
+            AppendPayloadPart(parts, document.RootElement, "errors_total");
+            AppendPayloadPart(parts, document.RootElement, "page_processed");
+            AppendPayloadPart(parts, document.RootElement, "page_error");
+
+            if (parts.Count > 0)
+            {
+                return $"[{eventType}] {string.Join(" | ", parts)}";
+            }
+        }
+        catch
+        {
+            // keep raw payload if parsing fails
+        }
+
+        return $"[{eventType}] {payloadJson}";
+    }
+
+    private static void AppendPayloadPart(List<string> parts, JsonElement root, string key)
+    {
+        if (!root.TryGetProperty(key, out var value))
+        {
+            return;
+        }
+
+        var text = value.ValueKind switch
+        {
+            JsonValueKind.String => value.GetString(),
+            JsonValueKind.Number => value.GetRawText(),
+            JsonValueKind.True => "true",
+            JsonValueKind.False => "false",
+            _ => null,
+        };
+
+        if (!string.IsNullOrWhiteSpace(text))
+        {
+            parts.Add($"{key}={text}");
+        }
+    }
+
+    private static List<WorkerThroughputPointViewModel> BuildThroughputSeriesFromCrawlerEvents(
+        IReadOnlyList<CrawlerEventViewModel> events,
+        int windowMinutes,
+        int bucketSeconds)
+    {
+        var windowStart = DateTime.UtcNow.AddMinutes(-Math.Clamp(windowMinutes, 5, 24 * 60));
+        var boundedBucket = Math.Clamp(bucketSeconds, 10, 600);
+        var bucketSums = new Dictionary<DateTime, double>();
+
+        foreach (var evt in events)
+        {
+            if (evt.TimestampUtc < windowStart)
+            {
+                continue;
+            }
+
+            if (!TryParseMetricIncrement(evt.PayloadJson, out var increment) || increment <= 0)
+            {
+                continue;
+            }
+
+            var bucket = FloorToBucketUtc(evt.TimestampUtc, boundedBucket);
+            bucketSums[bucket] = bucketSums.TryGetValue(bucket, out var current) ? current + increment : increment;
+        }
+
+        return bucketSums
+            .OrderBy(item => item.Key)
+            .Select(item => new WorkerThroughputPointViewModel
+            {
+                TimestampUtc = item.Key,
+                Value = item.Value,
+            })
+            .ToList();
+    }
+
+    private static bool TryParseMetricIncrement(string payloadJson, out double value)
+    {
+        value = 0;
+
+        if (string.IsNullOrWhiteSpace(payloadJson))
+        {
+            return false;
+        }
+
+        try
+        {
+            using var document = JsonDocument.Parse(payloadJson);
+            if (document.RootElement.ValueKind != JsonValueKind.Object)
+            {
+                return false;
+            }
+
+            if (document.RootElement.TryGetProperty("type", out var typeElement)
+                && typeElement.ValueKind == JsonValueKind.String
+                && string.Equals(typeElement.GetString(), "page-reported", StringComparison.OrdinalIgnoreCase))
+            {
+                value = 1;
+                return true;
+            }
+
+            if (document.RootElement.TryGetProperty("page_processed", out var pageProcessed)
+                && TryReadNumericValue(pageProcessed, out var parsedIncrement))
+            {
+                value = parsedIncrement;
+                return true;
+            }
+
+            if (document.RootElement.TryGetProperty("metric_value", out var metricValue)
+                && TryReadNumericValue(metricValue, out var parsedMetricValue))
+            {
+                value = parsedMetricValue;
+                return true;
+            }
+
+            if (document.RootElement.TryGetProperty("event_type", out var eventType)
+                && eventType.ValueKind == JsonValueKind.String
+                && string.Equals(eventType.GetString(), "page-reported", StringComparison.OrdinalIgnoreCase))
+            {
+                value = 1;
+                return true;
+            }
+
+            if (document.RootElement.TryGetProperty("status", out var statusElement)
+                && statusElement.ValueKind == JsonValueKind.String
+                && string.Equals(statusElement.GetString(), "Active", StringComparison.OrdinalIgnoreCase)
+                && document.RootElement.TryGetProperty("url", out var urlElement)
+                && urlElement.ValueKind == JsonValueKind.String)
+            {
+                value = 1;
+                return true;
+            }
+
+            if (document.RootElement.TryGetProperty("message", out var messageElement)
+                && messageElement.ValueKind == JsonValueKind.String)
+            {
+                return TryParseMetricIncrementFromString(messageElement.GetString(), out value);
+            }
+        }
+        catch
+        {
+            return false;
+        }
+
+        return false;
+    }
+
+    private static bool TryParseMetricIncrementFromString(string? metricText, out double value)
+    {
+        value = 0;
+        if (string.IsNullOrWhiteSpace(metricText))
+        {
+            return false;
+        }
+
+        var candidate = metricText.Trim();
+        var firstBrace = candidate.IndexOf('{');
+        if (firstBrace >= 0)
+        {
+            candidate = candidate[firstBrace..];
+        }
+
+        try
+        {
+            using var nestedDoc = JsonDocument.Parse(candidate);
+            if (nestedDoc.RootElement.ValueKind != JsonValueKind.Object)
+            {
+                return false;
+            }
+
+            if (nestedDoc.RootElement.TryGetProperty("page_processed", out var pageProcessed)
+                && TryReadNumericValue(pageProcessed, out var parsedIncrement))
+            {
+                value = parsedIncrement;
+                return true;
+            }
+
+            if (nestedDoc.RootElement.TryGetProperty("metric_value", out var metricValue)
+                && TryReadNumericValue(metricValue, out var parsedMetricValue))
+            {
+                value = parsedMetricValue;
+                return true;
+            }
+
+            if (nestedDoc.RootElement.TryGetProperty("type", out var typeElement)
+                && typeElement.ValueKind == JsonValueKind.String
+                && string.Equals(typeElement.GetString(), "page-reported", StringComparison.OrdinalIgnoreCase))
+            {
+                value = 1;
+                return true;
+            }
+
+            if (nestedDoc.RootElement.TryGetProperty("event_type", out var eventType)
+                && eventType.ValueKind == JsonValueKind.String
+                && string.Equals(eventType.GetString(), "page-reported", StringComparison.OrdinalIgnoreCase))
+            {
+                value = 1;
+                return true;
+            }
+        }
+        catch
+        {
+            return false;
+        }
+
+        return false;
+    }
+
+    private static bool TryReadNumericValue(JsonElement element, out double value)
+    {
+        value = 0;
+        if (element.ValueKind == JsonValueKind.Number)
+        {
+            return element.TryGetDouble(out value);
+        }
+
+        if (element.ValueKind == JsonValueKind.String)
+        {
+            return double.TryParse(element.GetString(), out value);
+        }
+
+        return false;
+    }
+
+    private static bool TryFormatMetricMessage(string metricText, out string formatted)
+    {
+        formatted = string.Empty;
+        var candidate = metricText;
+        var firstBrace = candidate.IndexOf('{');
+        if (firstBrace >= 0)
+        {
+            candidate = candidate[firstBrace..];
+        }
+
+        try
+        {
+            using var document = JsonDocument.Parse(candidate);
+            if (document.RootElement.ValueKind != JsonValueKind.Object)
+            {
+                return false;
+            }
+
+            var parts = new List<string>();
+            AppendPayloadPart(parts, document.RootElement, "pages_processed_total");
+            AppendPayloadPart(parts, document.RootElement, "errors_total");
+            AppendPayloadPart(parts, document.RootElement, "page_processed");
+            AppendPayloadPart(parts, document.RootElement, "page_error");
+            AppendPayloadPart(parts, document.RootElement, "frontier_in_memory");
+            AppendPayloadPart(parts, document.RootElement, "frontier_leases");
+
+            if (parts.Count == 0)
+            {
+                return false;
+            }
+
+            formatted = $"[worker-metric] {string.Join(" | ", parts)}";
+            return true;
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
+    private static DateTime FloorToBucketUtc(DateTime timestampUtc, int bucketSeconds)
+    {
+        var normalized = timestampUtc.Kind == DateTimeKind.Utc
+            ? timestampUtc
+            : DateTime.SpecifyKind(timestampUtc, DateTimeKind.Utc);
+        var ticksPerBucket = TimeSpan.FromSeconds(bucketSeconds).Ticks;
+        var flooredTicks = normalized.Ticks - (normalized.Ticks % ticksPerBucket);
+        return new DateTime(flooredTicks, DateTimeKind.Utc);
     }
 
     private readonly record struct WorkerActivity(string IconClass, string Label, string CssClass, bool IsProcessing);

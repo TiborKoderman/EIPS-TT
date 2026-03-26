@@ -1,4 +1,5 @@
 @page "/workers/strategy"
+@using System.Text.Json
 @using ManagerApp.Models
 @using ManagerApp.Services
 @implements IAsyncDisposable
@@ -161,19 +162,29 @@
             }
             else
             {
-                <ul class="list">
-                    @foreach (var evt in liveArbitrationEvents)
-                    {
-                        <li class="list-item">
-                            <div class="flex items-center justify-between gap-sm">
-                                <strong>@evt.Type</strong>
-                                <span class="text-small text-muted">@evt.TimestampUtc.ToLocalTime().ToString("HH:mm:ss")</span>
-                            </div>
-                            <div class="text-small text-muted">Daemon: @evt.DaemonId · Worker: @(evt.WorkerId?.ToString() ?? "-")</div>
-                            <div class="text-small text-muted">@evt.PayloadJson</div>
-                        </li>
-                    }
-                </ul>
+                <div class="workers-log-table-wrap">
+                    <table class="workers-log-table">
+                        <thead>
+                            <tr>
+                                <th>TS</th>
+                                <th>Type</th>
+                                <th>Scope</th>
+                                <th>Message</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            @foreach (var evt in liveArbitrationEvents)
+                            {
+                                <tr>
+                                    <td class="workers-log-ts">@evt.TimestampUtc.ToLocalTime().ToString("HH:mm:ss")</td>
+                                    <td><span class="badge badge-info">@evt.Type</span></td>
+                                    <td class="text-small text-muted">@((evt.DaemonId ?? "local-default") + " / w" + (evt.WorkerId?.ToString() ?? "-"))</td>
+                                    <td>@FormatArbitrationEventMessage(evt)</td>
+                                </tr>
+                            }
+                        </tbody>
+                    </table>
+                </div>
             }
         </div>
     }
@@ -488,6 +499,62 @@
             .OrderByDescending(evt => evt.TimestampUtc)
             .Take(20)
             .ToList();
+    }
+
+    private static string FormatArbitrationEventMessage(CrawlerEventViewModel evt)
+    {
+        if (string.IsNullOrWhiteSpace(evt.PayloadJson))
+        {
+            return "-";
+        }
+
+        try
+        {
+            using var document = JsonDocument.Parse(evt.PayloadJson);
+            if (document.RootElement.ValueKind != JsonValueKind.Object)
+            {
+                return evt.PayloadJson;
+            }
+
+            var parts = new List<string>();
+            AppendPayloadPart(parts, document.RootElement, "action");
+            AppendPayloadPart(parts, document.RootElement, "url");
+            AppendPayloadPart(parts, document.RootElement, "source");
+            AppendPayloadPart(parts, document.RootElement, "status");
+            AppendPayloadPart(parts, document.RootElement, "reason");
+            AppendPayloadPart(parts, document.RootElement, "inMemoryQueued");
+            AppendPayloadPart(parts, document.RootElement, "localQueued");
+            AppendPayloadPart(parts, document.RootElement, "activeLeases");
+            AppendPayloadPart(parts, document.RootElement, "knownUrls");
+
+            return parts.Count > 0 ? string.Join(" | ", parts) : evt.PayloadJson;
+        }
+        catch
+        {
+            return evt.PayloadJson;
+        }
+    }
+
+    private static void AppendPayloadPart(List<string> parts, JsonElement root, string key)
+    {
+        if (!root.TryGetProperty(key, out var value))
+        {
+            return;
+        }
+
+        var text = value.ValueKind switch
+        {
+            JsonValueKind.String => value.GetString(),
+            JsonValueKind.Number => value.GetRawText(),
+            JsonValueKind.True => "true",
+            JsonValueKind.False => "false",
+            _ => null,
+        };
+
+        if (!string.IsNullOrWhiteSpace(text))
+        {
+            parts.Add($"{key}={text}");
+        }
     }
 
     public ValueTask DisposeAsync()

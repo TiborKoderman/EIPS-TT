@@ -88,7 +88,8 @@ class DaemonWorkerService(WorkerControlService):
                 },
             ),
         }
-        self._next_worker_id = max(self._workers) + 1
+        # Bootstrap next_worker_id from both in-memory workers and persisted history
+        self._next_worker_id = self._bootstrap_worker_id_counter()
         self._global_config = GlobalWorkerConfig()
         self._groups: dict[int, WorkerGroupSettings] = {
             1: WorkerGroupSettings(
@@ -146,6 +147,10 @@ class DaemonWorkerService(WorkerControlService):
             os.getenv("CRAWLER_FRONTIER_DB_SYNC_ENABLED", "true"),
             True,
         )
+        self._frontier_remove_terminal_rows = _coerce_bool(
+            os.getenv("CRAWLER_FRONTIER_REMOVE_TERMINAL_ROWS", "true"),
+            True,
+        )
         self._frontier_swap_conn = None
         self._frontier_swap_store: PostgresFrontierSwapStore | None = None
         self._link_extractor = LinkExtractor()
@@ -156,6 +161,40 @@ class DaemonWorkerService(WorkerControlService):
 
         self._simulator_thread = threading.Thread(target=self._simulation_loop, daemon=True)
         self._simulator_thread.start()
+
+    def _bootstrap_worker_id_counter(self) -> int:
+        """Calculate next available worker ID, considering both in-memory and persisted workers."""
+        max_memory_id = max(self._workers.keys()) if self._workers else 0
+        max_persisted_id = self._get_max_worker_id_from_db()
+        # Use the higher of the two, then add 1 to avoid conflicts.
+        return max(max_memory_id, max_persisted_id) + 1
+
+    def _get_max_worker_id_from_db(self) -> int:
+        """Query database for maximum external_worker_id ever used."""
+        try:
+            conn = get_connection()
+            if conn is None:
+                return 0
+            try:
+                with conn.cursor() as cur:
+                    # Check all manager tables that persist worker identity.
+                    cur.execute(
+                        """
+                        SELECT GREATEST(
+                            COALESCE((SELECT MAX(external_worker_id) FROM manager.worker), 0),
+                            COALESCE((SELECT MAX(external_worker_id) FROM manager.worker_log), 0),
+                            COALESCE((SELECT MAX(external_worker_id) FROM manager.worker_metric), 0),
+                            COALESCE((SELECT MAX(external_worker_id) FROM manager.seed_url), 0)
+                        );
+                        """
+                    )
+                    result = cur.fetchone()
+                    return int(result[0]) if result and result[0] else 0
+            finally:
+                conn.close()
+        except Exception:
+            # Fall back to in-memory IDs if DB isn't reachable.
+            return 0
 
     def get_daemon_status(self) -> dict[str, object]:
         with self._lock:
@@ -262,9 +301,33 @@ class DaemonWorkerService(WorkerControlService):
             worker = self._workers.get(worker_id)
             if worker is None:
                 return False
-            if worker.mode == "thread" and worker_id not in self._thread_workers:
+
+            if worker.status == "Active" and self._is_worker_execution_alive_locked(worker_id):
+                return True
+
+            if not self._can_start_worker_locked(worker_id):
+                worker.status = "Idle"
+                worker.status_reason = "max-concurrency-reached"
+                self._append_log(
+                    worker_id,
+                    "Warning",
+                    f"Worker start blocked by maxConcurrentWorkers={self._global_config.max_concurrent_workers}.",
+                )
+                self._emit_manager_event(
+                    "status-change",
+                    worker_id=worker_id,
+                    payload={"status": worker.status, "reason": worker.status_reason},
+                )
+                return False
+
+            if worker.mode == "thread":
                 self._launch_thread_worker(worker_id, worker.current_url)
                 return True
+
+            if worker.mode == "local":
+                self._launch_local_worker_process(worker_id, worker.current_url)
+                return worker.status == "Active"
+
             worker.status = "Active"
             worker.status_reason = "manually-started"
             worker.started_at = utc_now_iso()
@@ -363,10 +426,11 @@ class DaemonWorkerService(WorkerControlService):
             if len(normalized_seed_urls) > 1:
                 self._append_log(worker_id, "Info", f"Configured {len(normalized_seed_urls)} seed URLs.")
 
-            if requested_mode == "local":
-                self._launch_local_worker_process(worker_id, effective_seed_url)
-            elif requested_mode == "thread":
-                self._launch_thread_worker(worker_id, effective_seed_url)
+            self._append_log(
+                worker_id,
+                "Info",
+                "Worker spawned in Idle state; call start-worker to begin crawling.",
+            )
 
             self._emit_manager_event(
                 "worker-spawned",
@@ -864,6 +928,15 @@ class DaemonWorkerService(WorkerControlService):
             }
 
     def _launch_local_worker_process(self, worker_id: int, seed_url: str | None) -> None:
+        existing = self._local_processes.get(worker_id)
+        if existing is not None and existing.poll() is None:
+            worker = self._workers[worker_id]
+            worker.pid = existing.pid
+            worker.status = "Active"
+            worker.status_reason = "local-process-running"
+            worker.started_at = worker.started_at or utc_now_iso()
+            return
+
         repo_root = Path(__file__).resolve().parents[3]
         main_path = repo_root / "pa1" / "crawler" / "src" / "main.py"
         if not main_path.exists():
@@ -900,7 +973,46 @@ class DaemonWorkerService(WorkerControlService):
         if worker is not None:
             worker.pid = None
 
+    def _is_worker_execution_alive_locked(self, worker_id: int) -> bool:
+        process = self._local_processes.get(worker_id)
+        if process is not None and process.poll() is None:
+            return True
+
+        thread_entry = self._thread_workers.get(worker_id)
+        if thread_entry is not None:
+            thread, _ = thread_entry
+            if thread.is_alive():
+                return True
+            self._thread_workers.pop(worker_id, None)
+
+        return False
+
+    def _can_start_worker_locked(self, worker_id: int) -> bool:
+        max_workers = max(1, self._global_config.max_concurrent_workers)
+        active_running = 0
+
+        for candidate in self._workers.values():
+            if candidate.id == worker_id:
+                continue
+            if candidate.status != "Active":
+                continue
+            if self._is_worker_execution_alive_locked(candidate.id):
+                active_running += 1
+
+        return active_running < max_workers
+
     def _launch_thread_worker(self, worker_id: int, seed_url: str | None) -> None:
+        existing = self._thread_workers.get(worker_id)
+        if existing is not None:
+            thread, _ = existing
+            if thread.is_alive():
+                worker = self._workers[worker_id]
+                worker.status = "Active"
+                worker.status_reason = "thread-running"
+                worker.started_at = worker.started_at or utc_now_iso()
+                return
+            self._thread_workers.pop(worker_id, None)
+
         worker = self._workers[worker_id]
         stop_event = threading.Event()
         if seed_url:
@@ -1092,15 +1204,25 @@ class DaemonWorkerService(WorkerControlService):
             return
         try:
             with self._frontier_swap_conn.cursor() as cur:
-                cur.execute(
-                    """
-                    UPDATE crawldb.frontier_queue
-                    SET state = %s,
-                        dequeued_at = CASE WHEN %s = 'queued' THEN NULL ELSE NOW() END
-                    WHERE url = %s;
-                    """,
-                    (state, state, url),
-                )
+                normalized_state = state.strip().lower()
+                if self._frontier_remove_terminal_rows and normalized_state in {"done", "failed", "completed"}:
+                    cur.execute(
+                        """
+                        DELETE FROM crawldb.frontier_queue
+                        WHERE url = %s;
+                        """,
+                        (url,),
+                    )
+                else:
+                    cur.execute(
+                        """
+                        UPDATE crawldb.frontier_queue
+                        SET state = %s,
+                            dequeued_at = CASE WHEN %s = 'queued' THEN NULL ELSE NOW() END
+                        WHERE url = %s;
+                        """,
+                        (state, state, url),
+                    )
             self._frontier_swap_conn.commit()
         except Exception:
             try:

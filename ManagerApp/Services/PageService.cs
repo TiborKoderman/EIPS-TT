@@ -31,16 +31,24 @@ public class PageService : IPageService
         // Filter by page type if specified
         if (!string.IsNullOrWhiteSpace(pageType) && pageType != "ALL")
         {
-            query = query.Where(p => p.PageTypeCode == pageType);
+            var normalizedType = pageType.Trim().ToUpperInvariant();
+            if (normalizedType == "DUPLICATE")
+            {
+                query = query.Where(p => p.DuplicateOfPageId != null);
+            }
+            else
+            {
+                query = query.Where(p => p.PageTypeCode != null && p.PageTypeCode.ToUpper() == normalizedType);
+            }
         }
 
         // Fuzzy search on URL and HTML content (case-insensitive)
         if (!string.IsNullOrWhiteSpace(searchTerm))
         {
-            var lowerSearch = searchTerm.ToLower();
+            var pattern = $"%{searchTerm.Trim()}%";
             query = query.Where(p =>
-                (p.Url != null && p.Url.ToLower().Contains(lowerSearch)) ||
-                (p.HtmlContent != null && p.HtmlContent.ToLower().Contains(lowerSearch))
+                (p.Url != null && EF.Functions.ILike(p.Url, pattern)) ||
+                (p.HtmlContent != null && EF.Functions.ILike(p.HtmlContent, pattern))
             );
         }
 
@@ -73,15 +81,23 @@ public class PageService : IPageService
 
         if (!string.IsNullOrWhiteSpace(pageType) && pageType != "ALL")
         {
-            query = query.Where(p => p.PageTypeCode == pageType);
+            var normalizedType = pageType.Trim().ToUpperInvariant();
+            if (normalizedType == "DUPLICATE")
+            {
+                query = query.Where(p => p.DuplicateOfPageId != null);
+            }
+            else
+            {
+                query = query.Where(p => p.PageTypeCode != null && p.PageTypeCode.ToUpper() == normalizedType);
+            }
         }
 
         if (!string.IsNullOrWhiteSpace(searchTerm))
         {
-            var lowerSearch = searchTerm.ToLower();
+            var pattern = $"%{searchTerm.Trim()}%";
             query = query.Where(p =>
-                (p.Url != null && p.Url.ToLower().Contains(lowerSearch)) ||
-                (p.HtmlContent != null && p.HtmlContent.ToLower().Contains(lowerSearch))
+                (p.Url != null && EF.Functions.ILike(p.Url, pattern)) ||
+                (p.HtmlContent != null && EF.Functions.ILike(p.HtmlContent, pattern))
             );
         }
 

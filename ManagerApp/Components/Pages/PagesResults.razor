@@ -3,6 +3,7 @@
 @using ManagerApp.Models
 @using ManagerApp.Services
 @inject IPageService PageService
+@implements IAsyncDisposable
 
 <div class="page-header">
     <h1 class="page-title">Collected Pages</h1>
@@ -10,19 +11,36 @@
 </div>
 
 <div class="page-body">
-    <div class="card mb-lg">
-        <div class="grid grid-cols-3 gap-md">
-            <input type="search" placeholder="Search URL or content..." @bind="SearchTerm" @bind:event="oninput" />
-            <select @bind="PageTypeFilter">
-                <option value="ALL">All page types</option>
-                <option value="HTML">HTML</option>
-                <option value="BINARY">BINARY</option>
-                <option value="DUPLICATE">DUPLICATE</option>
-                <option value="FRONTIER">FRONTIER</option>
-            </select>
-            <button class="btn btn-primary" @onclick="Reload">
-                <span class="mdi mdi-magnify"></span> Search
+    <div class="card mb-lg pages-toolbar-card">
+        <div class="pages-toolbar-row">
+            <div class="pages-search-shell">
+                <span class="mdi mdi-magnify pages-search-icon" aria-hidden="true"></span>
+                <input
+                    class="pages-search-input"
+                    type="search"
+                    placeholder="Search URL or page content..."
+                    value="@SearchTerm"
+                    @oninput="OnSearchInput" />
+            </div>
+
+            <div class="pages-filter-shell">
+                <span class="mdi mdi-filter-variant pages-filter-icon" aria-hidden="true"></span>
+                <select value="@PageTypeFilter" @onchange="OnFilterChanged">
+                    <option value="ALL">All page types</option>
+                    <option value="HTML">HTML</option>
+                    <option value="BINARY">BINARY</option>
+                    <option value="DUPLICATE">DUPLICATE</option>
+                    <option value="FRONTIER">FRONTIER</option>
+                </select>
+            </div>
+
+            <button class="btn btn-primary pages-search-button" @onclick="() => ReloadAsync(keepSelection: true)">
+                <span class="mdi mdi-magnify"></span>
+                <span>Search</span>
             </button>
+
+            <span class="live-pill"><span class="live-dot"></span> Live</span>
+            <span class="text-small text-muted">updated @GetSinceUpdateText()</span>
         </div>
     </div>
 
@@ -35,24 +53,39 @@
             }
             else
             {
-                <ul class="list page-results-list">
-                    @foreach (var row in Rows)
-                    {
-                        <li class="list-item page-row @(SelectedPage?.Id == row.Id ? "selected" : "")"
-                            @onclick="() => SelectPage(row.Id)">
-                            <div class="text-small text-muted">@row.SiteDomain</div>
-                            <div class="page-url">@row.Url</div>
-                            <div class="flex items-center gap-sm">
-                                <span class="badge badge-info">@row.PageType</span>
-                                <span class="text-small text-muted">HTTP @row.HttpStatus</span>
-                                @if (row.IsDuplicate)
-                                {
-                                    <span class="badge badge-warning">Duplicate</span>
-                                }
-                            </div>
-                        </li>
-                    }
-                </ul>
+                <div class="page-results-table-wrap">
+                    <table class="workers-log-table page-results-table">
+                        <thead>
+                            <tr>
+                                <th>TS</th>
+                                <th>Type</th>
+                                <th>HTTP</th>
+                                <th>URL</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            @foreach (var row in Rows)
+                            {
+                                <tr class="page-row @(SelectedPage?.Id == row.Id ? "selected" : "")"
+                                    @onclick="() => SelectPage(row.Id)">
+                                    <td class="workers-log-ts">@(row.AccessedTime.HasValue ? row.AccessedTime.Value.ToLocalTime().ToString("HH:mm:ss") : "-")</td>
+                                    <td>
+                                        <span class="badge badge-info">@row.PageType</span>
+                                        @if (row.IsDuplicate)
+                                        {
+                                            <span class="badge badge-warning">Dup</span>
+                                        }
+                                    </td>
+                                    <td>@(row.HttpStatus?.ToString() ?? "-")</td>
+                                    <td>
+                                        <div class="page-url">@row.Url</div>
+                                        <div class="text-small text-muted">@(string.IsNullOrWhiteSpace(row.SiteDomain) ? "-" : row.SiteDomain)</div>
+                                    </td>
+                                </tr>
+                            }
+                        </tbody>
+                    </table>
+                </div>
             }
         </div>
 
@@ -87,29 +120,105 @@
 
     private List<PageSearchDto> Rows = new();
     private Page? SelectedPage;
+    private PeriodicTimer? _liveTimer;
+    private CancellationTokenSource? _liveCts;
+    private CancellationTokenSource? _searchDebounceCts;
+    private DateTime _lastUpdatedUtc = DateTime.UtcNow;
 
     protected override async Task OnInitializedAsync()
     {
-        await Reload();
+        await ReloadAsync(keepSelection: false);
+
+        _liveCts = new CancellationTokenSource();
+        _liveTimer = new PeriodicTimer(TimeSpan.FromSeconds(3));
+        _ = Task.Run(async () =>
+        {
+            while (_liveTimer is not null && await _liveTimer.WaitForNextTickAsync(_liveCts.Token))
+            {
+                await InvokeAsync(async () =>
+                {
+                    await ReloadAsync(keepSelection: true);
+                    StateHasChanged();
+                });
+            }
+        }, _liveCts.Token);
     }
 
-    private async Task Reload()
+    private async Task OnSearchInput(ChangeEventArgs args)
     {
+        SearchTerm = args.Value?.ToString() ?? string.Empty;
+
+        _searchDebounceCts?.Cancel();
+        _searchDebounceCts?.Dispose();
+        _searchDebounceCts = new CancellationTokenSource();
+
+        try
+        {
+            await Task.Delay(280, _searchDebounceCts.Token);
+            await ReloadAsync(keepSelection: true);
+        }
+        catch (OperationCanceledException)
+        {
+            // New input arrived before debounce interval finished.
+        }
+    }
+
+    private async Task OnFilterChanged(ChangeEventArgs args)
+    {
+        PageTypeFilter = args.Value?.ToString() ?? "ALL";
+        await ReloadAsync(keepSelection: true);
+    }
+
+    private async Task ReloadAsync(bool keepSelection)
+    {
+        var selectedId = keepSelection ? SelectedPage?.Id : null;
         Rows = await PageService.SearchPagesAsync(SearchTerm, PageTypeFilter, 0, 120);
         Total = await PageService.GetSearchResultsCountAsync(SearchTerm, PageTypeFilter);
+        _lastUpdatedUtc = DateTime.UtcNow;
 
-        if (Rows.Count > 0)
+        if (Rows.Count == 0)
         {
-            await SelectPage(Rows[0].Id);
+            SelectedPage = null;
+            return;
+        }
+
+        if (selectedId.HasValue && Rows.Any(row => row.Id == selectedId.Value))
+        {
+            await SelectPage(selectedId.Value);
         }
         else
         {
-            SelectedPage = null;
+            await SelectPage(Rows[0].Id);
         }
     }
 
     private async Task SelectPage(int pageId)
     {
         SelectedPage = await PageService.GetPageDetailsAsync(pageId);
+    }
+
+    private string GetSinceUpdateText()
+    {
+        var seconds = Math.Max(0, (int)(DateTime.UtcNow - _lastUpdatedUtc).TotalSeconds);
+        return $"{seconds}s ago";
+    }
+
+    public ValueTask DisposeAsync()
+    {
+        _searchDebounceCts?.Cancel();
+        _searchDebounceCts?.Dispose();
+
+        try
+        {
+            _liveCts?.Cancel();
+        }
+        catch
+        {
+            // Ignore shutdown race when cancelling live timer.
+        }
+
+        _liveTimer?.Dispose();
+        _liveCts?.Dispose();
+        return ValueTask.CompletedTask;
     }
 }
