@@ -39,6 +39,10 @@ public sealed class CommandDispatchHostedService : BackgroundService
             {
                 await DispatchQueuedCommandsAsync(stoppingToken);
             }
+            catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
+            {
+                break;
+            }
             catch (Exception ex)
             {
                 if (!TryLogConnectionWarning(ex))
@@ -47,7 +51,14 @@ public sealed class CommandDispatchHostedService : BackgroundService
                 }
             }
 
-            await Task.Delay(pollIntervalMs, stoppingToken);
+            try
+            {
+                await Task.Delay(pollIntervalMs, stoppingToken);
+            }
+            catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
+            {
+                break;
+            }
         }
     }
 
