@@ -447,6 +447,8 @@ public class WorkerService : IWorkerService
     public async Task<CommandQueueDiagnosticsViewModel> GetCommandQueueDiagnosticsAsync()
     {
         var diagnostics = new CommandQueueDiagnosticsViewModel();
+        var lookbackMinutes = Math.Clamp(_configuration.GetValue("CrawlerApi:DiagnosticsLookbackMinutes", 60), 5, 24 * 60);
+        diagnostics.RecentWindowMinutes = lookbackMinutes;
 
         try
         {
@@ -462,11 +464,14 @@ public class WorkerService : IWorkerService
             const string countsSql = """
                 SELECT status, COUNT(*)
                 FROM manager.command
-                WHERE NOT (command_type = 'start-daemon' AND status = 'failed')
+                WHERE COALESCE(completed_at, created_at) >= NOW() - make_interval(mins => @lookback_minutes)
+                  AND NOT (command_type = 'start-daemon' AND status = 'failed')
                 GROUP BY status;
                 """;
 
             await using (var cmd = new NpgsqlCommand(countsSql, connection))
+            {
+                cmd.Parameters.AddWithValue("lookback_minutes", lookbackMinutes);
             await using (var reader = await cmd.ExecuteReaderAsync())
             {
                 while (await reader.ReadAsync())
@@ -493,16 +498,20 @@ public class WorkerService : IWorkerService
                     }
                 }
             }
+            }
 
             const string failureSql = """
                 SELECT error_message
                 FROM manager.command
-                WHERE status = 'failed' AND error_message IS NOT NULL
+                WHERE status = 'failed'
+                  AND error_message IS NOT NULL
+                  AND COALESCE(completed_at, created_at) >= NOW() - make_interval(mins => @lookback_minutes)
                 ORDER BY COALESCE(completed_at, created_at) DESC
                 LIMIT 1;
                 """;
 
             await using var failureCmd = new NpgsqlCommand(failureSql, connection);
+            failureCmd.Parameters.AddWithValue("lookback_minutes", lookbackMinutes);
             var failure = await failureCmd.ExecuteScalarAsync();
             diagnostics.LastFailure = failure as string;
         }

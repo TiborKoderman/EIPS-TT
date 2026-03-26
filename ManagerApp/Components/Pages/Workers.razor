@@ -56,6 +56,9 @@
             </div>
             <div class="flex items-center gap-sm">
                 <input type="text" placeholder="Worker name (optional)" @bind="SpawnWorkerName" />
+                <button class="btn btn-primary" @onclick="QuickStartCrawling">
+                    <span class="mdi mdi-rocket-launch-outline"></span> Quick Start
+                </button>
                 <button class="btn btn-primary" @onclick="SpawnWorker" disabled="@(daemonStatus?.Running != true)">
                     <span class="mdi mdi-plus"></span> Add Worker
                 </button>
@@ -81,7 +84,7 @@
             <StatCard Label="Connected Daemons" Value="@daemonConnections.Count.ToString()" Footnote="WebSocket channel" />
             <StatCard Label="Queued" Value="@commandDiagnostics.Queued.ToString()" Footnote="Awaiting dispatch" />
             <StatCard Label="In Flight" Value="@((commandDiagnostics.Dispatched + commandDiagnostics.Acknowledged).ToString())" Footnote="Dispatched/acknowledged" />
-            <StatCard Label="Failed" Value="@commandDiagnostics.Failed.ToString()" Footnote="Command execution failures" />
+            <StatCard Label="Failed" Value="@commandDiagnostics.Failed.ToString()" Footnote="@($"Command failures ({commandDiagnostics.RecentWindowMinutes}m)")" />
         </div>
 
         @if (daemonConnections.Count == 0)
@@ -179,6 +182,10 @@
                                                 <div class="worker-title">@worker.Name</div>
                                                 <div class="text-small text-muted">@worker.CurrentUrl</div>
                                                 <div class="text-small">Processed: @worker.PagesProcessed | Errors: @worker.ErrorCount</div>
+                                                @if (!string.IsNullOrWhiteSpace(worker.StatusReason))
+                                                {
+                                                    <div class="text-small text-muted">Reason: @worker.StatusReason</div>
+                                                }
                                             </div>
                                             <div class="worker-row-actions" @onclick:stopPropagation="true">
                                                 <span class="badge @GetStatusBadgeClass(worker.Status)">@worker.Status</span>
@@ -460,6 +467,72 @@
         }
 
         await RefreshAsync();
+    }
+
+    private async Task QuickStartCrawling()
+    {
+        if (globalConfig == null)
+        {
+            globalConfig = await WorkerService.GetGlobalConfigAsync();
+        }
+
+        if (daemonStatus?.Running != true)
+        {
+            var daemonStarted = await WorkerService.StartDaemonAsync();
+            if (!daemonStarted)
+            {
+                actionStatus = $"Quick Start failed to start daemon. {WorkerService.LastError}";
+                return;
+            }
+        }
+
+        await RefreshAsync();
+
+        var seeds = (globalConfig?.SeedEntries ?? new List<SeedEntryViewModel>())
+            .Where(entry => entry.Enabled && !string.IsNullOrWhiteSpace(entry.Url))
+            .Select(entry => entry.Url.Trim())
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToList();
+
+        if (seeds.Count == 0)
+        {
+            actionStatus = "Quick Start needs at least one enabled seed in Global Config.";
+            return;
+        }
+
+        if (SpawnGroupId <= 0 && SpawnableDaemons.Count > 0)
+        {
+            SpawnGroupId = SpawnableDaemons[0].Id;
+        }
+
+        var selectedDaemon = Daemons.FirstOrDefault(group => group.Id == SpawnGroupId);
+        var activeInSelectedDaemon = selectedDaemon != null
+            && workerItems.Any(worker =>
+                selectedDaemon.WorkerIds.Contains(worker.Id)
+                && string.Equals(worker.Status, "Active", StringComparison.OrdinalIgnoreCase));
+
+        if (!activeInSelectedDaemon)
+        {
+            var spawned = await WorkerService.SpawnWorkerAsync(
+                name: $"Crawler-{DateTime.Now:HHmmss}",
+                daemonGroupId: SpawnGroupId,
+                mode: "thread",
+                seedUrls: seeds);
+
+            if (spawned == null)
+            {
+                actionStatus = $"Quick Start failed to spawn worker. {WorkerService.LastError}";
+                return;
+            }
+        }
+
+        if (selectedDaemon != null)
+        {
+            await StartAllInDaemon(selectedDaemon);
+        }
+
+        await RefreshAsync();
+        actionStatus = "Quick Start complete: daemon running, seeds queued, workers active.";
     }
 
     private async Task ToggleDaemon()

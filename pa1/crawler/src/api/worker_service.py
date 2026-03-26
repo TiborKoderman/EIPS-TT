@@ -14,6 +14,7 @@ from pathlib import Path
 from urllib import error, request
 import json
 from dataclasses import dataclass
+from typing import Any
 
 from api.contracts import (
     GlobalWorkerConfig,
@@ -25,6 +26,8 @@ from api.contracts import (
     utc_now_iso,
 )
 from api.service_protocol import WorkerControlService
+from core.downloader import DownloadResult, Downloader
+from core.link_extractor import LinkExtractor
 
 
 @dataclass
@@ -69,6 +72,7 @@ class DaemonWorkerService(WorkerControlService):
                 id=1,
                 name="Worker-1",
                 status="Idle",
+                status_reason="daemon-initialized",
                 current_url=None,
                 pages_processed=0,
                 error_count=0,
@@ -124,6 +128,11 @@ class DaemonWorkerService(WorkerControlService):
         self._allow_daemon_db_fallback = os.getenv(
             "CRAWLER_DAEMON_ALLOW_DB_FALLBACK", "true"
         ).strip().lower() in {"1", "true", "yes", "on"}
+        self._max_extracted_links_per_page = max(
+            5,
+            _coerce_int(os.getenv("CRAWLER_MAX_EXTRACTED_LINKS_PER_PAGE", "30"), 30),
+        )
+        self._link_extractor = LinkExtractor()
 
         for worker in self._workers.values():
             self._append_log(worker.id, "Info", f"{worker.name} initialized in {worker.mode} mode.")
@@ -170,6 +179,7 @@ class DaemonWorkerService(WorkerControlService):
             for worker in self._workers.values():
                 if worker.status == "Stopped":
                     worker.status = "Idle"
+                    worker.status_reason = "daemon-started"
                 self._append_log(worker.id, "Info", "Daemon started.")
                 self._emit_manager_event(
                     "status-change",
@@ -196,10 +206,11 @@ class DaemonWorkerService(WorkerControlService):
             self._daemon_running = False
             for worker in self._workers.values():
                 worker.status = "Stopped"
+                worker.status_reason = "daemon-stopped"
                 worker.current_url = None
                 worker.pid = None
                 self._release_claim_for_worker(worker.id, requeue=True, reason="daemon-stop")
-                self._append_log(worker.id, "Info", "Daemon stopped; worker transitioned to Stopped.")
+                self._append_log(worker.id, "Info", "Daemon stopped; worker transitioned to Stopped (reason=daemon-stop).")
                 self._emit_manager_event(
                     "status-change",
                     worker_id=worker.id,
@@ -209,7 +220,7 @@ class DaemonWorkerService(WorkerControlService):
             for worker_id in list(self._local_processes):
                 self._terminate_process_if_running(worker_id)
             for worker_id in list(self._thread_workers):
-                self._stop_thread_worker(worker_id)
+                self._stop_thread_worker(worker_id, reason="daemon-stop")
 
             return {
                 "running": False,
@@ -238,9 +249,10 @@ class DaemonWorkerService(WorkerControlService):
                 self._launch_thread_worker(worker_id, worker.current_url)
                 return True
             worker.status = "Active"
+            worker.status_reason = "manually-started"
             worker.started_at = utc_now_iso()
             self._append_log(worker_id, "Info", "Worker started via API.")
-            self._emit_manager_event("status-change", worker_id=worker_id, payload={"status": "Active"})
+            self._emit_manager_event("status-change", worker_id=worker_id, payload={"status": "Active", "reason": "manual-start"})
             return True
 
     def pause_worker(self, worker_id: int) -> bool:
@@ -251,9 +263,10 @@ class DaemonWorkerService(WorkerControlService):
             if worker is None:
                 return False
             worker.status = "Paused"
+            worker.status_reason = "manually-paused"
             self._release_claim_for_worker(worker_id, requeue=True, reason="worker-paused")
             self._append_log(worker_id, "Info", "Worker paused via API.")
-            self._emit_manager_event("status-change", worker_id=worker_id, payload={"status": "Paused"})
+            self._emit_manager_event("status-change", worker_id=worker_id, payload={"status": "Paused", "reason": "manual-pause"})
             return True
 
     def stop_worker(self, worker_id: int) -> bool:
@@ -262,12 +275,13 @@ class DaemonWorkerService(WorkerControlService):
             if worker is None:
                 return False
             worker.status = "Stopped"
+            worker.status_reason = "manually-stopped"
             worker.current_url = None
             self._release_claim_for_worker(worker_id, requeue=True, reason="worker-stopped")
             self._terminate_process_if_running(worker_id)
-            self._stop_thread_worker(worker_id)
+            self._stop_thread_worker(worker_id, reason="manual-stop")
             self._append_log(worker_id, "Info", "Worker stopped via API.")
-            self._emit_manager_event("status-change", worker_id=worker_id, payload={"status": "Stopped"})
+            self._emit_manager_event("status-change", worker_id=worker_id, payload={"status": "Stopped", "reason": "manual-stop"})
             return True
 
     def spawn_worker(
@@ -305,6 +319,7 @@ class DaemonWorkerService(WorkerControlService):
                 id=worker_id,
                 name=worker_name,
                 status="Idle",
+                status_reason="spawned-awaiting-start",
                 current_url=effective_seed_url,
                 pages_processed=0,
                 error_count=0,
@@ -361,6 +376,7 @@ class DaemonWorkerService(WorkerControlService):
             for worker in self._workers.values():
                 if worker.status == "Active":
                     worker.status = "Idle"
+                    worker.status_reason = "daemon-reload"
                     worker.current_url = None
                     self._release_claim_for_worker(worker.id, requeue=True, reason="reload")
                     reloaded += 1
@@ -368,7 +384,7 @@ class DaemonWorkerService(WorkerControlService):
             for worker_id in list(self._local_processes):
                 self._terminate_process_if_running(worker_id)
             for worker_id in list(self._thread_workers):
-                self._stop_thread_worker(worker_id)
+                self._stop_thread_worker(worker_id, reason="daemon-reload")
         return {
             "reloadedWorkers": reloaded,
             "timestampUtc": utc_now_iso(),
@@ -762,6 +778,7 @@ class DaemonWorkerService(WorkerControlService):
             worker = self._workers[worker_id]
             worker.pid = process.pid
             worker.status = "Active"
+            worker.status_reason = "local-process-started"
             worker.started_at = utc_now_iso()
             self._append_log(worker_id, "Info", f"Local process started with PID={process.pid}.")
         except Exception as exc:
@@ -793,27 +810,53 @@ class DaemonWorkerService(WorkerControlService):
         def run() -> None:
             while not stop_event.is_set():
                 time.sleep(1.2)
+
                 with self._lock:
                     current = self._workers.get(worker_id)
                     if current is None or current.status != "Active":
                         continue
                     lease = self._claim_next_frontier_url(worker_id)
                     if lease is None:
+                        current.status_reason = "waiting-for-frontier"
                         continue
-                    current.pages_processed += 1
-                    current.current_url = lease.url
-                    self._report_page_to_manager(current, current.current_url)
-                    self._complete_frontier_claim(worker_id, lease.url, lease.token, "completed")
+
+                processing = self._download_and_extract_links(lease.url)
+
+                with self._lock:
+                    current = self._workers.get(worker_id)
+                    if current is None:
+                        continue
+
+                    current.current_url = processing["finalUrl"] or lease.url
+                    if processing["ok"]:
+                        current.status_reason = "processing"
+                        current.pages_processed += 1
+                    else:
+                        current.status_reason = "fetch-failed"
+                        current.error_count += 1
+                        self._append_log(worker_id, "Warning", f"Fetch failed for {lease.url}: {processing['error']}")
+
+                    for link in processing["discoveredLinks"]:
+                        self._enqueue_frontier_url(link)
+
+                    self._report_page_to_manager(current, lease.url, processing["downloadResult"])
+                    self._complete_frontier_claim(
+                        worker_id,
+                        lease.url,
+                        lease.token,
+                        "completed" if processing["ok"] else "failed",
+                    )
 
         thread = threading.Thread(target=run, daemon=True, name=f"worker-thread-{worker_id}")
         self._thread_workers[worker_id] = (thread, stop_event)
         worker.status = "Active"
+        worker.status_reason = "thread-started"
         worker.started_at = utc_now_iso()
         worker.pid = None
         thread.start()
         self._append_log(worker_id, "Info", "Thread worker started.")
 
-    def _stop_thread_worker(self, worker_id: int) -> None:
+    def _stop_thread_worker(self, worker_id: int, reason: str = "stopped") -> None:
         entry = self._thread_workers.pop(worker_id, None)
         if entry is None:
             return
@@ -824,7 +867,8 @@ class DaemonWorkerService(WorkerControlService):
         worker = self._workers.get(worker_id)
         if worker is not None:
             worker.pid = None
-        self._append_log(worker_id, "Info", "Thread worker stopped.")
+            worker.status_reason = reason
+        self._append_log(worker_id, "Info", f"Thread worker stopped (reason={reason}).")
 
     def _append_log(self, worker_id: int, level: str, message: str) -> None:
         self._logs[worker_id].append(
@@ -845,8 +889,9 @@ class DaemonWorkerService(WorkerControlService):
                         worker = self._workers.get(worker_id)
                         if worker is not None and worker.status == "Active":
                             worker.status = "Idle"
+                            worker.status_reason = "local-process-finished"
                             worker.pid = None
-                            self._append_log(worker_id, "Info", "Local process finished.")
+                            self._append_log(worker_id, "Info", "Local process finished (reason=process-exit).")
                         self._local_processes.pop(worker_id, None)
 
     def _enqueue_frontier_url(self, raw_url: str) -> bool:
@@ -1146,25 +1191,75 @@ class DaemonWorkerService(WorkerControlService):
             self._append_log(1, "Warning", f"Frontier relay failed, using daemon-local queue: {exc}")
             return False
 
-    def _report_page_to_manager(self, worker: WorkerRecord, url: str | None) -> None:
-        if self._manager_ingest_url is None or not url:
+    def _download_and_extract_links(self, url: str) -> dict[str, Any]:
+        try:
+            downloader = Downloader(user_agent=self._global_config.user_agent)
+            download = downloader.fetch(
+                url,
+                render_html=False,
+                download_pdf_content=False,
+                download_binary_content=False,
+                store_large_binary_content=False,
+            )
+            discovered_links: list[str] = []
+            if download.html_content:
+                extracted = self._link_extractor.extract(download.html_content, download.final_url)
+                discovered_links = extracted.links[: self._max_extracted_links_per_page]
+
+            return {
+                "ok": True,
+                "error": None,
+                "finalUrl": download.final_url,
+                "downloadResult": self._to_download_payload(download),
+                "discoveredLinks": discovered_links,
+            }
+        except Exception as exc:
+            return {
+                "ok": False,
+                "error": str(exc),
+                "finalUrl": url,
+                "downloadResult": {
+                    "requestedUrl": url,
+                    "finalUrl": url,
+                    "statusCode": 0,
+                    "contentType": None,
+                    "dataTypeCode": None,
+                    "pageTypeCode": "HTML",
+                    "htmlContent": None,
+                    "usedRenderer": False,
+                    "contentLength": None,
+                },
+                "discoveredLinks": [],
+            }
+
+    @staticmethod
+    def _to_download_payload(download: DownloadResult) -> dict[str, object | None]:
+        return {
+            "requestedUrl": download.requested_url,
+            "finalUrl": download.final_url,
+            "statusCode": download.status_code,
+            "contentType": download.content_type,
+            "dataTypeCode": download.data_type_code,
+            "pageTypeCode": download.page_type_code,
+            "htmlContent": download.html_content,
+            "usedRenderer": download.used_renderer,
+            "contentLength": download.content_length,
+        }
+
+    def _report_page_to_manager(
+        self,
+        worker: WorkerRecord,
+        raw_url: str | None,
+        download_result: dict[str, object | None],
+    ) -> None:
+        if self._manager_ingest_url is None or not raw_url:
             return
 
         payload = {
-            "rawUrl": url,
+            "rawUrl": raw_url,
             "siteId": None,
             "sourcePageId": None,
-            "downloadResult": {
-                "requestedUrl": url,
-                "finalUrl": url,
-                "statusCode": 200,
-                "contentType": "text/html",
-                "dataTypeCode": None,
-                "pageTypeCode": "HTML",
-                "htmlContent": f"<html><body><h1>{worker.name}</h1><p>{url}</p></body></html>",
-                "usedRenderer": False,
-                "contentLength": None,
-            },
+            "downloadResult": download_result,
         }
 
         self._post_manager_json(self._manager_ingest_url, payload)
@@ -1172,7 +1267,7 @@ class DaemonWorkerService(WorkerControlService):
             "page-reported",
             worker_id=worker.id,
             payload={
-                "url": url,
+                "url": download_result.get("finalUrl") or raw_url,
                 "pagesProcessed": worker.pages_processed,
                 "status": worker.status,
                 "reportedAt": datetime.now(timezone.utc).isoformat(),
@@ -1217,6 +1312,7 @@ class DaemonWorkerService(WorkerControlService):
             id=worker.id,
             name=worker.name,
             status=worker.status,
+            status_reason=worker.status_reason,
             current_url=worker.current_url,
             pages_processed=worker.pages_processed,
             error_count=worker.error_count,

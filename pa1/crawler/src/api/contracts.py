@@ -33,6 +33,7 @@ class WorkerRecord:
     id: int
     name: str
     status: str = "Idle"
+    status_reason: str = "initialized"
     current_url: str | None = None
     pages_processed: int = 0
     error_count: int = 0
@@ -46,6 +47,7 @@ class WorkerRecord:
             "id": self.id,
             "name": self.name,
             "status": self.status,
+            "statusReason": self.status_reason,
             "currentUrl": self.current_url,
             "pagesProcessed": self.pages_processed,
             "errorCount": self.error_count,

@@ -117,9 +117,61 @@ function renderLegend(host, queueMode) {
   host.appendChild(legend);
 }
 
+function renderFallbackGraph(host, nodes, links, width, height) {
+  const notice = document.createElement("div");
+  notice.className = "text-small text-muted";
+  notice.style.margin = "0 0 8px 0";
+  notice.textContent = "D3 library unavailable. Showing simplified static graph.";
+  host.appendChild(notice);
+
+  const ns = "http://www.w3.org/2000/svg";
+  const svg = document.createElementNS(ns, "svg");
+  svg.setAttribute("width", String(width));
+  svg.setAttribute("height", String(height));
+  svg.setAttribute("class", "graph-svg");
+  host.appendChild(svg);
+
+  const placed = new Map();
+  const maxCols = Math.max(2, Math.floor(width / 120));
+  nodes.forEach((node, idx) => {
+    const col = idx % maxCols;
+    const row = Math.floor(idx / maxCols);
+    const x = 70 + col * 110;
+    const y = 70 + row * 90;
+    placed.set(Number(node.id), { x, y, node });
+  });
+
+  for (const link of links) {
+    const source = placed.get(Number(link.source));
+    const target = placed.get(Number(link.target));
+    if (!source || !target) continue;
+    const line = document.createElementNS(ns, "line");
+    line.setAttribute("x1", String(source.x));
+    line.setAttribute("y1", String(source.y));
+    line.setAttribute("x2", String(target.x));
+    line.setAttribute("y2", String(target.y));
+    line.setAttribute("stroke", "#9aa9b7");
+    line.setAttribute("stroke-opacity", "0.4");
+    line.setAttribute("stroke-width", "1");
+    svg.appendChild(line);
+  }
+
+  for (const { x, y, node } of placed.values()) {
+    const r = Math.max(4, Math.min(18, 4 + Math.sqrt(Number(node.size || 1)) * 1.6));
+    const circle = document.createElementNS(ns, "circle");
+    circle.setAttribute("cx", String(x));
+    circle.setAttribute("cy", String(y));
+    circle.setAttribute("r", String(r));
+    circle.setAttribute("fill", "hsl(204 48% 58%)");
+    circle.setAttribute("stroke", "#fff");
+    circle.setAttribute("stroke-width", "1.2");
+    svg.appendChild(circle);
+  }
+}
+
 export function renderGraph(hostId, payloadJson) {
   const host = document.getElementById(hostId);
-  if (!host || typeof d3 === "undefined") return;
+  if (!host) return;
 
   clearExisting(hostId);
   host.innerHTML = "";
@@ -136,6 +188,11 @@ export function renderGraph(hostId, payloadJson) {
 
   const width = host.clientWidth || 900;
   const height = host.clientHeight || 600;
+
+  if (typeof d3 === "undefined") {
+    renderFallbackGraph(host, nodes, links, width, height);
+    return;
+  }
 
   renderLegend(host, payload.queueMode || "server");
 

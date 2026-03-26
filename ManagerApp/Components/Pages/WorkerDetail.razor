@@ -33,7 +33,7 @@
             <StatCard Label="Worker" Value="@workerDetail.Worker.Name" Footnote="@workerDetail.Worker.Status" />
             <StatCard Label="Pages" Value="@workerDetail.Worker.PagesProcessed.ToString()" Footnote="Processed" />
             <StatCard Label="Errors" Value="@workerDetail.Worker.ErrorCount.ToString()" Footnote="Observed failures" />
-            <StatCard Label="Daemon" Value="@(workerDetail.GroupName ?? "Unassigned")" Footnote="Current owner process" />
+            <StatCard Label="Daemon" Value="@(workerDetail.GroupName ?? "Unassigned")" Footnote="@GetDaemonFootnote()" />
         </div>
 
         <div class="card mb-lg worker-detail-tabs-card">
@@ -266,5 +266,16 @@
         }
 
         return $"{Math.Max(0, span.Seconds)}s";
+    }
+
+    private string GetDaemonFootnote()
+    {
+        var reason = workerDetail?.Worker.StatusReason;
+        if (string.IsNullOrWhiteSpace(reason))
+        {
+            return "Current owner process";
+        }
+
+        return $"Current owner process · {reason}";
     }
 }

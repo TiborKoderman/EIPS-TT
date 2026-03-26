@@ -436,6 +436,22 @@ textarea:focus {
     min-width: 130px;
 }
 
+.dashboard-queue-widget {
+    min-width: 190px;
+    border-left: 1px solid var(--color-border-light);
+    padding-left: var(--spacing-sm);
+}
+
+.dashboard-queue-list {
+    margin: 0;
+    max-height: 170px;
+    overflow: auto;
+}
+
+.dashboard-queue-row {
+    padding: 8px;
+}
+
 .status-row {
     display: flex;
     align-items: center;
@@ -940,6 +956,14 @@ textarea:focus {
     .dashboard-worker-status {
         flex-direction: column;
         align-items: flex-start;
+    }
+
+    .dashboard-queue-widget {
+        border-left: none;
+        border-top: 1px solid var(--color-border-light);
+        padding-left: 0;
+        padding-top: var(--spacing-sm);
+        width: 100%;
     }
 
     .worker-row {

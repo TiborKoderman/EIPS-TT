@@ -29,7 +29,7 @@
     [Parameter] public string? SelectedStatus { get; set; }
     [Parameter] public EventCallback<string> OnSliceClick { get; set; }
 
-    private int Total => StatusCounts.Values.Sum();
+    private int Total => StatusCounts.Values.Where(value => value > 0).Sum();
 
     private IEnumerable<PieSlice> Slices
     {
@@ -50,7 +50,8 @@
 
                 var angle = 360.0 * value / Total;
                 var end = start + angle;
-                yield return new PieSlice(status, ArcPath(start, end, 90), StatusColor(status));
+                var normalizedStatus = string.IsNullOrWhiteSpace(status) ? "Unknown" : status;
+                yield return new PieSlice(normalizedStatus, ArcPath(start, end, 90), StatusColor(normalizedStatus));
                 start = end;
             }
         }

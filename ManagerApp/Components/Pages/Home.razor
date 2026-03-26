@@ -1,4 +1,5 @@
 ﻿@page "/"
+@using System.Text.Json
 @using ManagerApp.Services
 @using ManagerApp.Models
 @inject IStatisticsService StatisticsService
@@ -60,7 +61,7 @@
                     <h2 class="card-title mb-0">Worker Status</h2>
                     <span class="live-pill"><span class="live-dot"></span> Live</span>
                 </div>
-                @if (workerStatusCounts != null && workerStatusCounts.Any())
+                @if (workerStatusCounts != null && WorkerStatusTotal > 0)
                 {
                     <div class="dashboard-worker-status">
                         <WorkerStatusPieChart StatusCounts="workerStatusCounts"
@@ -77,6 +78,30 @@
                                         <span class="pill-count">@count</span>
                                     </span>
                                 </button>
+                            }
+                        </div>
+                        <div class="dashboard-queue-widget">
+                            <div class="text-small text-muted mb-sm">Queue</div>
+                            @if (daemonQueueSnapshots.Count == 0)
+                            {
+                                <div class="text-small text-muted">No daemon queue data yet.</div>
+                            }
+                            else
+                            {
+                                <ul class="list dashboard-queue-list">
+                                    @foreach (var snapshot in daemonQueueSnapshots.OrderBy(item => item.DaemonId))
+                                    {
+                                        <li class="list-item dashboard-queue-row">
+                                            <div class="flex items-center justify-between gap-sm">
+                                                <strong>@snapshot.DaemonId</strong>
+                                                <span class="badge badge-info">q @snapshot.InMemoryQueued</span>
+                                            </div>
+                                            <div class="text-small text-muted">
+                                                local @snapshot.LocalQueued | leases @snapshot.ActiveLeases | known @snapshot.KnownUrls
+                                            </div>
+                                        </li>
+                                    }
+                                </ul>
                             }
                         </div>
                     </div>
@@ -169,6 +194,7 @@
     private StatisticsViewModel? stats;
     private Dictionary<string, int>? workerStatusCounts;
     private List<WorkerViewModel> workers = new();
+    private List<DaemonQueueSnapshot> daemonQueueSnapshots = new();
     private GraphDataDto graphPreview = new();
     private string? graphError;
     private string? selectedWorkerStatus;
@@ -179,6 +205,8 @@
     private readonly SemaphoreSlim workerRefreshLock = new(1, 1);
     private static readonly string[] DashboardStatuses = ["Active", "Idle", "Paused", "Error", "Stopped"];
     private DateTime lastDashboardUpdateUtc = DateTime.UtcNow;
+
+    private int WorkerStatusTotal => workerStatusCounts?.Values.Sum() ?? 0;
 
     private List<WorkerViewModel> visibleWorkers => workers
         .Where(w => selectedWorkerStatus == null || string.Equals(w.Status, selectedWorkerStatus, StringComparison.OrdinalIgnoreCase))
@@ -260,6 +288,11 @@
         {
             workers = await WorkerService.GetAllWorkersAsync();
             workerStatusCounts = BuildStatusCounts(workers);
+
+            var daemonStatus = await WorkerService.GetDaemonStatusAsync();
+            var events = await WorkerService.GetRecentCrawlerEventsAsync(200);
+            daemonQueueSnapshots = BuildDaemonQueueSnapshots(daemonStatus, events);
+
             lastDashboardUpdateUtc = DateTime.UtcNow;
         }
         catch (Exception ex)
@@ -323,37 +356,151 @@
         return char.ToUpperInvariant(normalized[0]) + normalized[1..].ToLowerInvariant();
     }
 
+    private static List<DaemonQueueSnapshot> BuildDaemonQueueSnapshots(
+        DaemonStatusViewModel? daemonStatus,
+        IReadOnlyList<CrawlerEventViewModel> events)
+    {
+        var byDaemon = new Dictionary<string, DaemonQueueSnapshot>(StringComparer.OrdinalIgnoreCase);
+
+        if (daemonStatus?.Frontier != null)
+        {
+            byDaemon["local-default"] = new DaemonQueueSnapshot
+            {
+                DaemonId = "local-default",
+                InMemoryQueued = daemonStatus.Frontier.InMemoryQueued,
+                LocalQueued = daemonStatus.Frontier.LocalQueued,
+                ActiveLeases = daemonStatus.Frontier.ActiveLeases,
+                KnownUrls = daemonStatus.Frontier.KnownUrls,
+            };
+        }
+
+        foreach (var evt in events.OrderBy(item => item.TimestampUtc))
+        {
+            if (!string.Equals(evt.Type, "queue-change", StringComparison.OrdinalIgnoreCase)
+                && !evt.Type.StartsWith("frontier", StringComparison.OrdinalIgnoreCase))
+            {
+                continue;
+            }
+
+            if (!TryParseQueuePayload(evt.PayloadJson, out var payload))
+            {
+                continue;
+            }
+
+            var daemonId = string.IsNullOrWhiteSpace(evt.DaemonId) ? "local-default" : evt.DaemonId;
+            if (!byDaemon.TryGetValue(daemonId, out var snapshot))
+            {
+                snapshot = new DaemonQueueSnapshot { DaemonId = daemonId };
+                byDaemon[daemonId] = snapshot;
+            }
+
+            if (payload.TryGetValue("inMemoryQueued", out var inMemory))
+            {
+                snapshot.InMemoryQueued = inMemory;
+            }
+
+            if (payload.TryGetValue("localQueued", out var localQueued))
+            {
+                snapshot.LocalQueued = localQueued;
+            }
+
+            if (payload.TryGetValue("knownUrls", out var known))
+            {
+                snapshot.KnownUrls = known;
+            }
+
+            if (payload.TryGetValue("activeLeases", out var leases))
+            {
+                snapshot.ActiveLeases = leases;
+            }
+        }
+
+        return byDaemon.Values.ToList();
+    }
+
+    private static bool TryParseQueuePayload(string? payloadJson, out Dictionary<string, int> values)
+    {
+        values = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+
+        if (string.IsNullOrWhiteSpace(payloadJson))
+        {
+            return false;
+        }
+
+        try
+        {
+            using var document = JsonDocument.Parse(payloadJson);
+            if (document.RootElement.ValueKind != JsonValueKind.Object)
+            {
+                return false;
+            }
+
+            foreach (var property in document.RootElement.EnumerateObject())
+            {
+                if (property.Value.ValueKind == JsonValueKind.Number && property.Value.TryGetInt32(out var parsed))
+                {
+                    values[property.Name] = parsed;
+                }
+            }
+
+            return values.Count > 0;
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
     private static WorkerActivity GetWorkerActivity(WorkerViewModel worker)
     {
         var status = worker.Status.ToLowerInvariant();
+        var reason = (worker.StatusReason ?? string.Empty).ToLowerInvariant();
 
         if (status == "error")
         {
-            return new WorkerActivity("mdi-alert-circle-outline", "Issue", "activity-error", false);
+            return new WorkerActivity("mdi-alert-circle-outline", string.IsNullOrWhiteSpace(worker.StatusReason) ? "Issue" : worker.StatusReason, "activity-error", false);
         }
 
         if (status is "idle" or "stopped")
         {
-            return new WorkerActivity("mdi-sleep", "Waiting", "activity-waiting", false);
+            var label = string.IsNullOrWhiteSpace(worker.StatusReason) ? "Waiting" : worker.StatusReason;
+            return new WorkerActivity("mdi-sleep", label, "activity-waiting", false);
         }
 
         if (status == "paused")
         {
-            return new WorkerActivity("mdi-pause-circle-outline", "Paused", "activity-paused", false);
+            var label = string.IsNullOrWhiteSpace(worker.StatusReason) ? "Paused" : worker.StatusReason;
+            return new WorkerActivity("mdi-pause-circle-outline", label, "activity-paused", false);
         }
 
         if (status == "active")
         {
-            var isParsing = (worker.PagesProcessed + worker.ErrorCount + worker.Id) % 2 == 0;
-            return isParsing
-                ? new WorkerActivity("mdi-file-code-outline", "Parsing", "activity-parsing", true)
-                : new WorkerActivity("mdi-magnify", "Searching", "activity-searching", true);
+            if (reason.Contains("waiting"))
+            {
+                return new WorkerActivity("mdi-timer-sand", "Waiting for queue", "activity-waiting", false);
+            }
+
+            if (reason.Contains("processing") || reason.Contains("fetch"))
+            {
+                return new WorkerActivity("mdi-file-code-outline", "Parsing", "activity-parsing", true);
+            }
+
+            return new WorkerActivity("mdi-magnify", "Searching", "activity-searching", true);
         }
 
         return new WorkerActivity("mdi-cog-outline", "Processing", "activity-processing", true);
     }
 
     private readonly record struct WorkerActivity(string IconClass, string Label, string CssClass, bool IsProcessing);
+
+    private sealed class DaemonQueueSnapshot
+    {
+        public string DaemonId { get; set; } = "local-default";
+        public int InMemoryQueued { get; set; }
+        public int LocalQueued { get; set; }
+        public int ActiveLeases { get; set; }
+        public int KnownUrls { get; set; }
+    }
 
     private void OpenWorkerDetail(int workerId)
     {

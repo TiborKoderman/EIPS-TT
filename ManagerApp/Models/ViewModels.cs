@@ -72,6 +72,7 @@ public class WorkerViewModel
     public int Id { get; set; }
     public string Name { get; set; } = "";
     public string Status { get; set; } = "Idle"; // Active, Idle, Paused, Stopped, Error
+    public string? StatusReason { get; set; }
     public string? CurrentUrl { get; set; }
     public int PagesProcessed { get; set; }
     public int ErrorCount { get; set; }
@@ -159,6 +160,16 @@ public class DaemonStatusViewModel
     public int WorkerCount { get; set; }
     public int ActiveWorkers { get; set; }
     public int LocalProcessCount { get; set; }
+    public DaemonFrontierSnapshotViewModel Frontier { get; set; } = new();
+}
+
+public class DaemonFrontierSnapshotViewModel
+{
+    public int InMemoryQueued { get; set; }
+    public int KnownUrls { get; set; }
+    public int LocalQueued { get; set; }
+    public int ActiveLeases { get; set; }
+    public int Tombstones { get; set; }
 }
 
 /// <summary>
@@ -166,6 +177,7 @@ public class DaemonStatusViewModel
 /// </summary>
 public class CommandQueueDiagnosticsViewModel
 {
+    public int RecentWindowMinutes { get; set; }
     public int Queued { get; set; }
     public int Dispatched { get; set; }
     public int Acknowledged { get; set; }
