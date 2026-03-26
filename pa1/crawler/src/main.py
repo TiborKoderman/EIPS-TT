@@ -181,10 +181,10 @@ def main() -> int:
     if args.extract_links_demo:
         extractor = LinkExtractor()
         extracted = extractor.extract(args.html, args.url)
-        print(f"href links: {len(extracted.links)}")
+        print(f"all links: {len(extracted.links)}")
         for link in extracted.links:
             print(f"  - {link}")
-        print(f"js links: {len(extracted.js_links)}")
+        print(f"js-only links: {len(extracted.js_links)}")
         for link in extracted.js_links:
             print(f"  - {link}")
         print(f"img links: {len(extracted.images)}")

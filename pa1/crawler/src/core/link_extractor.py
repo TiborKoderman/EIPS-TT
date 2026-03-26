@@ -3,22 +3,19 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-import re
+from bs4 import BeautifulSoup
 
+from core.parser import _extract_js_urls, parse_outgoing_urls
 from utils.url_canonicalizer import DefaultUrlCanonicalizer, UrlCanonicalizer
-
-
-_HREF_RE = re.compile(r"<a\b[^>]*\bhref\s*=\s*['\"]([^'\"]+)['\"]", re.IGNORECASE)
-_IMG_RE = re.compile(r"<img\b[^>]*\bsrc\s*=\s*['\"]([^'\"]+)['\"]", re.IGNORECASE)
-_ONCLICK_URL_RE = re.compile(
-    r"(?:location\.href|document\.location(?:\.href)?)\s*=\s*['\"]([^'\"]+)['\"]",
-    re.IGNORECASE,
-)
 
 
 @dataclass(frozen=True)
 class ExtractedPageAssets:
-    """Normalized links and image sources extracted from one page."""
+    """Normalized page assets extracted from one page.
+
+    `links` contains all crawl candidates discovered on the page.
+    `js_links` is the subset of those links that came from inline JS navigation.
+    """
 
     links: list[str]
     js_links: list[str]
@@ -26,36 +23,43 @@ class ExtractedPageAssets:
 
 
 class LinkExtractor:
-    """Extract and canonicalize href/js/image links from HTML."""
+    """Compatibility wrapper around the shared HTML parser."""
 
     def __init__(self, canonicalizer: UrlCanonicalizer | None = None) -> None:
         self._canonicalizer = canonicalizer or DefaultUrlCanonicalizer()
 
     def extract(self, html: str, page_url: str) -> ExtractedPageAssets:
-        href_links = self._normalize_matches(_HREF_RE.findall(html), page_url)
-        js_links = self._normalize_matches(_ONCLICK_URL_RE.findall(html), page_url)
-        image_links = self._normalize_matches(_IMG_RE.findall(html), page_url)
+        parsed = parse_outgoing_urls(
+            html,
+            page_url=page_url,
+            canonicalizer=self._canonicalizer,
+        )
+        js_links = self._extract_js_links(html, page_url)
         return ExtractedPageAssets(
-            links=href_links,
+            links=parsed.links,
             js_links=js_links,
-            images=image_links,
+            images=parsed.images,
         )
 
-    def _normalize_matches(self, values: list[str], page_url: str) -> list[str]:
+    def _extract_js_links(self, html: str, page_url: str) -> list[str]:
+        soup = BeautifulSoup(html or "", "html.parser")
         normalized: list[str] = []
         seen: set[str] = set()
-        for raw in values:
-            candidate = raw.strip()
-            if not candidate:
+
+        for element in soup.find_all(onclick=True):
+            onclick = element.get("onclick")
+            if not onclick:
                 continue
-            if candidate.startswith("javascript:") or candidate.startswith("mailto:"):
-                continue
-            try:
-                url = self._canonicalizer.canonicalize(candidate, base_url=page_url)
-            except ValueError:
-                continue
-            if url in seen:
-                continue
-            seen.add(url)
-            normalized.append(url)
+
+            for raw_url in _extract_js_urls(onclick):
+                try:
+                    normalized_url = self._canonicalizer.canonicalize(raw_url, base_url=page_url)
+                except ValueError:
+                    continue
+
+                if normalized_url in seen:
+                    continue
+                seen.add(normalized_url)
+                normalized.append(normalized_url)
+
         return normalized
