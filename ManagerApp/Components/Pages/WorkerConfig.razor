@@ -1,0 +1,101 @@
+@page "/workers/config"
+@using ManagerApp.Models
+@using ManagerApp.Services
+@inject IWorkerService WorkerService
+
+<div class="page-header">
+    <div class="page-header-main">
+        <div>
+            <h1 class="page-title">Worker Global Config</h1>
+            <p class="page-subtitle">Default settings shared across all workers</p>
+        </div>
+        <a class="btn" href="/workers/groups">
+            <span class="mdi mdi-account-group"></span>
+            Group Settings
+        </a>
+    </div>
+</div>
+
+<div class="page-body">
+    @if (isLoading)
+    {
+        <div class="card"><p>Loading configuration...</p></div>
+    }
+    else if (config == null)
+    {
+        <div class="card"><p class="text-muted">Unable to load worker configuration.</p></div>
+    }
+    else
+    {
+        <div class="card mb-lg">
+            <h2 class="card-title">Defaults</h2>
+            <div class="workers-config-grid">
+                <label>
+                    <span class="text-small text-muted">Max Concurrent Workers</span>
+                    <input type="number" min="1" @bind="config.MaxConcurrentWorkers" />
+                </label>
+                <label>
+                    <span class="text-small text-muted">Request Timeout (seconds)</span>
+                    <input type="number" min="1" @bind="config.RequestTimeoutSeconds" />
+                </label>
+                <label>
+                    <span class="text-small text-muted">Crawl Delay (ms)</span>
+                    <input type="number" min="0" @bind="config.CrawlDelayMilliseconds" />
+                </label>
+                <label>
+                    <span class="text-small text-muted">User Agent</span>
+                    <input type="text" @bind="config.UserAgent" />
+                </label>
+            </div>
+
+            <label class="mt-md flex items-center gap-sm">
+                <input type="checkbox" @bind="config.RespectRobotsTxt" style="width:auto;" />
+                <span>Respect robots.txt</span>
+            </label>
+
+            <div class="mt-md flex gap-sm">
+                <button class="btn btn-primary" @onclick="SaveConfig">
+                    <span class="mdi mdi-content-save"></span>
+                    Save Defaults
+                </button>
+                @if (!string.IsNullOrWhiteSpace(statusMessage))
+                {
+                    <span class="text-small text-muted">@statusMessage</span>
+                }
+            </div>
+        </div>
+
+        <div class="placeholder-note">
+            <div class="placeholder-note-title">
+                <span class="mdi mdi-information-outline"></span> Integration note
+            </div>
+            <ul class="placeholder-note-list">
+                <li>These settings are currently mock-backed in ManagerApp service memory.</li>
+                <li>When Python worker API is available, save/apply will target the shared worker config endpoint.</li>
+            </ul>
+        </div>
+    }
+</div>
+
+@code {
+    private WorkerGlobalConfigViewModel? config;
+    private bool isLoading = true;
+    private string? statusMessage;
+
+    protected override async Task OnInitializedAsync()
+    {
+        config = await WorkerService.GetGlobalConfigAsync();
+        isLoading = false;
+    }
+
+    private async Task SaveConfig()
+    {
+        if (config == null)
+        {
+            return;
+        }
+
+        await WorkerService.SaveGlobalConfigAsync(config);
+        statusMessage = "Saved";
+    }
+}

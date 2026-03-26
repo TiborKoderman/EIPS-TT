@@ -1,0 +1,299 @@
+@page "/workers/{WorkerId:int}"
+@page "/workers/{WorkerId:int}/{Section}"
+@using ManagerApp.Models
+@using ManagerApp.Services
+@inject IWorkerService WorkerService
+@inject NavigationManager Navigation
+
+<div class="page-header">
+    <div class="page-header-main">
+        <div>
+            <h1 class="page-title">Worker Details</h1>
+            <p class="page-subtitle">Runtime detail, config snapshot, and recent logs</p>
+        </div>
+        <a class="btn" href="/workers">
+            <span class="mdi mdi-arrow-left"></span>
+            Back to Workers
+        </a>
+    </div>
+</div>
+
+<div class="page-body">
+    @if (isLoading)
+    {
+        <div class="card"><p>Loading worker details...</p></div>
+    }
+    else if (workerDetail == null)
+    {
+        <div class="card"><p class="text-muted">Worker not found.</p></div>
+    }
+    else
+    {
+        <div class="grid grid-cols-4 mb-lg">
+            <StatCard Label="Worker" Value="@workerDetail.Worker.Name" Footnote="@workerDetail.Worker.Status" />
+            <StatCard Label="Pages" Value="@workerDetail.Worker.PagesProcessed.ToString()" Footnote="Processed" />
+            <StatCard Label="Errors" Value="@workerDetail.Worker.ErrorCount.ToString()" Footnote="Observed failures" />
+            <StatCard Label="Group" Value="@(workerDetail.GroupName ?? "Unassigned")" Footnote="Current assignment" />
+        </div>
+
+        <div class="card mb-lg worker-detail-tabs-card">
+            <div class="worker-detail-tabs" role="tablist" aria-label="Worker detail sections">
+                @foreach (var tab in Tabs)
+                {
+                    <a class="worker-detail-tab @(IsTabActive(tab.Key) ? "active" : "")"
+                       href="@($"/workers/{WorkerId}/{tab.Key}")"
+                       role="tab"
+                       aria-selected="@IsTabActive(tab.Key)">
+                        <span class="mdi @tab.Icon"></span>
+                        <span>@tab.Label</span>
+                    </a>
+                }
+            </div>
+        </div>
+
+        @if (IsTabActive("overview"))
+        {
+            <div class="grid grid-cols-2 mb-lg">
+                <div class="card">
+                    <div class="card-header-inline mb-md">
+                        <h2 class="card-title mb-0">Live Status</h2>
+                        <span class="badge @GetStatusBadgeClass(workerDetail.Worker.Status)">@workerDetail.Worker.Status</span>
+                    </div>
+                    <div class="text-small text-muted mb-sm">Current URL</div>
+                    <div>@(workerDetail.Worker.CurrentUrl ?? "Waiting for next page...")</div>
+
+                    <div class="mt-md text-small text-muted">Started</div>
+                    <div>@(workerDetail.Worker.StartedAt?.ToString("yyyy-MM-dd HH:mm:ss UTC") ?? "N/A")</div>
+
+                    <div class="mt-md flex gap-sm">
+                        <button class="btn btn-primary" @onclick="StartWorker">
+                            <span class="mdi mdi-play"></span> Start
+                        </button>
+                        <button class="btn" @onclick="PauseWorker">
+                            <span class="mdi mdi-pause"></span> Pause
+                        </button>
+                        <button class="btn" @onclick="StopWorker">
+                            <span class="mdi mdi-stop"></span> Stop
+                        </button>
+                    </div>
+                </div>
+
+                <div class="card">
+                    <h2 class="card-title">Quick Runtime Snapshot</h2>
+                    <ul class="list">
+                        <li class="list-item worker-config-row">
+                            <span class="text-muted">Group</span>
+                            <strong>@(workerDetail.GroupName ?? "Unassigned")</strong>
+                        </li>
+                        <li class="list-item worker-config-row">
+                            <span class="text-muted">Pages Processed</span>
+                            <strong>@workerDetail.Worker.PagesProcessed</strong>
+                        </li>
+                        <li class="list-item worker-config-row">
+                            <span class="text-muted">Error Count</span>
+                            <strong>@workerDetail.Worker.ErrorCount</strong>
+                        </li>
+                    </ul>
+                </div>
+            </div>
+        }
+
+        @if (IsTabActive("logs"))
+        {
+            <div class="card">
+                <h2 class="card-title">Recent Logs</h2>
+                @if (workerDetail.RecentLogs.Count == 0)
+                {
+                    <p class="text-muted">No logs available.</p>
+                }
+                else
+                {
+                    <ul class="list worker-log-list">
+                        @foreach (var log in workerDetail.RecentLogs.OrderByDescending(l => l.TimestampUtc))
+                        {
+                            <li class="list-item">
+                                <div class="worker-log-row">
+                                    <span class="text-small text-muted">@log.TimestampUtc.ToString("HH:mm:ss")</span>
+                                    <span class="badge @GetLogBadgeClass(log.Level)">@log.Level</span>
+                                    <span>@log.Message</span>
+                                </div>
+                            </li>
+                        }
+                    </ul>
+                }
+            </div>
+        }
+
+        @if (IsTabActive("config"))
+        {
+            <div class="card">
+                <div class="card-header-inline mb-md">
+                    <h2 class="card-title mb-0">Runtime Config</h2>
+                    <div class="flex gap-sm">
+                        <a class="btn btn-sm" href="/workers/config">
+                            <span class="mdi mdi-tune"></span> Global
+                        </a>
+                        <a class="btn btn-sm" href="/workers/groups">
+                            <span class="mdi mdi-account-group"></span> Groups
+                        </a>
+                    </div>
+                </div>
+                <ul class="list">
+                    @foreach (var (key, value) in workerDetail.RuntimeConfig)
+                    {
+                        <li class="list-item">
+                            <div class="worker-config-row">
+                                <span class="text-muted">@key</span>
+                                <strong>@value</strong>
+                            </div>
+                        </li>
+                    }
+                </ul>
+            </div>
+        }
+
+        @if (IsTabActive("metrics"))
+        {
+            <div class="grid grid-cols-3 mb-lg">
+                <StatCard Label="Success Rate" Value="@GetSuccessRate()" Footnote="Processed vs errors" />
+                <StatCard Label="Log Throughput" Value="@GetLogThroughput()" Footnote="entries/min" />
+                <StatCard Label="Uptime" Value="@GetUptime()" Footnote="Since started" />
+            </div>
+
+            <div class="card">
+                <h2 class="card-title">Metrics Notes</h2>
+                <ul class="placeholder-note-list">
+                    <li>Current metrics are derived from mock data in ManagerApp service.</li>
+                    <li>Planned: replace with real worker telemetry stream and persisted runtime counters.</li>
+                    <li>Per-group aggregate metrics will be shown on Worker Groups page next.</li>
+                </ul>
+            </div>
+        }
+    }
+</div>
+
+@code {
+    [Parameter] public int WorkerId { get; set; }
+    [Parameter] public string? Section { get; set; }
+
+    private WorkerDetailViewModel? workerDetail;
+    private bool isLoading = true;
+    private static readonly (string Key, string Label, string Icon)[] Tabs =
+    [
+        ("overview", "Overview", "mdi-view-dashboard-outline"),
+        ("logs", "Logs", "mdi-text-box-search-outline"),
+        ("config", "Config", "mdi-cog-outline"),
+        ("metrics", "Metrics", "mdi-chart-line")
+    ];
+
+    protected override async Task OnParametersSetAsync()
+    {
+        isLoading = true;
+        workerDetail = await WorkerService.GetWorkerDetailAsync(WorkerId);
+        if (!Tabs.Any(t => string.Equals(t.Key, CurrentSection, StringComparison.OrdinalIgnoreCase)))
+        {
+            Navigation.NavigateTo($"/workers/{WorkerId}/overview", replace: true);
+        }
+        isLoading = false;
+    }
+
+    private string CurrentSection => string.IsNullOrWhiteSpace(Section) ? "overview" : Section.ToLowerInvariant();
+
+    private bool IsTabActive(string key)
+    {
+        return string.Equals(CurrentSection, key, StringComparison.OrdinalIgnoreCase);
+    }
+
+    private async Task StartWorker()
+    {
+        await WorkerService.StartWorkerAsync(WorkerId);
+        workerDetail = await WorkerService.GetWorkerDetailAsync(WorkerId);
+    }
+
+    private async Task PauseWorker()
+    {
+        await WorkerService.PauseWorkerAsync(WorkerId);
+        workerDetail = await WorkerService.GetWorkerDetailAsync(WorkerId);
+    }
+
+    private async Task StopWorker()
+    {
+        await WorkerService.StopWorkerAsync(WorkerId);
+        workerDetail = await WorkerService.GetWorkerDetailAsync(WorkerId);
+    }
+
+    private static string GetStatusBadgeClass(string status)
+    {
+        return status.ToLowerInvariant() switch
+        {
+            "active" => "badge-success",
+            "error" => "badge-error",
+            "idle" => "badge-info",
+            "paused" => "badge-warning",
+            _ => "badge-info"
+        };
+    }
+
+    private static string GetLogBadgeClass(string level)
+    {
+        return level.ToLowerInvariant() switch
+        {
+            "error" => "badge-error",
+            "warning" => "badge-warning",
+            "debug" => "badge-info",
+            _ => "badge-success"
+        };
+    }
+
+    private string GetSuccessRate()
+    {
+        if (workerDetail == null)
+        {
+            return "0%";
+        }
+
+        var total = workerDetail.Worker.PagesProcessed + workerDetail.Worker.ErrorCount;
+        if (total == 0)
+        {
+            return "100%";
+        }
+
+        var success = workerDetail.Worker.PagesProcessed * 100.0 / total;
+        return $"{Math.Round(success, 1)}%";
+    }
+
+    private string GetLogThroughput()
+    {
+        if (workerDetail == null || workerDetail.RecentLogs.Count == 0)
+        {
+            return "0";
+        }
+
+        var minTs = workerDetail.RecentLogs.Min(l => l.TimestampUtc);
+        var maxTs = workerDetail.RecentLogs.Max(l => l.TimestampUtc);
+        var minutes = Math.Max(1.0 / 60.0, (maxTs - minTs).TotalMinutes);
+        var perMinute = workerDetail.RecentLogs.Count / minutes;
+        return Math.Round(perMinute, 1).ToString();
+    }
+
+    private string GetUptime()
+    {
+        if (workerDetail?.Worker.StartedAt == null)
+        {
+            return "N/A";
+        }
+
+        var span = DateTime.UtcNow - workerDetail.Worker.StartedAt.Value;
+        if (span.TotalHours >= 1)
+        {
+            return $"{(int)span.TotalHours}h {span.Minutes}m";
+        }
+
+        if (span.TotalMinutes >= 1)
+        {
+            return $"{(int)span.TotalMinutes}m {span.Seconds}s";
+        }
+
+        return $"{Math.Max(0, span.Seconds)}s";
+    }
+}

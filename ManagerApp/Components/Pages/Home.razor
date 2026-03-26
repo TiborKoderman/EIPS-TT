@@ -4,6 +4,7 @@
 @inject IStatisticsService StatisticsService
 @inject IWorkerService WorkerService
 @inject IGraphService GraphService
+@inject NavigationManager Navigation
 @implements IAsyncDisposable
 
 <div class="page-header">
@@ -101,7 +102,7 @@
                         @foreach (var worker in visibleWorkers.Take(6))
                         {
                             var activity = GetWorkerActivity(worker);
-                            <li class="list-item">
+                            <li class="list-item worker-list-clickable" @onclick="() => OpenWorkerDetail(worker.Id)">
                                 <div class="flex items-center justify-between gap-sm">
                                     <strong>@worker.Name</strong>
                                     <span class="badge @GetStatusBadgeClass(worker.Status)">@worker.Status</span>
@@ -325,6 +326,11 @@
     }
 
     private readonly record struct WorkerActivity(string IconClass, string Label, string CssClass, bool IsProcessing);
+
+    private void OpenWorkerDetail(int workerId)
+    {
+        Navigation.NavigateTo($"/workers/{workerId}");
+    }
 
     private string GetSinceUpdateCompactText()
     {

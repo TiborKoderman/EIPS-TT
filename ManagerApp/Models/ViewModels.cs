@@ -77,3 +77,50 @@ public class WorkerViewModel
     public int ErrorCount { get; set; }
     public DateTime? StartedAt { get; set; }
 }
+
+/// <summary>
+/// Log entry for worker diagnostics and activity timeline.
+/// </summary>
+public class WorkerLogEntryViewModel
+{
+    public DateTime TimestampUtc { get; set; }
+    public string Level { get; set; } = "Info";
+    public string Message { get; set; } = "";
+}
+
+/// <summary>
+/// Detailed worker view model used by the worker details page.
+/// </summary>
+public class WorkerDetailViewModel
+{
+    public WorkerViewModel Worker { get; set; } = new();
+    public string? GroupName { get; set; }
+    public Dictionary<string, string> RuntimeConfig { get; set; } = new();
+    public List<WorkerLogEntryViewModel> RecentLogs { get; set; } = new();
+}
+
+/// <summary>
+/// Global worker settings shared across worker instances.
+/// </summary>
+public class WorkerGlobalConfigViewModel
+{
+    public int MaxConcurrentWorkers { get; set; } = 4;
+    public int RequestTimeoutSeconds { get; set; } = 20;
+    public int CrawlDelayMilliseconds { get; set; } = 300;
+    public bool RespectRobotsTxt { get; set; } = true;
+    public string UserAgent { get; set; } = "EIPS-TT-Crawler/1.0";
+}
+
+/// <summary>
+/// Group-level worker settings for segmented crawling behavior.
+/// </summary>
+public class WorkerGroupSettingsViewModel
+{
+    public int Id { get; set; }
+    public string Name { get; set; } = "";
+    public string Description { get; set; } = "";
+    public bool Enabled { get; set; } = true;
+    public int? MaxPagesPerWorker { get; set; }
+    public int? RateLimitPerMinute { get; set; }
+    public List<int> WorkerIds { get; set; } = new();
+}

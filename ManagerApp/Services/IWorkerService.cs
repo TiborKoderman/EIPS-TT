@@ -41,4 +41,29 @@ public interface IWorkerService
     /// Returns dictionary with status names as keys and counts as values
     /// </summary>
     Task<Dictionary<string, int>> GetWorkerStatusCountsAsync();
+
+    /// <summary>
+    /// Get full details for a single worker.
+    /// </summary>
+    Task<WorkerDetailViewModel?> GetWorkerDetailAsync(int id);
+
+    /// <summary>
+    /// Get global worker configuration.
+    /// </summary>
+    Task<WorkerGlobalConfigViewModel> GetGlobalConfigAsync();
+
+    /// <summary>
+    /// Save global worker configuration.
+    /// </summary>
+    Task SaveGlobalConfigAsync(WorkerGlobalConfigViewModel config);
+
+    /// <summary>
+    /// Get all worker groups and their settings.
+    /// </summary>
+    Task<List<WorkerGroupSettingsViewModel>> GetWorkerGroupsAsync();
+
+    /// <summary>
+    /// Save a worker group's settings.
+    /// </summary>
+    Task<bool> SaveWorkerGroupAsync(WorkerGroupSettingsViewModel group);
 }

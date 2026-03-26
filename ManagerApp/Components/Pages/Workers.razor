@@ -2,15 +2,24 @@
 @using ManagerApp.Models
 @using ManagerApp.Services
 @inject IWorkerService WorkerService
+@inject NavigationManager Navigation
 
 <div class="page-header">
-    <h1 class="page-title">Workers</h1>
-    <p class="page-subtitle">Manage crawler workers and inspect runtime state</p>
+    <div class="page-header-main">
+        <div>
+            <h1 class="page-title">Workers</h1>
+            <p class="page-subtitle">Manage crawler workers and inspect runtime state</p>
+        </div>
+        <div class="header-updated-pill">
+            <span class="mdi mdi-robot"></span>
+            <span>@FilteredWorkers.Count workers</span>
+        </div>
+    </div>
 </div>
 
 <div class="page-body">
-    <div class="card mb-lg">
-        <div class="flex items-center justify-between gap-md">
+    <div class="card mb-lg workers-filter-card">
+        <div class="flex items-center justify-between gap-md workers-filter-row">
             <div class="flex items-center gap-md">
                 <input type="search" placeholder="Filter workers by name or URL..." @bind="SearchTerm" @bind:event="oninput" />
                 <select @bind="StatusFilter">
@@ -43,14 +52,23 @@
             <ul class="list">
                 @foreach (var worker in FilteredWorkers)
                 {
-                    <li class="list-item worker-row">
+                    <li class="list-item worker-row worker-list-clickable" @onclick="() => OpenWorkerDetail(worker.Id)">
                         <div class="worker-row-main">
                             <div class="worker-title">@worker.Name</div>
                             <div class="text-small text-muted">@worker.CurrentUrl</div>
                             <div class="text-small">Processed: @worker.PagesProcessed | Errors: @worker.ErrorCount</div>
                         </div>
-                        <div class="worker-row-actions">
+                        <div class="worker-row-actions" @onclick:stopPropagation="true">
                             <span class="badge @GetStatusBadgeClass(worker.Status)">@worker.Status</span>
+                            <button class="btn btn-icon" title="Logs" aria-label="Logs" @onclick='() => OpenWorkerSection(worker.Id, "logs")' type="button">
+                                <span class="mdi mdi-text-box-search-outline"></span>
+                            </button>
+                            <button class="btn btn-icon" title="Config" aria-label="Config" @onclick='() => OpenWorkerSection(worker.Id, "config")' type="button">
+                                <span class="mdi mdi-cog-outline"></span>
+                            </button>
+                            <button class="btn btn-icon" title="Metrics" aria-label="Metrics" @onclick='() => OpenWorkerSection(worker.Id, "metrics")' type="button">
+                                <span class="mdi mdi-chart-line"></span>
+                            </button>
                             <button class="btn btn-icon" title="Start" aria-label="Start" @onclick="() => Start(worker.Id)" type="button">
                                 <span class="mdi mdi-play"></span>
                             </button>
@@ -157,5 +175,15 @@
             "paused" => "badge-warning",
             _ => "badge-info"
         };
+    }
+
+    private void OpenWorkerDetail(int workerId)
+    {
+        Navigation.NavigateTo($"/workers/{workerId}");
+    }
+
+    private void OpenWorkerSection(int workerId, string section)
+    {
+        Navigation.NavigateTo($"/workers/{workerId}/{section}");
     }
 }

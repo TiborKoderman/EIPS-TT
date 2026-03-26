@@ -1,0 +1,171 @@
+@page "/workers/groups"
+@using ManagerApp.Models
+@using ManagerApp.Services
+@inject IWorkerService WorkerService
+
+<div class="page-header">
+    <div class="page-header-main">
+        <div>
+            <h1 class="page-title">Worker Groups</h1>
+            <p class="page-subtitle">Group-wise worker settings and assignment controls</p>
+        </div>
+        <a class="btn" href="/workers/config">
+            <span class="mdi mdi-tune"></span>
+            Global Config
+        </a>
+    </div>
+</div>
+
+<div class="page-body">
+    @if (isLoading)
+    {
+        <div class="card"><p>Loading groups...</p></div>
+    }
+    else if (groups.Count == 0)
+    {
+        <div class="card"><p class="text-muted">No worker groups defined yet.</p></div>
+    }
+    else
+    {
+        <div class="grid grid-cols-4 mb-lg">
+            <StatCard Label="Groups" Value="@groups.Count.ToString()" Footnote="Total defined" />
+            <StatCard Label="Enabled" Value="@groups.Count(g => g.Enabled).ToString()" Footnote="Active groups" />
+            <StatCard Label="Assigned Workers" Value="@DistinctAssignedWorkers.ToString()" Footnote="Unique worker IDs" />
+            <StatCard Label="Avg Rate Limit" Value="@GetAverageRateLimit()" Footnote="req/min per group" />
+        </div>
+
+        <div class="grid grid-cols-2 mb-lg">
+            <div class="card">
+                <h2 class="card-title">Groups</h2>
+                <ul class="list">
+                    @foreach (var group in groups)
+                    {
+                        <li class="list-item worker-group-row @(selectedGroup?.Id == group.Id ? "selected" : "")"
+                            @onclick="() => SelectGroup(group.Id)">
+                            <div class="flex items-center justify-between gap-sm">
+                                <strong>@group.Name</strong>
+                                <span class="badge @(group.Enabled ? "badge-success" : "badge-warning")">
+                                    @(group.Enabled ? "Enabled" : "Disabled")
+                                </span>
+                            </div>
+                            <div class="text-small text-muted">@group.Description</div>
+                            <div class="text-small">Workers: @group.WorkerIds.Count</div>
+                        </li>
+                    }
+                </ul>
+            </div>
+
+            <div class="card">
+                @if (selectedGroup == null)
+                {
+                    <p class="text-muted">Select a group to edit settings.</p>
+                }
+                else
+                {
+                    <h2 class="card-title">@selectedGroup.Name Settings</h2>
+
+                    <div class="workers-config-grid">
+                        <label>
+                            <span class="text-small text-muted">Name</span>
+                            <input type="text" @bind="selectedGroup.Name" />
+                        </label>
+                        <label>
+                            <span class="text-small text-muted">Description</span>
+                            <input type="text" @bind="selectedGroup.Description" />
+                        </label>
+                        <label>
+                            <span class="text-small text-muted">Max Pages / Worker</span>
+                            <input type="number" min="0" @bind="selectedGroup.MaxPagesPerWorker" />
+                        </label>
+                        <label>
+                            <span class="text-small text-muted">Rate Limit / Minute</span>
+                            <input type="number" min="0" @bind="selectedGroup.RateLimitPerMinute" />
+                        </label>
+                    </div>
+
+                    <label class="mt-md flex items-center gap-sm">
+                        <input type="checkbox" @bind="selectedGroup.Enabled" style="width:auto;" />
+                        <span>Group enabled</span>
+                    </label>
+
+                    <label class="mt-md">
+                        <span class="text-small text-muted">Worker IDs (comma-separated)</span>
+                        <input type="text" @bind="workerIdsInput" />
+                    </label>
+
+                    <div class="mt-md flex gap-sm">
+                        <button class="btn btn-primary" @onclick="SaveSelectedGroup">
+                            <span class="mdi mdi-content-save"></span>
+                            Save Group
+                        </button>
+                        @if (!string.IsNullOrWhiteSpace(statusMessage))
+                        {
+                            <span class="text-small text-muted">@statusMessage</span>
+                        }
+                    </div>
+                }
+            </div>
+        </div>
+    }
+</div>
+
+@code {
+    private List<WorkerGroupSettingsViewModel> groups = new();
+    private WorkerGroupSettingsViewModel? selectedGroup;
+    private string workerIdsInput = "";
+    private string? statusMessage;
+    private bool isLoading = true;
+
+    private int DistinctAssignedWorkers => groups
+        .SelectMany(g => g.WorkerIds)
+        .Distinct()
+        .Count();
+
+    protected override async Task OnInitializedAsync()
+    {
+        groups = await WorkerService.GetWorkerGroupsAsync();
+        selectedGroup = groups.FirstOrDefault();
+        workerIdsInput = selectedGroup == null ? "" : string.Join(",", selectedGroup.WorkerIds);
+        isLoading = false;
+    }
+
+    private void SelectGroup(int id)
+    {
+        selectedGroup = groups.FirstOrDefault(g => g.Id == id);
+        workerIdsInput = selectedGroup == null ? "" : string.Join(",", selectedGroup.WorkerIds);
+        statusMessage = null;
+    }
+
+    private async Task SaveSelectedGroup()
+    {
+        if (selectedGroup == null)
+        {
+            return;
+        }
+
+        selectedGroup.WorkerIds = workerIdsInput
+            .Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+            .Select(v => int.TryParse(v, out var parsed) ? parsed : -1)
+            .Where(v => v > 0)
+            .Distinct()
+            .ToList();
+
+        var saved = await WorkerService.SaveWorkerGroupAsync(selectedGroup);
+        statusMessage = saved ? "Saved" : "Unable to save group";
+    }
+
+    private string GetAverageRateLimit()
+    {
+        var rates = groups
+            .Where(g => g.RateLimitPerMinute.HasValue)
+            .Select(g => g.RateLimitPerMinute!.Value)
+            .ToList();
+
+        if (rates.Count == 0)
+        {
+            return "N/A";
+        }
+
+        return Math.Round(rates.Average(), 1).ToString();
+    }
+}
