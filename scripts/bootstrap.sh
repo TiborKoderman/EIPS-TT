@@ -8,5 +8,6 @@ bash scripts/venv-restore.sh
 mkdir -p pa1/report/.out
 bash scripts/db-migrate.sh
 source_project_env
+bash scripts/db-info.sh
 
 echo "Bootstrap complete (.venv + postgres + migration on localhost:${DB_HOST_PORT})."

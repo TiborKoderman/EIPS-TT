@@ -7,6 +7,14 @@ source scripts/project-env.sh
 ensure_project_env
 source_project_env
 
+if [[ ! -x ".venv/bin/python" ]]; then
+  echo "Python virtualenv missing; restoring it first..."
+  bash scripts/venv-restore.sh
+fi
+
+bash scripts/db-migrate.sh
+bash scripts/db-info.sh
+
 export ASPNETCORE_ENVIRONMENT="${ASPNETCORE_ENVIRONMENT:-Development}"
 export ASPNETCORE_URLS="${ASPNETCORE_URLS:-http://127.0.0.1:5160}"
 export ConnectionStrings__CrawldbConnection="Host=${DB_HOST};Port=${DB_PORT};Database=${DB_NAME};Username=${DB_USER};Password=${DB_PASSWORD}"

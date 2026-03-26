@@ -53,30 +53,22 @@ docker compose --profile devcontainer up -d app
 
 ## Database Connection
 
-Use this from DB tools:
+The repo does not assume `5432` is free. On first bootstrap it picks an available host port,
+stores it in `.env.local`, and publishes PostgreSQL there.
 
-`postgresql://postgres:postgres@localhost:5432/crawldb`
-
-Credentials are local to your compose stack.
-
-If `5432` is already occupied on your machine, you can run this repo DB on another host port:
-
-```bash
-DB_HOST_PORT=5433 bash scripts/db-migrate.sh
-```
-
-Then run ManagerApp and the crawler with matching DB overrides:
-
-```bash
-DB_PORT=5433 DB_PASSWORD=postgres DB_USER=postgres DB_NAME=crawldb dotnet run --project ManagerApp/ManagerApp.csproj
-```
-
-The setup scripts now persist the selected DB port in `.env.local`, so the usual workflow is simply:
+The normal local workflow is:
 
 ```bash
 ./scripts/bootstrap.sh
+./scripts/db-info.sh
 ./scripts/run-manager.sh
 ```
+
+`./scripts/db-info.sh` prints the exact `Host`, `Port`, `Database`, `Username`, and `Password`
+to use from DBeaver or any other external DB tool.
+
+On this machine right now the repo DB is on `localhost:5433`, not `5432`, because `5432`
+was already occupied by another local PostgreSQL instance.
 
 ## Utility Commands
 
@@ -89,6 +81,9 @@ bash scripts/reset-db.sh
 
 # full DB reset (drops compose volumes), then re-apply migrations
 bash scripts/reset-db.sh --clean
+
+# print the exact external PostgreSQL connection settings and verify them
+bash scripts/db-info.sh
 
 # db logs
 docker compose logs -f db
@@ -115,69 +110,35 @@ bash scripts/crawler-standalone-preset.sh crawl-once
 bash scripts/crawler-standalone-preset.sh api
 ```
 
-## Crawler API (Mock Scaffolding)
+## Daemon Control Plane
 
-The crawler now includes a standalone Flask API server for worker management scaffolding.
-This is additive and does not change existing `pa1/crawler/src/main.py` standalone behavior.
+The current architecture is:
 
-Architecture model:
+- manager server hosts the HTTP and websocket control plane
+- daemons are client-only processes that connect outbound to the manager
+- workers live under a daemon; workers do not host their own web servers
+- local development auto-starts one default local daemon from `ManagerApp`
 
-- One API server process represents one crawler daemon instance.
-- The daemon manages multiple workers internally (worker-level parallelism).
-- There is no nested "worker API per worker" process.
-- The API is primarily the manager/external control plane (local or remote).
+That means you should not expect a daemon HTTP API on `127.0.0.1:8090`.
+The manager listens on `http://127.0.0.1:5160` by default, and the local daemon connects to:
+
+- manager websocket endpoint: `/api/daemon-channel`
+- manager ingest endpoint: `/api/crawler/ingest`
+- manager events endpoint: `/api/crawler/events`
+
+For normal local development, just run:
 
 ```bash
-source .venv/bin/activate
-python pa1/crawler/src/daemon/main.py
+./scripts/run-manager.sh
 ```
 
-Equivalent via the main utility entrypoint:
+If you need to start a daemon manually for debugging, point it at the manager websocket:
 
 ```bash
-python pa1/crawler/src/main.py --run-api --api-host 127.0.0.1 --api-port 8090
+CRAWLER_DAEMON_ID=local-default \
+MANAGER_DAEMON_WS_URL=ws://127.0.0.1:5160/api/daemon-channel?daemonId=local-default \
+.venv/bin/python pa1/crawler/src/daemon/main.py
 ```
-
-Default API URL: `http://127.0.0.1:8090`
-
-Optional environment variables:
-
-- `CRAWLER_API_HOST` (default `127.0.0.1`)
-- `CRAWLER_API_PORT` (default `8090`)
-- `CRAWLER_API_DEBUG` (`true/false`, default `false`)
-- `CRAWLER_API_TOKEN` (if set, Bearer auth is required)
-
-The current implementation is daemon-backed and returns `source: "daemon"` in API envelopes.
-
-Typical flow:
-
-1. `POST /api/daemon/start`
-2. `PUT /api/config/global` and optional group/worker config endpoints
-3. `POST /api/workers/spawn` (repeat as needed)
-4. `POST /api/workers/{id}/start` to activate specific workers
-5. Manager reads status/logs/statistics endpoints
-6. `POST /api/daemon/reload` or `POST /api/daemon/stop` as needed
-
-### Manager-controlled local daemon (default)
-
-`ManagerApp` can auto-start a local daemon process on app startup and terminate it on app shutdown.
-This is enabled by default for local development when `CrawlerApi:BaseUrl` points to localhost.
-
-Relevant `ManagerApp` settings:
-
-- `CrawlerApi:AutoStartLocalDaemon` (default `true`)
-- `CrawlerApi:LauncherMode` (`Process` or `Docker`)
-- `CrawlerApi:PythonExecutable`
-- `CrawlerApi:LocalDaemonArgs`
-- `CrawlerApi:DockerStartCommand`
-- `CrawlerApi:DockerStopCommand`
-
-### Reverse socket channel (no daemon-side port forwarding)
-
-Daemons can establish an outbound websocket connection to the manager server:
-
-- Manager endpoint: `/api/daemon-channel`
-- Daemon env var: `MANAGER_DAEMON_WS_URL=ws://<manager-host>/api/daemon-channel?daemonId=<id>`
 
 Because the daemon initiates the connection, the daemon host does not need inbound port forwarding.
 The manager/server side still needs to be reachable.

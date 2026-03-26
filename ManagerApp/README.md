@@ -6,7 +6,7 @@ This app provides:
 - Dashboard statistics from PostgreSQL (`crawldb`)
 - Page search and detail views
 - Link graph visualization (D3 via JS interop)
-- Worker monitoring controls backed by crawler daemon API
+- Worker monitoring controls backed by daemon websocket connections
 - SignalR hub endpoint for live updates (`/crawlerhub`)
 
 ## Tech Stack
@@ -30,9 +30,13 @@ This app provides:
 - .NET SDK compatible with `net10.0`
 - PostgreSQL reachable at the configured connection string
 
-Default connection (from `appsettings.json`):
+Default fallback connection (from `appsettings.json`):
 
 `Host=localhost;Port=5432;Database=crawldb;Username=postgres;Password=postgres`
+
+For local repo use, prefer the wrapper scripts instead of relying on that fallback directly,
+because the repo may shift PostgreSQL to `5433` or another free host port and persist it in
+`.env.local`.
 
 ## Setup (Standalone for ManagerApp)
 
@@ -43,21 +47,29 @@ cd /home/tibor/Repos/EIPS-TT
 bash scripts/db-migrate.sh
 ```
 
-2. Build app:
+2. Bootstrap the repo-local DB + Python environment:
+
+```bash
+cd /home/tibor/Repos/EIPS-TT
+./scripts/bootstrap.sh
+./scripts/db-info.sh
+```
+
+3. Build app:
 
 ```bash
 cd /home/tibor/Repos/EIPS-TT/ManagerApp
 dotnet build
 ```
 
-3. Run app:
+4. Run app:
 
 ```bash
-cd /home/tibor/Repos/EIPS-TT/ManagerApp
-dotnet run
+cd /home/tibor/Repos/EIPS-TT
+./scripts/run-manager.sh
 ```
 
-4. Open shown local URL (typically `https://localhost:7xxx` or `http://localhost:5xxx`).
+5. Open `http://127.0.0.1:5160`.
 
 ## Recommended VS Code Dev Workflow
 
@@ -108,7 +120,8 @@ cd /home/tibor/Repos/EIPS-TT
 ./scripts/run-manager.sh
 ```
 
-It reads the persisted `.env.local` DB settings created by `./scripts/bootstrap.sh`.
+It reads the persisted `.env.local` DB settings created by `./scripts/bootstrap.sh`,
+verifies the local PostgreSQL connection, and then starts the manager.
 
 ## Live Updates
 
@@ -132,6 +145,7 @@ The hub supports broadcasts for:
 - Build fails with SDK error:
   - install/use a .NET SDK that supports `net10.0`.
 - DB connection errors:
-  - verify PostgreSQL is running and `CrawldbConnection` is correct.
+  - run `./scripts/db-info.sh` and use the printed `Host`/`Port` in DBeaver or any other client.
+  - this repo may be on `localhost:5433` instead of `5432` when another PostgreSQL instance already uses `5432`.
 - No live updates visible:
   - ensure producer service publishes events to `/crawlerhub`.
