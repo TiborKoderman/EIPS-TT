@@ -28,6 +28,7 @@ class ManagerIngestRelay(Protocol):
         download_result: DownloadResult,
         site_id: int | None,
         source_page_id: int | None = None,
+        discovered_urls: list[str] | None = None,
     ) -> IngestPageResult | None:
         ...
 
@@ -50,6 +51,7 @@ class HttpManagerIngestRelay:
         download_result: DownloadResult,
         site_id: int | None,
         source_page_id: int | None = None,
+        discovered_urls: list[str] | None = None,
     ) -> IngestPageResult | None:
         if not self._endpoint_url:
             return None
@@ -58,6 +60,7 @@ class HttpManagerIngestRelay:
             "rawUrl": raw_url,
             "siteId": site_id,
             "sourcePageId": source_page_id,
+            "discoveredUrls": discovered_urls or [],
             "downloadResult": {
                 "requestedUrl": download_result.requested_url,
                 "finalUrl": download_result.final_url,
@@ -94,7 +97,7 @@ class HttpManagerIngestRelay:
             return IngestPageResult(
                 page_id=int(result["pageId"]),
                 status=str(result["status"]),
-                canonical_url=str(result["canonicalUrl"]),
+                url=str(result["url"]),
                 duplicate_of_page_id=(
                     int(result["duplicateOfPageId"])
                     if result.get("duplicateOfPageId") is not None
@@ -131,12 +134,14 @@ class DaemonPersistenceRouter:
         download_result: DownloadResult,
         site_id: int | None,
         source_page_id: int | None = None,
+        discovered_urls: list[str] | None = None,
     ) -> IngestPageResult:
         relayed = self._manager_relay.relay_download_result(
             raw_url=raw_url,
             download_result=download_result,
             site_id=site_id,
             source_page_id=source_page_id,
+            discovered_urls=discovered_urls,
         )
         if relayed is not None:
             return relayed
@@ -147,6 +152,7 @@ class DaemonPersistenceRouter:
                 download_result=download_result,
                 site_id=site_id,
                 source_page_id=source_page_id,
+                discovered_urls=discovered_urls,
             )
 
         raise RuntimeError(

@@ -174,7 +174,7 @@ def main() -> int:
             )
         print(
             f"status={result.status} page_id={result.page_id} "
-            f"canonical_url={result.canonical_url} duplicate_of={result.duplicate_of_page_id}"
+            f"url={result.url} duplicate_of={result.duplicate_of_page_id}"
         )
         return 0
 

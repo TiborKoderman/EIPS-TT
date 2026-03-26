@@ -38,10 +38,10 @@ public sealed class CrawlerRelayService
     public async Task<CrawlerIngestResponse> IngestAsync(CrawlerIngestRequest request, CancellationToken cancellationToken)
     {
         var accessedTime = DateTime.SpecifyKind(DateTime.UtcNow, DateTimeKind.Unspecified);
-        var rawUrl = (request.RawUrl ?? string.Empty).Trim();
-        var finalUrl = (request.DownloadResult?.FinalUrl ?? rawUrl).Trim();
-        var canonicalUrl = string.IsNullOrWhiteSpace(finalUrl) ? rawUrl : finalUrl;
-        if (string.IsNullOrWhiteSpace(canonicalUrl))
+        var rawUrl = NormalizeUrl(request.RawUrl);
+        var finalUrl = NormalizeUrl(request.DownloadResult?.FinalUrl);
+        var url = string.IsNullOrWhiteSpace(finalUrl) ? rawUrl : finalUrl;
+        if (string.IsNullOrWhiteSpace(url))
         {
             throw new InvalidOperationException("rawUrl/finalUrl must be provided.");
         }
@@ -55,41 +55,81 @@ public sealed class CrawlerRelayService
         await using var context = await _contextFactory.CreateDbContextAsync(cancellationToken);
 
         var existingPage = await context.Pages
-            .FirstOrDefaultAsync(
-                page => page.CanonicalUrl == canonicalUrl || page.Url == canonicalUrl,
-                cancellationToken);
+            .FirstOrDefaultAsync(page => page.Url == url, cancellationToken);
 
+        var siteId = await ResolveSiteIdAsync(context, url, request.SiteId, cancellationToken);
         var status = "inserted";
         Page targetPage;
 
-        if (existingPage != null)
+        if (existingPage != null && !string.Equals(existingPage.PageTypeCode, "FRONTIER", StringComparison.OrdinalIgnoreCase))
         {
+            existingPage.SiteId ??= siteId;
+            existingPage.PageTypeCode = pageTypeCode;
             existingPage.AccessedTime = accessedTime;
             existingPage.HttpStatusCode = request.DownloadResult?.StatusCode;
-            if (pageTypeCode == "HTML" && !string.IsNullOrWhiteSpace(html))
-            {
-                existingPage.HtmlContent = html;
-                existingPage.ContentHash = contentHash;
-            }
+            existingPage.HtmlContent = pageTypeCode == "HTML" ? html : null;
+            existingPage.ContentHash = pageTypeCode == "HTML" ? contentHash : null;
+            existingPage.DuplicateOfPageId = null;
             targetPage = existingPage;
             status = "updated";
         }
         else
         {
-            var siteId = await ResolveSiteIdAsync(context, canonicalUrl, request.SiteId, cancellationToken);
-            targetPage = new Page
+            var duplicateOfPageId = pageTypeCode == "HTML" && !string.IsNullOrWhiteSpace(contentHash)
+                ? await context.Pages
+                    .Where(page =>
+                        page.Url != url &&
+                        page.PageTypeCode == "HTML" &&
+                        page.ContentHash == contentHash)
+                    .OrderBy(page => page.Id)
+                    .Select(page => (int?)page.Id)
+                    .FirstOrDefaultAsync(cancellationToken)
+                : null;
+
+            if (existingPage != null)
             {
-                SiteId = siteId,
-                PageTypeCode = pageTypeCode,
-                Url = canonicalUrl,
-                CanonicalUrl = canonicalUrl,
-                HtmlContent = pageTypeCode == "HTML" ? html : null,
-                HttpStatusCode = request.DownloadResult?.StatusCode,
-                AccessedTime = accessedTime,
-                ContentHash = pageTypeCode == "HTML" ? contentHash : null,
-            };
-            context.Pages.Add(targetPage);
-            status = "inserted";
+                var existingPageType = existingPage.PageTypeCode;
+                existingPage.SiteId ??= siteId;
+                existingPage.AccessedTime = accessedTime;
+                existingPage.HttpStatusCode = request.DownloadResult?.StatusCode;
+                existingPage.ContentHash = pageTypeCode == "HTML" ? contentHash : null;
+                existingPage.DuplicateOfPageId = duplicateOfPageId;
+
+                if (pageTypeCode == "HTML" && duplicateOfPageId.HasValue)
+                {
+                    existingPage.PageTypeCode = "DUPLICATE";
+                    existingPage.HtmlContent = null;
+                    status = "promoted_duplicate";
+                }
+                else
+                {
+                    existingPage.PageTypeCode = pageTypeCode;
+                    existingPage.HtmlContent = pageTypeCode == "HTML" ? html : null;
+                    status = string.Equals(existingPageType, "FRONTIER", StringComparison.OrdinalIgnoreCase)
+                        ? "promoted"
+                        : "updated";
+                }
+
+                targetPage = existingPage;
+            }
+            else
+            {
+                targetPage = new Page
+                {
+                    SiteId = siteId,
+                    PageTypeCode = pageTypeCode == "HTML" && duplicateOfPageId.HasValue ? "DUPLICATE" : pageTypeCode,
+                    Url = url,
+                    HtmlContent = pageTypeCode == "HTML" && !duplicateOfPageId.HasValue ? html : null,
+                    HttpStatusCode = request.DownloadResult?.StatusCode,
+                    AccessedTime = accessedTime,
+                    ContentHash = pageTypeCode == "HTML" ? contentHash : null,
+                    DuplicateOfPageId = duplicateOfPageId,
+                };
+                context.Pages.Add(targetPage);
+                status = pageTypeCode == "HTML" && duplicateOfPageId.HasValue
+                    ? "duplicate_content"
+                    : "inserted";
+            }
         }
 
         await context.SaveChangesAsync(cancellationToken);
@@ -117,11 +157,17 @@ public sealed class CrawlerRelayService
             }
         }
 
+        await UpsertDiscoveredLinksAsync(
+            context,
+            targetPage,
+            request.DiscoveredUrls,
+            cancellationToken);
+
         return new CrawlerIngestResponse
         {
             PageId = targetPage.Id,
             Status = status,
-            CanonicalUrl = canonicalUrl,
+            Url = url,
             DuplicateOfPageId = targetPage.DuplicateOfPageId,
             ContentHash = targetPage.ContentHash,
         };
@@ -339,9 +385,93 @@ public sealed class CrawlerRelayService
         return Convert.ToHexString(bytes).ToLowerInvariant();
     }
 
+    private static string NormalizeUrl(string? value)
+    {
+        var trimmed = (value ?? string.Empty).Trim();
+        if (string.IsNullOrWhiteSpace(trimmed))
+        {
+            return string.Empty;
+        }
+
+        if (!Uri.TryCreate(trimmed, UriKind.Absolute, out var uri))
+        {
+            return trimmed;
+        }
+
+        var builder = new UriBuilder(uri)
+        {
+            Fragment = string.Empty,
+        };
+        return builder.Uri.AbsoluteUri;
+    }
+
+    private static async Task UpsertDiscoveredLinksAsync(
+        CrawldbContext context,
+        Page sourcePage,
+        IReadOnlyCollection<string>? discoveredUrls,
+        CancellationToken cancellationToken)
+    {
+        if (discoveredUrls is null || discoveredUrls.Count == 0)
+        {
+            return;
+        }
+
+        var normalizedUrls = discoveredUrls
+            .Select(NormalizeUrl)
+            .Where(url => !string.IsNullOrWhiteSpace(url))
+            .Distinct(StringComparer.Ordinal)
+            .ToList();
+        if (normalizedUrls.Count == 0)
+        {
+            return;
+        }
+
+        var knownTargets = await context.Pages
+            .Where(page => page.Url != null && normalizedUrls.Contains(page.Url))
+            .ToDictionaryAsync(page => page.Url!, cancellationToken);
+
+        var targetPages = new List<Page>();
+        foreach (var discoveredUrl in normalizedUrls)
+        {
+            if (string.Equals(discoveredUrl, sourcePage.Url, StringComparison.Ordinal))
+            {
+                continue;
+            }
+
+            if (!knownTargets.TryGetValue(discoveredUrl, out var targetPage))
+            {
+                var siteId = await ResolveSiteIdAsync(context, discoveredUrl, null, cancellationToken);
+                targetPage = new Page
+                {
+                    SiteId = siteId,
+                    PageTypeCode = "FRONTIER",
+                    Url = discoveredUrl,
+                    HtmlContent = null,
+                    HttpStatusCode = null,
+                    AccessedTime = null,
+                    ContentHash = null,
+                    DuplicateOfPageId = null,
+                };
+                context.Pages.Add(targetPage);
+                knownTargets[discoveredUrl] = targetPage;
+            }
+
+            targetPages.Add(targetPage);
+        }
+
+        await context.SaveChangesAsync(cancellationToken);
+
+        foreach (var targetPage in targetPages)
+        {
+            await context.Database.ExecuteSqlInterpolatedAsync(
+                $"INSERT INTO crawldb.link(from_page, to_page) VALUES ({sourcePage.Id}, {targetPage.Id}) ON CONFLICT DO NOTHING",
+                cancellationToken);
+        }
+    }
+
     private static async Task<int?> ResolveSiteIdAsync(
         CrawldbContext context,
-        string canonicalUrl,
+        string url,
         int? explicitSiteId,
         CancellationToken cancellationToken)
     {
@@ -350,7 +480,7 @@ public sealed class CrawlerRelayService
             return explicitSiteId;
         }
 
-        if (!Uri.TryCreate(canonicalUrl, UriKind.Absolute, out var uri) || string.IsNullOrWhiteSpace(uri.Host))
+        if (!Uri.TryCreate(url, UriKind.Absolute, out var uri) || string.IsNullOrWhiteSpace(uri.Host))
         {
             return null;
         }
@@ -379,6 +509,7 @@ public sealed class CrawlerIngestRequest
     public string? RawUrl { get; set; }
     public int? SiteId { get; set; }
     public int? SourcePageId { get; set; }
+    public List<string>? DiscoveredUrls { get; set; }
     public CrawlerDownloadResult? DownloadResult { get; set; }
 }
 
@@ -399,7 +530,7 @@ public sealed class CrawlerIngestResponse
 {
     public int PageId { get; set; }
     public string Status { get; set; } = "inserted";
-    public string CanonicalUrl { get; set; } = string.Empty;
+    public string Url { get; set; } = string.Empty;
     public int? DuplicateOfPageId { get; set; }
     public string? ContentHash { get; set; }
 }

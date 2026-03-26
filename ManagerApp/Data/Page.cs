@@ -21,19 +21,11 @@ public partial class Page
 
     public string? ContentHash { get; set; }
 
-    public int? DuplicateOf { get; set; }
-
-    public string? CanonicalUrl { get; set; }
-
     public int? DuplicateOfPageId { get; set; }
-
-    public virtual Page? DuplicateOfNavigation { get; set; }
 
     public virtual Page? DuplicateOfPage { get; set; }
 
     public virtual ICollection<Image> Images { get; set; } = new List<Image>();
-
-    public virtual ICollection<Page> InverseDuplicateOfNavigation { get; set; } = new List<Page>();
 
     public virtual ICollection<Page> InverseDuplicateOfPage { get; set; } = new List<Page>();
 

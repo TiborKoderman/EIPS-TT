@@ -77,21 +77,15 @@ public partial class CrawldbContext : DbContext
 
             entity.HasIndex(e => e.SiteId, "idx_page_site_id");
 
-            entity.HasIndex(e => e.CanonicalUrl, "unq_page_canonical_url").IsUnique();
-
             entity.HasIndex(e => e.Url, "unq_url_idx").IsUnique();
 
             entity.Property(e => e.Id).HasColumnName("id");
             entity.Property(e => e.AccessedTime)
                 .HasColumnType("timestamp without time zone")
                 .HasColumnName("accessed_time");
-            entity.Property(e => e.CanonicalUrl)
-                .HasMaxLength(3000)
-                .HasColumnName("canonical_url");
             entity.Property(e => e.ContentHash)
                 .HasMaxLength(64)
                 .HasColumnName("content_hash");
-            entity.Property(e => e.DuplicateOf).HasColumnName("duplicate_of");
             entity.Property(e => e.DuplicateOfPageId).HasColumnName("duplicate_of_page_id");
             entity.Property(e => e.HtmlContent).HasColumnName("html_content");
             entity.Property(e => e.HttpStatusCode).HasColumnName("http_status_code");
@@ -102,10 +96,6 @@ public partial class CrawldbContext : DbContext
             entity.Property(e => e.Url)
                 .HasMaxLength(3000)
                 .HasColumnName("url");
-
-            entity.HasOne(d => d.DuplicateOfNavigation).WithMany(p => p.InverseDuplicateOfNavigation)
-                .HasForeignKey(d => d.DuplicateOf)
-                .HasConstraintName("page_duplicate_of_fkey");
 
             entity.HasOne(d => d.DuplicateOfPage).WithMany(p => p.InverseDuplicateOfPage)
                 .HasForeignKey(d => d.DuplicateOfPageId)

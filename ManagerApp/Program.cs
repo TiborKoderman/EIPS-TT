@@ -74,7 +74,7 @@ app.MapPost("/api/crawler/ingest", async (
         {
             pageId = result.PageId,
             status = result.Status,
-            canonicalUrl = result.CanonicalUrl,
+            url = result.Url,
             duplicateOfPageId = result.DuplicateOfPageId,
             contentHash = result.ContentHash,
         }

@@ -24,6 +24,7 @@ class PageIngestSink(Protocol):
         download_result: DownloadResult,
         site_id: int | None,
         source_page_id: int | None = None,
+        discovered_urls: list[str] | None = None,
     ) -> IngestPageResult:
         ...
 
@@ -72,17 +73,18 @@ class CrawlerPageProcessor:
             large_binary_threshold_bytes=large_binary_threshold_bytes,
         )
 
+        if download.html_content:
+            assets = self._link_extractor.extract(download.html_content, download.final_url)
+        else:
+            assets = ExtractedPageAssets(links=[], js_links=[], images=[])
+
         ingest = self._page_store.ingest_download_result(
             raw_url=url,
             download_result=download,
             site_id=site_id,
             source_page_id=source_page_id,
+            discovered_urls=assets.links,
         )
-
-        if download.html_content:
-            assets = self._link_extractor.extract(download.html_content, download.final_url)
-        else:
-            assets = ExtractedPageAssets(links=[], js_links=[], images=[])
 
         return CrawlProcessResult(
             download=download,

@@ -26,13 +26,21 @@ CREATE TABLE crawldb.page (
 	html_content         text  ,
 	http_status_code     integer  ,
 	accessed_time        timestamp  ,
+	content_hash         char(64)  ,
+	duplicate_of_page_id integer  ,
 	CONSTRAINT pk_page_id PRIMARY KEY ( id ),
-	CONSTRAINT unq_url_idx UNIQUE ( url )
+	CONSTRAINT unq_url_idx UNIQUE ( url ),
+	CONSTRAINT chk_page_content_hash_hex CHECK (content_hash IS NULL OR content_hash ~ '^[0-9a-f]{64}$'),
+	CONSTRAINT chk_page_url_no_fragment CHECK (url IS NULL OR position('#' in url) = 0)
  );
 
 CREATE INDEX "idx_page_site_id" ON crawldb.page ( site_id );
 
 CREATE INDEX "idx_page_page_type_code" ON crawldb.page ( page_type_code );
+
+CREATE INDEX "idx_page_content_hash" ON crawldb.page ( content_hash );
+
+CREATE INDEX "idx_page_duplicate_of_page_id" ON crawldb.page ( duplicate_of_page_id );
 
 CREATE TABLE crawldb.page_data (
 	id                   serial  NOT NULL,
@@ -78,15 +86,11 @@ ALTER TABLE crawldb.page ADD CONSTRAINT fk_page_site FOREIGN KEY ( site_id ) REF
 
 ALTER TABLE crawldb.page ADD CONSTRAINT fk_page_page_type FOREIGN KEY ( page_type_code ) REFERENCES crawldb.page_type( code ) ON DELETE RESTRICT;
 
+ALTER TABLE crawldb.page ADD CONSTRAINT fk_page_duplicate_of_page FOREIGN KEY ( duplicate_of_page_id ) REFERENCES crawldb.page( id ) ON DELETE SET NULL;
+
 ALTER TABLE crawldb.page_data ADD CONSTRAINT fk_page_data_page FOREIGN KEY ( page_id ) REFERENCES crawldb.page( id ) ON DELETE RESTRICT;
 
 ALTER TABLE crawldb.page_data ADD CONSTRAINT fk_page_data_data_type FOREIGN KEY ( data_type_code ) REFERENCES crawldb.data_type( code ) ON DELETE RESTRICT;
-
-ALTER TABLE crawldb.page
-	ADD COLUMN IF NOT EXISTS content_hash varchar(64),
-	ADD COLUMN IF NOT EXISTS duplicate_of integer NULL REFERENCES crawldb.page(id);
-
-CREATE INDEX IF NOT EXISTS idx_page_content_hash ON crawldb.page (content_hash);
 
 INSERT INTO crawldb.data_type VALUES
 	('PDF'),

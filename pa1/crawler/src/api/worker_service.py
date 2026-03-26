@@ -129,6 +129,8 @@ class DaemonWorkerService(WorkerControlService):
         self._manager_ingest_url = os.getenv("MANAGER_INGEST_API_URL", "").strip() or None
         self._manager_event_url = os.getenv("MANAGER_EVENT_API_URL", "").strip() or None
         self._manager_api_token = os.getenv("MANAGER_INGEST_API_TOKEN", "").strip() or None
+        self._pending_manager_events: deque[dict[str, object | None]] = deque(maxlen=1000)
+        self._manager_event_relay_degraded = False
         self._allow_daemon_db_fallback = os.getenv(
             "CRAWLER_DAEMON_ALLOW_DB_FALLBACK", "true"
         ).strip().lower() in {"1", "true", "yes", "on"}
@@ -955,7 +957,12 @@ class DaemonWorkerService(WorkerControlService):
                     for link in processing["discoveredLinks"]:
                         self._enqueue_frontier_url(link)
 
-                    self._report_page_to_manager(current, lease.url, processing["downloadResult"])
+                    self._report_page_to_manager(
+                        current,
+                        lease.url,
+                        processing["downloadResult"],
+                        processing["discoveredLinks"],
+                    )
                     self._emit_manager_event(
                         "worker-metric",
                         worker_id=worker_id,
@@ -1054,7 +1061,7 @@ class DaemonWorkerService(WorkerControlService):
                 cur.execute(
                     """
                     INSERT INTO crawldb.frontier_queue (
-                        canonical_url,
+                        url,
                         priority,
                         source_url,
                         depth,
@@ -1063,7 +1070,7 @@ class DaemonWorkerService(WorkerControlService):
                         dequeued_at
                     )
                     VALUES (%s, %s, %s, %s, %s, NOW(), CASE WHEN %s = 'queued' THEN NULL ELSE NOW() END)
-                    ON CONFLICT (canonical_url)
+                    ON CONFLICT (url)
                     DO UPDATE
                         SET priority = GREATEST(crawldb.frontier_queue.priority, EXCLUDED.priority),
                             source_url = COALESCE(EXCLUDED.source_url, crawldb.frontier_queue.source_url),
@@ -1090,7 +1097,7 @@ class DaemonWorkerService(WorkerControlService):
                     UPDATE crawldb.frontier_queue
                     SET state = %s,
                         dequeued_at = CASE WHEN %s = 'queued' THEN NULL ELSE NOW() END
-                    WHERE canonical_url = %s;
+                    WHERE url = %s;
                     """,
                     (state, state, url),
                 )
@@ -1594,6 +1601,7 @@ class DaemonWorkerService(WorkerControlService):
         worker: WorkerRecord,
         raw_url: str | None,
         download_result: dict[str, object | None],
+        discovered_links: list[str],
     ) -> None:
         if self._manager_ingest_url is None or not raw_url:
             return
@@ -1602,6 +1610,7 @@ class DaemonWorkerService(WorkerControlService):
             "rawUrl": raw_url,
             "siteId": None,
             "sourcePageId": None,
+            "discoveredUrls": discovered_links,
             "downloadResult": download_result,
         }
 
@@ -1626,19 +1635,45 @@ class DaemonWorkerService(WorkerControlService):
             },
         )
 
-    def _emit_manager_event(self, event_type: str, worker_id: int | None = None, payload: object | None = None) -> None:
+    def _emit_manager_event(self, event_type: str, worker_id: int | None = None, payload: object | None = None) -> bool:
         if self._manager_event_url is None:
-            return
+            return False
 
-        self._post_manager_json(
-            self._manager_event_url,
-            {
-                "type": event_type,
-                "daemonId": self._daemon_id,
-                "workerId": worker_id,
-                "payload": payload,
-            },
-        )
+        event = {
+            "type": event_type,
+            "daemonId": self._daemon_id,
+            "workerId": worker_id,
+            "payload": payload,
+        }
+
+        pending_events = list(self._pending_manager_events)
+        pending_events.append(event)
+        for index, pending_event in enumerate(pending_events):
+            delivered = self._post_manager_json(self._manager_event_url, pending_event)
+            if delivered:
+                continue
+
+            self._pending_manager_events = deque(pending_events[index:], maxlen=1000)
+            if not self._manager_event_relay_degraded:
+                self._manager_event_relay_degraded = True
+                self._append_local_log(
+                    worker_id or 1,
+                    "Warning",
+                    "Manager event relay unavailable; worker logs and metrics will sync when the manager API responds again.",
+                    emit_manager_event=False,
+                )
+            return False
+
+        self._pending_manager_events.clear()
+        if self._manager_event_relay_degraded:
+            self._manager_event_relay_degraded = False
+            self._append_local_log(
+                worker_id or 1,
+                "Info",
+                "Manager event relay restored; queued worker logs and metrics were synced.",
+                emit_manager_event=False,
+            )
+        return True
 
     def _post_manager_json(self, url: str, payload: object) -> bool:
         data = json.dumps(payload).encode("utf-8")

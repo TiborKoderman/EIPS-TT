@@ -20,7 +20,7 @@ class PostgresFrontierSwapStore(FrontierSwapStore):
             cur.execute(
                 """
                 INSERT INTO crawldb.frontier_queue (
-                    canonical_url,
+                    url,
                     priority,
                     source_url,
                     depth,
@@ -28,7 +28,7 @@ class PostgresFrontierSwapStore(FrontierSwapStore):
                     discovered_at
                 )
                 VALUES (%s, %s, %s, %s, 'queued', %s)
-                ON CONFLICT (canonical_url)
+                ON CONFLICT (url)
                 DO NOTHING;
                 """,
                 (
@@ -47,7 +47,7 @@ class PostgresFrontierSwapStore(FrontierSwapStore):
             cur.execute(
                 """
                 WITH picked AS (
-                    SELECT canonical_url, priority, source_url, depth, discovered_at
+                    SELECT url, priority, source_url, depth, discovered_at
                     FROM crawldb.frontier_queue
                     WHERE state = 'queued'
                     ORDER BY priority DESC, discovered_at ASC
@@ -57,8 +57,8 @@ class PostgresFrontierSwapStore(FrontierSwapStore):
                 UPDATE crawldb.frontier_queue q
                 SET state = 'in_memory', dequeued_at = NOW()
                 FROM picked
-                WHERE q.canonical_url = picked.canonical_url
-                RETURNING picked.canonical_url, picked.priority, picked.source_url, picked.depth, picked.discovered_at;
+                WHERE q.url = picked.url
+                RETURNING picked.url, picked.priority, picked.source_url, picked.depth, picked.discovered_at;
                 """,
                 (limit,),
             )
