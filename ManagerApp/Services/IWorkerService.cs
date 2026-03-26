@@ -100,4 +100,9 @@ public interface IWorkerService
     /// Save a worker group's settings.
     /// </summary>
     Task<bool> SaveWorkerGroupAsync(WorkerGroupSettingsViewModel group);
+
+    /// <summary>
+    /// Get command queue dispatch diagnostics.
+    /// </summary>
+    Task<CommandQueueDiagnosticsViewModel> GetCommandQueueDiagnosticsAsync();
 }

@@ -124,34 +124,6 @@
             </div>
         }
 
-        @if (IsTabActive("config"))
-        {
-            <div class="card">
-                <div class="card-header-inline mb-md">
-                    <h2 class="card-title mb-0">Runtime Config</h2>
-                    <div class="flex gap-sm">
-                        <a class="btn btn-sm" href="/workers/config">
-                            <span class="mdi mdi-tune"></span> Global
-                        </a>
-                        <a class="btn btn-sm" href="/workers/groups">
-                            <span class="mdi mdi-account-group"></span> Daemons
-                        </a>
-                    </div>
-                </div>
-                <ul class="list">
-                    @foreach (var (key, value) in workerDetail.RuntimeConfig)
-                    {
-                        <li class="list-item">
-                            <div class="worker-config-row">
-                                <span class="text-muted">@key</span>
-                                <strong>@value</strong>
-                            </div>
-                        </li>
-                    }
-                </ul>
-            </div>
-        }
-
         @if (IsTabActive("metrics"))
         {
             <div class="grid grid-cols-3 mb-lg">
@@ -182,7 +154,6 @@
     [
         ("overview", "Overview", "mdi-view-dashboard-outline"),
         ("logs", "Logs", "mdi-text-box-search-outline"),
-        ("config", "Config", "mdi-cog-outline"),
         ("metrics", "Metrics", "mdi-chart-line")
     ];
 

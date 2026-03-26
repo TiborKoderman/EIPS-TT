@@ -79,6 +79,7 @@ class MockWorkerService(WorkerControlService):
         }
         self._logs: dict[int, deque[WorkerLogEntry]] = defaultdict(lambda: deque(maxlen=500))
         self._local_processes: dict[int, subprocess.Popen[bytes]] = {}
+        self._thread_workers: dict[int, tuple[threading.Thread, threading.Event]] = {}
 
         for worker in self._workers.values():
             self._append_log(worker.id, "Info", f"{worker.name} initialized in {worker.mode} mode.")
@@ -138,6 +139,8 @@ class MockWorkerService(WorkerControlService):
 
             for worker_id in list(self._local_processes):
                 self._terminate_process_if_running(worker_id)
+            for worker_id in list(self._thread_workers):
+                self._stop_thread_worker(worker_id)
 
             return {
                 "running": False,
@@ -162,6 +165,9 @@ class MockWorkerService(WorkerControlService):
             worker = self._workers.get(worker_id)
             if worker is None:
                 return False
+            if worker.mode == "thread" and worker_id not in self._thread_workers:
+                self._launch_thread_worker(worker_id, worker.current_url)
+                return True
             worker.status = "Active"
             worker.started_at = utc_now_iso()
             self._append_log(worker_id, "Info", "Worker started via API.")
@@ -186,6 +192,7 @@ class MockWorkerService(WorkerControlService):
             worker.status = "Stopped"
             worker.current_url = None
             self._terminate_process_if_running(worker_id)
+            self._stop_thread_worker(worker_id)
             self._append_log(worker_id, "Info", "Worker stopped via API.")
             return True
 
@@ -199,10 +206,12 @@ class MockWorkerService(WorkerControlService):
         group_id: int | None,
     ) -> WorkerRecord:
         requested_mode = (mode or "mock").strip().lower()
-        if requested_mode not in {"mock", "local"}:
+        if requested_mode not in {"mock", "local", "thread"}:
             requested_mode = "mock"
 
         normalized_seed_urls = [url.strip() for url in (seed_urls or []) if url and url.strip()]
+        if not normalized_seed_urls and self._global_config.seed_urls:
+            normalized_seed_urls = list(self._global_config.seed_urls)
         effective_seed_url = seed_url
         if not effective_seed_url and normalized_seed_urls:
             effective_seed_url = normalized_seed_urls[0]
@@ -242,6 +251,8 @@ class MockWorkerService(WorkerControlService):
 
             if requested_mode == "local":
                 self._launch_local_worker_process(worker_id, effective_seed_url)
+            elif requested_mode == "thread":
+                self._launch_thread_worker(worker_id, effective_seed_url)
 
             return self._copy_worker(worker)
 
@@ -262,6 +273,8 @@ class MockWorkerService(WorkerControlService):
                     self._append_log(worker.id, "Info", "Reload: worker state set to Idle.")
             for worker_id in list(self._local_processes):
                 self._terminate_process_if_running(worker_id)
+            for worker_id in list(self._thread_workers):
+                self._stop_thread_worker(worker_id)
         return {
             "reloadedWorkers": reloaded,
             "timestampUtc": utc_now_iso(),
@@ -318,6 +331,17 @@ class MockWorkerService(WorkerControlService):
             )
 
     def update_global_config(self, payload: dict[str, object]) -> GlobalWorkerConfig:
+        seed_urls: list[str] = []
+        raw_seed_urls = payload.get("seedUrls")
+        if isinstance(raw_seed_urls, list) and len(raw_seed_urls) > 0:
+            seed_urls = [str(url).strip() for url in raw_seed_urls if str(url).strip()]
+        elif "seedUrlsText" in payload:
+            seed_urls = [
+                line.strip()
+                for line in str(payload.get("seedUrlsText", "")).splitlines()
+                if line.strip()
+            ]
+
         with self._lock:
             self._global_config = GlobalWorkerConfig(
                 max_concurrent_workers=_coerce_int(
@@ -337,8 +361,17 @@ class MockWorkerService(WorkerControlService):
                     self._global_config.respect_robots_txt,
                 ),
                 user_agent=str(payload.get("userAgent", self._global_config.user_agent)),
+                seed_urls=seed_urls,
             )
-            return self.get_global_config()
+            cfg = self._global_config
+            return GlobalWorkerConfig(
+                max_concurrent_workers=cfg.max_concurrent_workers,
+                request_timeout_seconds=cfg.request_timeout_seconds,
+                crawl_delay_milliseconds=cfg.crawl_delay_milliseconds,
+                respect_robots_txt=cfg.respect_robots_txt,
+                user_agent=cfg.user_agent,
+                seed_urls=list(cfg.seed_urls),
+            )
 
     def list_groups(self) -> list[WorkerGroupSettings]:
         with self._lock:
@@ -477,6 +510,53 @@ class MockWorkerService(WorkerControlService):
         if worker is not None:
             worker.pid = None
 
+    def _launch_thread_worker(self, worker_id: int, seed_url: str | None) -> None:
+        worker = self._workers[worker_id]
+        stop_event = threading.Event()
+
+        def run() -> None:
+            sample_urls = [
+                "https://example.com/thread/news",
+                "https://example.com/thread/about",
+                "https://gov.si/thread",
+                "https://e-uprava.gov.si/thread",
+            ]
+            if seed_url:
+                sample_urls.insert(0, seed_url)
+
+            while not stop_event.is_set():
+                time.sleep(1.2)
+                with self._lock:
+                    current = self._workers.get(worker_id)
+                    if current is None or current.status != "Active":
+                        continue
+                    current.pages_processed += 1
+                    current.current_url = random.choice(sample_urls)
+                    if random.random() < 0.05:
+                        current.error_count += 1
+                        self._append_log(worker_id, "Warning", "Thread worker fetch retry scheduled.")
+
+        thread = threading.Thread(target=run, daemon=True, name=f"worker-thread-{worker_id}")
+        self._thread_workers[worker_id] = (thread, stop_event)
+        worker.status = "Active"
+        worker.started_at = utc_now_iso()
+        worker.pid = None
+        thread.start()
+        self._append_log(worker_id, "Info", "Thread worker started.")
+
+    def _stop_thread_worker(self, worker_id: int) -> None:
+        entry = self._thread_workers.pop(worker_id, None)
+        if entry is None:
+            return
+
+        thread, stop_event = entry
+        stop_event.set()
+        thread.join(timeout=2)
+        worker = self._workers.get(worker_id)
+        if worker is not None:
+            worker.pid = None
+        self._append_log(worker_id, "Info", "Thread worker stopped.")
+
     def _append_log(self, worker_id: int, level: str, message: str) -> None:
         self._logs[worker_id].append(
             WorkerLogEntry(timestamp_utc=utc_now_iso(), level=level, message=message)
@@ -495,6 +575,8 @@ class MockWorkerService(WorkerControlService):
             with self._lock:
                 for worker in self._workers.values():
                     if worker.status != "Active":
+                        continue
+                    if worker.mode == "thread":
                         continue
 
                     worker.pages_processed += 1

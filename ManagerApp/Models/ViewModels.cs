@@ -109,6 +109,7 @@ public class WorkerGlobalConfigViewModel
     public int CrawlDelayMilliseconds { get; set; } = 300;
     public bool RespectRobotsTxt { get; set; } = true;
     public string UserAgent { get; set; } = "EIPS-TT-Crawler/1.0";
+    public string SeedUrlsText { get; set; } = "";
 }
 
 /// <summary>
@@ -136,4 +137,17 @@ public class DaemonStatusViewModel
     public int WorkerCount { get; set; }
     public int ActiveWorkers { get; set; }
     public int LocalProcessCount { get; set; }
+}
+
+/// <summary>
+/// Queue diagnostics for manager command dispatch pipeline.
+/// </summary>
+public class CommandQueueDiagnosticsViewModel
+{
+    public int Queued { get; set; }
+    public int Dispatched { get; set; }
+    public int Acknowledged { get; set; }
+    public int Completed { get; set; }
+    public int Failed { get; set; }
+    public string? LastFailure { get; set; }
 }

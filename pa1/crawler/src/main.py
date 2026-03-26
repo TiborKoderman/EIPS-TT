@@ -105,10 +105,15 @@ def main() -> int:
         return 0
 
     if args.run_api:
-        from api.app import create_app
+        from api_server import main as run_daemon_api
 
-        app = create_app()
-        app.run(host=args.api_host, port=args.api_port, debug=args.api_debug)
+        # Keep CLI flags backward compatible by propagating to env vars consumed by api_server.
+        import os
+
+        os.environ["CRAWLER_API_HOST"] = args.api_host
+        os.environ["CRAWLER_API_PORT"] = str(args.api_port)
+        os.environ["CRAWLER_API_DEBUG"] = "true" if args.api_debug else "false"
+        run_daemon_api()
         return 0
 
     if args.url_to_canonicalize:

@@ -3,6 +3,7 @@
 @using ManagerApp.Services
 @implements IAsyncDisposable
 @inject IWorkerService WorkerService
+@inject DaemonChannelService DaemonChannel
 @inject NavigationManager Navigation
 
 <div class="page-header">
@@ -12,6 +13,9 @@
             <p class="page-subtitle">Manage workers inside crawler daemons (one daemon process can run multiple workers)</p>
         </div>
         <div class="flex items-center gap-sm">
+            <a class="btn btn-icon" href="/workers/config" title="Global worker config" aria-label="Global worker config">
+                <span class="mdi mdi-cog-outline"></span>
+            </a>
             <div class="header-updated-pill">
                 <span class="mdi mdi-server"></span>
                 <span>Daemon: @(daemonStatus?.Running == true ? "Running" : "Stopped")</span>
@@ -37,7 +41,7 @@
                     }
                 </select>
                 <select @bind="SpawnGroupId">
-                    @foreach (var daemon in Daemons)
+                    @foreach (var daemon in SpawnableDaemons)
                     {
                         <option value="@daemon.Id">@daemon.Name</option>
                     }
@@ -45,6 +49,7 @@
                 <select @bind="SpawnMode">
                     <option value="mock">Mock</option>
                     <option value="local">Local Process</option>
+                    <option value="thread">OS Thread</option>
                 </select>
             </div>
             <div class="flex items-center gap-sm">
@@ -69,6 +74,43 @@
     </div>
 
     <div class="card mb-lg">
+        <h2 class="card-title">Daemon Channel Diagnostics</h2>
+        <div class="grid grid-cols-4 mb-md">
+            <StatCard Label="Connected Daemons" Value="@daemonConnections.Count.ToString()" Footnote="WebSocket channel" />
+            <StatCard Label="Queued" Value="@commandDiagnostics.Queued.ToString()" Footnote="Awaiting dispatch" />
+            <StatCard Label="In Flight" Value="@((commandDiagnostics.Dispatched + commandDiagnostics.Acknowledged).ToString())" Footnote="Dispatched/acknowledged" />
+            <StatCard Label="Failed" Value="@commandDiagnostics.Failed.ToString()" Footnote="Command execution failures" />
+        </div>
+
+        @if (daemonConnections.Count == 0)
+        {
+            <p class="text-small text-muted">No daemons are connected to the reverse channel.</p>
+        }
+        else
+        {
+            <ul class="list">
+                @foreach (var connection in daemonConnections)
+                {
+                    <li class="list-item">
+                        <div class="flex items-center justify-between gap-sm">
+                            <strong>@connection.DaemonId</strong>
+                            <span class="badge @(connection.IsOpen ? "badge-success" : "badge-warning")">
+                                @(connection.IsOpen ? "Open" : "Closed")
+                            </span>
+                        </div>
+                        <div class="text-small text-muted">Last seen: @connection.LastSeenUtc.ToLocalTime().ToString("yyyy-MM-dd HH:mm:ss")</div>
+                    </li>
+                }
+            </ul>
+        }
+
+        @if (!string.IsNullOrWhiteSpace(commandDiagnostics.LastFailure))
+        {
+            <p class="text-small text-muted mt-sm">Last queue failure: @commandDiagnostics.LastFailure</p>
+        }
+    </div>
+
+    <div class="card mb-lg">
         <h2 class="card-title">Daemons</h2>
         @if (Daemons.Count == 0)
         {
@@ -82,18 +124,29 @@
                     var daemonWorkers = GetFilteredWorkersForDaemon(daemon);
                     var expanded = expandedDaemonIds.Contains(daemon.Id);
                     <li class="list-item daemon-item">
-                        <button class="daemon-header" type="button" @onclick="() => ToggleDaemonExpand(daemon.Id)">
-                            <div class="daemon-header-title">
-                                <span class="mdi @(expanded ? "mdi-chevron-down" : "mdi-chevron-right")"></span>
-                                <strong>@daemon.Name</strong>
-                            </div>
-                            <div class="daemon-header-stats">
-                                <span class="badge badge-info">@daemonWorkers.Count total</span>
-                                <span class="badge badge-success">@CountByStatus(daemonWorkers, "Active") active</span>
-                                <span class="badge badge-warning">@CountByStatus(daemonWorkers, "Paused") paused</span>
-                                <span class="badge badge-error">@CountByStatus(daemonWorkers, "Error") errors</span>
-                            </div>
-                        </button>
+                        <div class="daemon-header-shell">
+                            <button class="daemon-header" type="button" @onclick="() => ToggleDaemonExpand(daemon.Id)">
+                                <div class="daemon-header-title">
+                                    <span class="mdi @(expanded ? "mdi-chevron-down" : "mdi-chevron-right")"></span>
+                                    <strong>@daemon.Name</strong>
+                                </div>
+                                <div class="daemon-header-stats">
+                                    <span class="badge badge-info">@daemonWorkers.Count total</span>
+                                    <span class="badge badge-success">@CountByStatus(daemonWorkers, "Active") active</span>
+                                    <span class="badge badge-warning">@CountByStatus(daemonWorkers, "Paused") paused</span>
+                                    <span class="badge badge-error">@CountByStatus(daemonWorkers, "Error") errors</span>
+                                </div>
+                            </button>
+                            @if (daemon.Id > 0)
+                            {
+                                <a class="btn btn-icon daemon-gear"
+                                   href="@($"/workers/groups?daemonId={daemon.Id}")"
+                                   title="Configure daemon"
+                                   aria-label="Configure daemon">
+                                    <span class="mdi mdi-cog"></span>
+                                </a>
+                            }
+                        </div>
 
                         @if (expanded)
                         {
@@ -116,9 +169,6 @@
                                                 <span class="badge @GetStatusBadgeClass(worker.Status)">@worker.Status</span>
                                                 <button class="btn btn-icon" title="Logs" aria-label="Logs" @onclick='() => OpenWorkerSection(worker.Id, "logs")' type="button">
                                                     <span class="mdi mdi-text-box-search-outline"></span>
-                                                </button>
-                                                <button class="btn btn-icon" title="Config" aria-label="Config" @onclick='() => OpenWorkerSection(worker.Id, "config")' type="button">
-                                                    <span class="mdi mdi-cog-outline"></span>
                                                 </button>
                                                 <button class="btn btn-icon" title="Metrics" aria-label="Metrics" @onclick='() => OpenWorkerSection(worker.Id, "metrics")' type="button">
                                                     <span class="mdi mdi-chart-line"></span>
@@ -160,6 +210,9 @@
 @code {
     private List<WorkerViewModel> workerItems = new();
     private List<WorkerGroupSettingsViewModel> daemonGroups = new();
+    private List<DaemonChannelService.DaemonConnectionInfo> daemonConnections = new();
+    private CommandQueueDiagnosticsViewModel commandDiagnostics = new();
+    private WorkerGlobalConfigViewModel? globalConfig;
     private DaemonStatusViewModel? daemonStatus;
     private string? actionStatus;
     private readonly HashSet<int> expandedDaemonIds = new();
@@ -190,6 +243,11 @@
         .OrderBy(group => group.Name)
         .ToList();
 
+    private List<WorkerGroupSettingsViewModel> SpawnableDaemons => daemonGroups
+        .Where(group => group.Id > 0)
+        .OrderBy(group => group.Name)
+        .ToList();
+
     private List<WorkerViewModel> FilteredWorkers => workerItems
         .Where(w => StatusFilter == "ALL" || string.Equals(w.Status, StatusFilter, StringComparison.OrdinalIgnoreCase))
         .Where(w => string.IsNullOrWhiteSpace(SearchTerm)
@@ -201,6 +259,7 @@
     protected override async Task OnInitializedAsync()
     {
         await RefreshAsync();
+        globalConfig = await WorkerService.GetGlobalConfigAsync();
 
         _refreshCts = new CancellationTokenSource();
         _refreshTimer = new PeriodicTimer(TimeSpan.FromSeconds(3));
@@ -222,20 +281,42 @@
         daemonStatus = await WorkerService.GetDaemonStatusAsync();
         workerItems = await WorkerService.GetAllWorkersAsync();
         daemonGroups = await WorkerService.GetWorkerGroupsAsync();
+        daemonConnections = DaemonChannel.GetConnectionInfos().ToList();
+        commandDiagnostics = await WorkerService.GetCommandQueueDiagnosticsAsync();
+
+        var groupedWorkerIds = daemonGroups
+            .SelectMany(group => group.WorkerIds)
+            .Distinct()
+            .ToHashSet();
+        var ungroupedWorkers = workerItems
+            .Where(worker => !groupedWorkerIds.Contains(worker.Id))
+            .Select(worker => worker.Id)
+            .ToList();
+        if (ungroupedWorkers.Count > 0)
+        {
+            daemonGroups.Add(new WorkerGroupSettingsViewModel
+            {
+                Id = -1,
+                Name = "Ungrouped Workers",
+                Description = "Workers not assigned to a daemon group yet.",
+                Enabled = true,
+                WorkerIds = ungroupedWorkers,
+            });
+        }
 
         if (daemonGroups.Count > 0 && daemonGroups.All(group => !expandedDaemonIds.Contains(group.Id)))
         {
             expandedDaemonIds.Add(daemonGroups[0].Id);
         }
 
-        if (daemonGroups.Count > 0 && daemonGroups.All(group => group.Id != SpawnGroupId))
+        if (SpawnableDaemons.Count > 0 && SpawnableDaemons.All(group => group.Id != SpawnGroupId))
         {
-            SpawnGroupId = daemonGroups[0].Id;
+            SpawnGroupId = SpawnableDaemons[0].Id;
         }
 
         if (daemonStatus == null && !string.IsNullOrWhiteSpace(WorkerService.LastError))
         {
-            actionStatus = $"Daemon API unavailable: {WorkerService.LastError} Run: python pa1/crawler/src/main.py --run-api";
+            actionStatus = $"Daemon API unavailable: {WorkerService.LastError} Run: python pa1/crawleer/daemon/main.py";
         }
     }
 
@@ -265,12 +346,28 @@
             return;
         }
 
+        if (SpawnGroupId <= 0)
+        {
+            actionStatus = "Select a daemon group before spawning a worker.";
+            return;
+        }
+
         var seedUrls = SpawnSeedUrlsText
             .Split(new[] { '\r', '\n' }, StringSplitOptions.RemoveEmptyEntries)
             .Select(url => url.Trim())
             .Where(url => !string.IsNullOrWhiteSpace(url))
             .Distinct(StringComparer.OrdinalIgnoreCase)
             .ToList();
+
+        if (seedUrls.Count == 0 && !string.IsNullOrWhiteSpace(globalConfig?.SeedUrlsText))
+        {
+            seedUrls = globalConfig.SeedUrlsText
+                .Split(new[] { '\r', '\n' }, StringSplitOptions.RemoveEmptyEntries)
+                .Select(url => url.Trim())
+                .Where(url => !string.IsNullOrWhiteSpace(url))
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .ToList();
+        }
 
         var spawned = await WorkerService.SpawnWorkerAsync(
             name: string.IsNullOrWhiteSpace(SpawnWorkerName) ? null : SpawnWorkerName.Trim(),

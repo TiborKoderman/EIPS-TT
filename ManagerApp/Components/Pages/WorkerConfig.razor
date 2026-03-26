@@ -48,6 +48,11 @@
                 </label>
             </div>
 
+            <label class="mt-md">
+                <span class="text-small text-muted">Default Seed URLs (one per line)</span>
+                <textarea rows="5" @bind="config.SeedUrlsText"></textarea>
+            </label>
+
             <label class="mt-md flex items-center gap-sm">
                 <input type="checkbox" @bind="config.RespectRobotsTxt" style="width:auto;" />
                 <span>Respect robots.txt</span>

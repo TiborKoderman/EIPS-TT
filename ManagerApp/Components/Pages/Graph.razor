@@ -24,7 +24,14 @@
             <button class="btn btn-primary" @onclick="ReloadGraph">
                 <span class="mdi mdi-refresh"></span> Reload
             </button>
+            <button class="btn" @onclick="AddMockGraphData">
+                <span class="mdi mdi-database-plus-outline"></span> Add Mock Data
+            </button>
         </div>
+        @if (!string.IsNullOrWhiteSpace(ActionStatus))
+        {
+            <p class="text-small text-muted mt-sm">@ActionStatus</p>
+        }
     </div>
 
     @if (IsLoading)
@@ -67,6 +74,7 @@
     private int SelectedLimit = 500;
     private bool IsLoading = true;
     private string? Error;
+    private string? ActionStatus;
     private string? SearchTerm;
     private readonly string GraphHostId = $"graph_{Guid.NewGuid():N}";
     private IJSObjectReference? _graphModule;
@@ -114,6 +122,20 @@
         finally
         {
             IsLoading = false;
+        }
+    }
+
+    private async Task AddMockGraphData()
+    {
+        try
+        {
+            var inserted = await GraphService.AddMockGraphDataAsync(120);
+            ActionStatus = $"Inserted {inserted} mock pages and graph links.";
+            await ReloadGraph();
+        }
+        catch (Exception ex)
+        {
+            ActionStatus = $"Unable to add mock graph data: {ex.Message}";
         }
     }
 

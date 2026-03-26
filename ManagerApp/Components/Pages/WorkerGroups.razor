@@ -123,6 +123,9 @@
 </div>
 
 @code {
+    [SupplyParameterFromQuery(Name = "daemonId")]
+    public int? SelectedDaemonId { get; set; }
+
     private List<WorkerGroupSettingsViewModel> groups = new();
     private WorkerGroupSettingsViewModel? selectedGroup;
     private string workerIdsInput = "";
@@ -137,7 +140,9 @@
     protected override async Task OnInitializedAsync()
     {
         groups = await WorkerService.GetWorkerGroupsAsync();
-        selectedGroup = groups.FirstOrDefault();
+        selectedGroup = SelectedDaemonId.HasValue
+            ? groups.FirstOrDefault(group => group.Id == SelectedDaemonId.Value)
+            : groups.FirstOrDefault();
         workerIdsInput = selectedGroup == null ? "" : string.Join(",", selectedGroup.WorkerIds);
         isLoading = false;
     }

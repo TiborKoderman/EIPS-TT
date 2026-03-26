@@ -622,6 +622,13 @@ textarea:focus {
     padding: 0;
 }
 
+.daemon-header-shell {
+    display: flex;
+    align-items: center;
+    gap: var(--spacing-xs);
+    padding-right: 8px;
+}
+
 .daemon-header {
     width: 100%;
     border: none;
@@ -633,6 +640,10 @@ textarea:focus {
     justify-content: space-between;
     gap: var(--spacing-md);
     padding: 12px;
+}
+
+.daemon-gear {
+    flex-shrink: 0;
 }
 
 .daemon-header:hover {

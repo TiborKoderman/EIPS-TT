@@ -68,6 +68,7 @@ class GlobalWorkerConfig:
     crawl_delay_milliseconds: int = 300
     respect_robots_txt: bool = True
     user_agent: str = "EIPS-TT-Crawler/1.0"
+    seed_urls: list[str] = field(default_factory=list)
 
     def to_view_model(self) -> dict[str, object]:
         return {
@@ -76,6 +77,8 @@ class GlobalWorkerConfig:
             "crawlDelayMilliseconds": self.crawl_delay_milliseconds,
             "respectRobotsTxt": self.respect_robots_txt,
             "userAgent": self.user_agent,
+            "seedUrls": list(self.seed_urls),
+            "seedUrlsText": "\n".join(self.seed_urls),
         }
 
 

@@ -61,7 +61,7 @@ public sealed class LocalDaemonHostedService : IHostedService
     private async Task StartProcessDaemonAsync(CancellationToken cancellationToken)
     {
         var daemonArgs = _configuration["CrawlerApi:LocalDaemonArgs"]
-            ?? "pa1/crawler/src/main.py --run-api --api-host 127.0.0.1 --api-port 8090";
+            ?? "pa1/crawleer/daemon/main.py";
         var baseUrl = _configuration["CrawlerApi:BaseUrl"] ?? "http://127.0.0.1:8090";
 
         var managerDir = Directory.GetCurrentDirectory();
@@ -112,6 +112,7 @@ public sealed class LocalDaemonHostedService : IHostedService
                 RedirectStandardError = true,
             };
             startInfo.Environment["MANAGER_DAEMON_WS_URL"] = wsUrl;
+            startInfo.Environment["MANAGER_PARENT_PID"] = Environment.ProcessId.ToString();
 
             _process = new Process
             {

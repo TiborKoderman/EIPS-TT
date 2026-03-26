@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import os
 import sys
+import threading
+import time
 from pathlib import Path
 
 # Keep direct execution working from repository root.
@@ -38,12 +40,43 @@ def main() -> int:
         logger=lambda msg: print(f"[reverse-channel] {msg}"),
     )
     reverse_channel.start()
+    _start_parent_watchdog_if_configured()
 
     try:
         app.run(host=host, port=port, debug=debug)
     finally:
         reverse_channel.stop()
     return 0
+
+
+def _start_parent_watchdog_if_configured() -> None:
+    raw_parent_pid = os.getenv("MANAGER_PARENT_PID", "").strip()
+    if not raw_parent_pid:
+        return
+
+    try:
+        parent_pid = int(raw_parent_pid)
+    except ValueError:
+        return
+
+    if parent_pid <= 1:
+        return
+
+    def watch() -> None:
+        while True:
+            if os.getppid() == 1:
+                print("[daemon-watchdog] parent process is gone; exiting daemon")
+                os._exit(0)
+
+            try:
+                os.kill(parent_pid, 0)
+            except OSError:
+                print("[daemon-watchdog] parent PID no longer alive; exiting daemon")
+                os._exit(0)
+
+            time.sleep(1.0)
+
+    threading.Thread(target=watch, daemon=True, name="daemon-parent-watchdog").start()
 
 
 def _handle_reverse_command(service: MockWorkerService, payload: dict[str, object]) -> tuple[bool, str | None]:

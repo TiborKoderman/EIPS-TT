@@ -41,34 +41,55 @@ public class WorkerService : IWorkerService
     public async Task<bool> StartDaemonAsync()
     {
         LastError = null;
-        if (_useReverseChannelCommands && await EnqueueCommandAsync("start-daemon", null))
+        var response = await PostAsync("api/daemon/start", new { });
+        if (response?.Ok == true)
         {
             return true;
         }
-        var response = await PostAsync("api/daemon/start", new { });
-        return response?.Ok == true;
+
+        if (_useReverseChannelCommands && await EnqueueCommandAsync("start-daemon", null))
+        {
+            LastError = null;
+            return true;
+        }
+
+        return false;
     }
 
     public async Task<bool> StopDaemonAsync()
     {
         LastError = null;
-        if (_useReverseChannelCommands && await EnqueueCommandAsync("stop-daemon", null))
+        var response = await PostAsync("api/daemon/stop", new { });
+        if (response?.Ok == true)
         {
             return true;
         }
-        var response = await PostAsync("api/daemon/stop", new { });
-        return response?.Ok == true;
+
+        if (_useReverseChannelCommands && await EnqueueCommandAsync("stop-daemon", null))
+        {
+            LastError = null;
+            return true;
+        }
+
+        return false;
     }
 
     public async Task<bool> ReloadDaemonAsync()
     {
         LastError = null;
-        if (_useReverseChannelCommands && await EnqueueCommandAsync("reload-daemon", null))
+        var response = await PostAsync("api/daemon/reload", new { });
+        if (response?.Ok == true)
         {
             return true;
         }
-        var response = await PostAsync("api/daemon/reload", new { });
-        return response?.Ok == true;
+
+        if (_useReverseChannelCommands && await EnqueueCommandAsync("reload-daemon", null))
+        {
+            LastError = null;
+            return true;
+        }
+
+        return false;
     }
 
     public async Task<WorkerViewModel?> SpawnWorkerAsync(
@@ -296,6 +317,75 @@ public class WorkerService : IWorkerService
         return response?.Ok == true;
     }
 
+    public async Task<CommandQueueDiagnosticsViewModel> GetCommandQueueDiagnosticsAsync()
+    {
+        var diagnostics = new CommandQueueDiagnosticsViewModel();
+
+        try
+        {
+            var connectionString = _configuration.GetConnectionString("CrawldbConnection");
+            if (string.IsNullOrWhiteSpace(connectionString))
+            {
+                return diagnostics;
+            }
+
+            await using var connection = new NpgsqlConnection(connectionString);
+            await connection.OpenAsync();
+
+            const string countsSql = """
+                SELECT status, COUNT(*)
+                FROM manager.command
+                GROUP BY status;
+                """;
+
+            await using (var cmd = new NpgsqlCommand(countsSql, connection))
+            await using (var reader = await cmd.ExecuteReaderAsync())
+            {
+                while (await reader.ReadAsync())
+                {
+                    var status = reader.GetString(0);
+                    var count = reader.GetInt32(1);
+                    switch (status)
+                    {
+                        case "queued":
+                            diagnostics.Queued = count;
+                            break;
+                        case "dispatched":
+                            diagnostics.Dispatched = count;
+                            break;
+                        case "acknowledged":
+                            diagnostics.Acknowledged = count;
+                            break;
+                        case "completed":
+                            diagnostics.Completed = count;
+                            break;
+                        case "failed":
+                            diagnostics.Failed = count;
+                            break;
+                    }
+                }
+            }
+
+            const string failureSql = """
+                SELECT error_message
+                FROM manager.command
+                WHERE status = 'failed' AND error_message IS NOT NULL
+                ORDER BY COALESCE(completed_at, created_at) DESC
+                LIMIT 1;
+                """;
+
+            await using var failureCmd = new NpgsqlCommand(failureSql, connection);
+            var failure = await failureCmd.ExecuteScalarAsync();
+            diagnostics.LastFailure = failure as string;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogDebug(ex, "Failed to load command queue diagnostics.");
+        }
+
+        return diagnostics;
+    }
+
     private async Task<ApiEnvelope<T>?> GetAsync<T>(string path)
     {
         try
@@ -358,7 +448,7 @@ public class WorkerService : IWorkerService
             var managerDir = Directory.GetCurrentDirectory();
             var repoRoot = Path.GetFullPath(Path.Combine(managerDir, ".."));
             var daemonArgs = _configuration["CrawlerApi:LocalDaemonArgs"]
-                ?? "pa1/crawler/src/main.py --run-api --api-host 127.0.0.1 --api-port 8090";
+                ?? "pa1/crawleer/daemon/main.py";
 
             var candidates = new List<string>();
             var configured = _configuration["CrawlerApi:PythonExecutable"];
