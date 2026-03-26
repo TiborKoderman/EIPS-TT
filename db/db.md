@@ -12,7 +12,7 @@ bash scripts/db-migrate.sh
 What it does:
 - restores `.venv` from `requirements.txt`
 - starts PostgreSQL via root `docker-compose.yml`
-- applies `0_initial_crawldb.sql` when needed
+- applies `00_initial_crawldb.sql` when needed
 - applies numbered migrations like `01_*.sql`
 
 Current migration highlights:

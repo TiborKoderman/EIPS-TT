@@ -8,6 +8,9 @@ public sealed class CommandDispatchHostedService : BackgroundService
     private readonly IConfiguration _configuration;
     private readonly DaemonChannelService _daemonChannel;
     private readonly ILogger<CommandDispatchHostedService> _logger;
+    private string? _lastConnectionWarningKey;
+    private DateTime _lastConnectionWarningUtc = DateTime.MinValue;
+    private static readonly TimeSpan WarningThrottle = TimeSpan.FromSeconds(30);
 
     public CommandDispatchHostedService(
         IConfiguration configuration,
@@ -38,7 +41,10 @@ public sealed class CommandDispatchHostedService : BackgroundService
             }
             catch (Exception ex)
             {
-                _logger.LogWarning(ex, "Failed to dispatch queued daemon commands.");
+                if (!TryLogConnectionWarning(ex))
+                {
+                    _logger.LogWarning(ex, "Failed to dispatch queued daemon commands.");
+                }
             }
 
             await Task.Delay(pollIntervalMs, stoppingToken);
@@ -189,5 +195,62 @@ public sealed class CommandDispatchHostedService : BackgroundService
         public required string CommandType { get; set; }
         public required string PayloadJson { get; set; }
         public required string DaemonIdentifier { get; set; }
+    }
+
+    private bool TryLogConnectionWarning(Exception ex)
+    {
+        var postgres = ex as PostgresException ?? ex.InnerException as PostgresException;
+        if (postgres?.SqlState == PostgresErrorCodes.InvalidPassword)
+        {
+            return LogConnectionWarning(
+                $"auth:{postgres.SqlState}:{postgres.MessageText}",
+                $"Command dispatch DB auth failed for {DescribeConnectionTarget()}. Check ConnectionStrings:CrawldbConnection or DB_/PG_ environment variables.");
+        }
+
+        if (ex is NpgsqlException npgsql && ex.InnerException is TimeoutException)
+        {
+            return LogConnectionWarning(
+                "timeout",
+                $"Command dispatch could not reach the manager DB at {DescribeConnectionTarget()}. Check the DB host/port and whether PostgreSQL is reachable from this process.");
+        }
+
+        return false;
+    }
+
+    private bool LogConnectionWarning(string key, string message)
+    {
+        var now = DateTime.UtcNow;
+        if (string.Equals(_lastConnectionWarningKey, key, StringComparison.Ordinal)
+            && now - _lastConnectionWarningUtc < WarningThrottle)
+        {
+            return true;
+        }
+
+        _lastConnectionWarningKey = key;
+        _lastConnectionWarningUtc = now;
+        _logger.LogWarning("{Message}", message);
+        return true;
+    }
+
+    private string DescribeConnectionTarget()
+    {
+        var connectionString = _configuration.GetConnectionString("CrawldbConnection");
+        if (string.IsNullOrWhiteSpace(connectionString))
+        {
+            return "an unspecified PostgreSQL target";
+        }
+
+        try
+        {
+            var builder = new NpgsqlConnectionStringBuilder(connectionString);
+            var host = string.IsNullOrWhiteSpace(builder.Host) ? "localhost" : builder.Host;
+            var database = string.IsNullOrWhiteSpace(builder.Database) ? "crawldb" : builder.Database;
+            var username = string.IsNullOrWhiteSpace(builder.Username) ? "postgres" : builder.Username;
+            return $"{host}:{builder.Port}/{database} as {username}";
+        }
+        catch
+        {
+            return "the configured PostgreSQL target";
+        }
     }
 }

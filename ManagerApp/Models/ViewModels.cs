@@ -77,6 +77,9 @@ public class WorkerViewModel
     public int PagesProcessed { get; set; }
     public int ErrorCount { get; set; }
     public DateTime? StartedAt { get; set; }
+    public string Mode { get; set; } = "thread";
+    public int? Pid { get; set; }
+    public Dictionary<string, string> RuntimeConfig { get; set; } = new();
 }
 
 /// <summary>

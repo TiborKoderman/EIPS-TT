@@ -59,6 +59,25 @@ Use this from DB tools:
 
 Credentials are local to your compose stack.
 
+If `5432` is already occupied on your machine, you can run this repo DB on another host port:
+
+```bash
+DB_HOST_PORT=5433 bash scripts/db-migrate.sh
+```
+
+Then run ManagerApp and the crawler with matching DB overrides:
+
+```bash
+DB_PORT=5433 DB_PASSWORD=postgres DB_USER=postgres DB_NAME=crawldb dotnet run --project ManagerApp/ManagerApp.csproj
+```
+
+The setup scripts now persist the selected DB port in `.env.local`, so the usual workflow is simply:
+
+```bash
+./scripts/bootstrap.sh
+./scripts/run-manager.sh
+```
+
 ## Utility Commands
 
 ```bash
@@ -178,3 +197,15 @@ Control flow:
 ## Optional Devcontainer Notes
 
 See `.devcontainer/NOTE.md`.
+
+## Docker Volume Upgrade Note
+
+If `postgres:latest` starts crash-looping with a message about existing data in
+`/var/lib/postgresql`, the repo's Docker volume was created with an older Postgres image layout.
+Run this repo-local reset once:
+
+```bash
+bash scripts/reset-db.sh --clean
+```
+
+That recreates only this compose stack's database volume and keeps the project on `postgres:latest`.

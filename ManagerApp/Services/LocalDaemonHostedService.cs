@@ -1,5 +1,4 @@
 using System.Diagnostics;
-using System.Net.Http;
 
 namespace ManagerApp.Services;
 
@@ -7,39 +6,62 @@ public sealed class LocalDaemonHostedService : IHostedService
 {
     private readonly IConfiguration _configuration;
     private readonly ILogger<LocalDaemonHostedService> _logger;
+    private readonly DaemonChannelService _daemonChannel;
+    private readonly IHostApplicationLifetime _applicationLifetime;
     private Process? _process;
     private Process? _dockerStartProcess;
 
-    public LocalDaemonHostedService(IConfiguration configuration, ILogger<LocalDaemonHostedService> logger)
+    public LocalDaemonHostedService(
+        IConfiguration configuration,
+        ILogger<LocalDaemonHostedService> logger,
+        DaemonChannelService daemonChannel,
+        IHostApplicationLifetime applicationLifetime)
     {
         _configuration = configuration;
         _logger = logger;
+        _daemonChannel = daemonChannel;
+        _applicationLifetime = applicationLifetime;
     }
 
-    public async Task StartAsync(CancellationToken cancellationToken)
+    public Task StartAsync(CancellationToken cancellationToken)
     {
         var autoStart = _configuration.GetValue("CrawlerApi:AutoStartLocalDaemon", true);
         if (!autoStart)
         {
             _logger.LogInformation("Local daemon autostart disabled.");
-            return;
+            return Task.CompletedTask;
         }
 
         var baseUrl = _configuration["CrawlerApi:BaseUrl"] ?? "http://127.0.0.1:8090";
         if (!baseUrl.Contains("127.0.0.1") && !baseUrl.Contains("localhost"))
         {
             _logger.LogInformation("CrawlerApi BaseUrl is not local ({BaseUrl}); skipping local daemon autostart.", baseUrl);
-            return;
+            return Task.CompletedTask;
         }
 
-        var launcherMode = (_configuration["CrawlerApi:LauncherMode"] ?? "Process").Trim().ToLowerInvariant();
-        if (launcherMode == "docker")
+        _applicationLifetime.ApplicationStarted.Register(() =>
         {
-            await StartDockerDaemonAsync(cancellationToken);
-            return;
-        }
+            _ = Task.Run(async () =>
+            {
+                try
+                {
+                    var launcherMode = (_configuration["CrawlerApi:LauncherMode"] ?? "Process").Trim().ToLowerInvariant();
+                    if (launcherMode == "docker")
+                    {
+                        await StartDockerDaemonAsync(CancellationToken.None);
+                        return;
+                    }
 
-        await StartProcessDaemonAsync(cancellationToken);
+                    await StartProcessDaemonAsync(CancellationToken.None);
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogWarning(ex, "Failed to autostart local daemon after application startup.");
+                }
+            });
+        });
+
+        return Task.CompletedTask;
     }
 
     public Task StopAsync(CancellationToken cancellationToken)
@@ -62,7 +84,7 @@ public sealed class LocalDaemonHostedService : IHostedService
     {
         var daemonArgs = _configuration["CrawlerApi:LocalDaemonArgs"]
             ?? "pa1/crawler/src/daemon/main.py";
-        var baseUrl = _configuration["CrawlerApi:BaseUrl"] ?? "http://127.0.0.1:8090";
+        var daemonId = ResolveLocalDaemonId();
 
         var managerDir = Directory.GetCurrentDirectory();
         var repoRoot = Path.GetFullPath(Path.Combine(managerDir, ".."));
@@ -71,9 +93,9 @@ public sealed class LocalDaemonHostedService : IHostedService
 
         foreach (var pythonExe in ResolvePythonCandidates(repoRoot))
         {
-            if (TryStartDaemonProcess(pythonExe, daemonArgs, repoRoot, wsUrl, managerHttpBaseUrl))
+            if (TryStartDaemonProcess(pythonExe, daemonArgs, repoRoot, wsUrl, managerHttpBaseUrl, daemonId))
             {
-                var ready = await WaitForApiReadyAsync(baseUrl, cancellationToken);
+                var ready = await _daemonChannel.WaitForConnectionAsync(daemonId, TimeSpan.FromSeconds(15), cancellationToken);
                 if (ready)
                 {
                     return;
@@ -90,7 +112,7 @@ public sealed class LocalDaemonHostedService : IHostedService
 
                 if (!ready)
                 {
-                    _logger.LogWarning("Daemon process started but API did not become reachable at {BaseUrl}.", baseUrl);
+                    _logger.LogWarning("Daemon process started but did not establish websocket connection as {DaemonId}.", daemonId);
                 }
                 return;
             }
@@ -99,7 +121,13 @@ public sealed class LocalDaemonHostedService : IHostedService
         _logger.LogWarning("Failed to start local crawler daemon process with all configured Python candidates.");
     }
 
-    private bool TryStartDaemonProcess(string pythonExe, string daemonArgs, string repoRoot, string wsUrl, string managerHttpBaseUrl)
+    private bool TryStartDaemonProcess(
+        string pythonExe,
+        string daemonArgs,
+        string repoRoot,
+        string wsUrl,
+        string managerHttpBaseUrl,
+        string daemonId)
     {
         try
         {
@@ -112,6 +140,7 @@ public sealed class LocalDaemonHostedService : IHostedService
                 RedirectStandardOutput = true,
                 RedirectStandardError = true,
             };
+            startInfo.Environment["CRAWLER_DAEMON_ID"] = daemonId;
             startInfo.Environment["MANAGER_DAEMON_WS_URL"] = wsUrl;
             startInfo.Environment["MANAGER_INGEST_API_URL"] = managerHttpBaseUrl.TrimEnd('/') + "/api/crawler/ingest";
             startInfo.Environment["MANAGER_EVENT_API_URL"] = managerHttpBaseUrl.TrimEnd('/') + "/api/crawler/events";
@@ -252,29 +281,10 @@ public sealed class LocalDaemonHostedService : IHostedService
         return "ws://127.0.0.1:5160/api/daemon-channel?daemonId=local-default";
     }
 
-    private static async Task<bool> WaitForApiReadyAsync(string baseUrl, CancellationToken cancellationToken)
+    private string ResolveLocalDaemonId()
     {
-        using var client = new HttpClient { Timeout = TimeSpan.FromSeconds(2) };
-        var healthUrl = baseUrl.TrimEnd('/') + "/api/health";
-        for (var i = 0; i < 20; i++)
-        {
-            try
-            {
-                using var response = await client.GetAsync(healthUrl, cancellationToken);
-                if (response.IsSuccessStatusCode)
-                {
-                    return true;
-                }
-            }
-            catch
-            {
-                // Keep polling until timeout.
-            }
-
-            await Task.Delay(400, cancellationToken);
-        }
-
-        return false;
+        var configured = _configuration["CrawlerApi:LocalDaemonId"];
+        return string.IsNullOrWhiteSpace(configured) ? "local-default" : configured.Trim();
     }
 
     private async Task StartDockerDaemonAsync(CancellationToken cancellationToken)

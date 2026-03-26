@@ -1,16 +1,16 @@
 CREATE SCHEMA IF NOT EXISTS crawldb;
 
-CREATE TABLE crawldb.data_type ( 
+CREATE TABLE crawldb.data_type (
 	code                 varchar(20)  NOT NULL,
 	CONSTRAINT pk_data_type_code PRIMARY KEY ( code )
  );
 
-CREATE TABLE crawldb.page_type ( 
-	code                 varchar(20)  NOT NULL,	
+CREATE TABLE crawldb.page_type (
+	code                 varchar(20)  NOT NULL,
 	CONSTRAINT pk_page_type_code PRIMARY KEY ( code )
  );
 
-CREATE TABLE crawldb.site ( 
+CREATE TABLE crawldb.site (
 	id                   serial  NOT NULL,
 	"domain"             varchar(500)  ,
 	robots_content       text  ,
@@ -18,7 +18,7 @@ CREATE TABLE crawldb.site (
 	CONSTRAINT pk_site_id PRIMARY KEY ( id )
  );
 
-CREATE TABLE crawldb.page ( 
+CREATE TABLE crawldb.page (
 	id                   serial  NOT NULL,
 	site_id              integer  ,
 	page_type_code       varchar(20)  ,
@@ -27,14 +27,14 @@ CREATE TABLE crawldb.page (
 	http_status_code     integer  ,
 	accessed_time        timestamp  ,
 	CONSTRAINT pk_page_id PRIMARY KEY ( id ),
-	CONSTRAINT unq_url_idx UNIQUE ( url ) 
+	CONSTRAINT unq_url_idx UNIQUE ( url )
  );
 
 CREATE INDEX "idx_page_site_id" ON crawldb.page ( site_id );
 
 CREATE INDEX "idx_page_page_type_code" ON crawldb.page ( page_type_code );
 
-CREATE TABLE crawldb.page_data ( 
+CREATE TABLE crawldb.page_data (
 	id                   serial  NOT NULL,
 	page_id              integer  ,
 	data_type_code       varchar(20)  ,
@@ -46,7 +46,7 @@ CREATE INDEX "idx_page_data_page_id" ON crawldb.page_data ( page_id );
 
 CREATE INDEX "idx_page_data_data_type_code" ON crawldb.page_data ( data_type_code );
 
-CREATE TABLE crawldb.image ( 
+CREATE TABLE crawldb.image (
 	id                   serial  NOT NULL,
 	page_id              integer  ,
 	filename             varchar(255)  ,
@@ -58,7 +58,7 @@ CREATE TABLE crawldb.image (
 
 CREATE INDEX "idx_image_page_id" ON crawldb.image ( page_id );
 
-CREATE TABLE crawldb.link ( 
+CREATE TABLE crawldb.link (
 	from_page            integer  NOT NULL,
 	to_page              integer  NOT NULL,
 	CONSTRAINT _0 PRIMARY KEY ( from_page, to_page )
@@ -88,7 +88,7 @@ ALTER TABLE crawldb.page
 
 CREATE INDEX IF NOT EXISTS idx_page_content_hash ON crawldb.page (content_hash);
 
-INSERT INTO crawldb.data_type VALUES 
+INSERT INTO crawldb.data_type VALUES
 	('PDF'),
 	('DOC'),
 	('DOCX'),
@@ -96,7 +96,7 @@ INSERT INTO crawldb.data_type VALUES
 	('PPTX')
 ON CONFLICT (code) DO NOTHING;
 
-INSERT INTO crawldb.page_type VALUES 
+INSERT INTO crawldb.page_type VALUES
 	('HTML'),
 	('BINARY'),
 	('DUPLICATE'),

@@ -22,14 +22,16 @@ class ReverseChannelClient:
         *,
         daemon_id: str,
         manager_ws_url: str | None,
-        status_provider: Callable[[], dict[str, object]],
+        snapshot_provider: Callable[[], dict[str, object]],
         command_handler: Callable[[dict[str, object]], tuple[bool, str | None]],
+        request_handler: Callable[[str, dict[str, object]], tuple[bool, object | None, str | None]],
         logger: Callable[[str], None],
     ) -> None:
         self._daemon_id = daemon_id
         self._manager_ws_url = manager_ws_url
-        self._status_provider = status_provider
+        self._snapshot_provider = snapshot_provider
         self._command_handler = command_handler
+        self._request_handler = request_handler
         self._logger = logger
         self._thread: threading.Thread | None = None
         self._stop_event = threading.Event()
@@ -58,18 +60,10 @@ class ReverseChannelClient:
             try:
                 ws = websocket.create_connection(self._manager_ws_url, timeout=10)
                 self._logger(f"reverse channel connected to {self._manager_ws_url}")
-                self._send(ws, {
-                    "type": "register",
-                    "daemonId": self._daemon_id,
-                    "status": self._status_provider(),
-                })
+                self._send_snapshot(ws, "register")
 
                 while not self._stop_event.is_set():
-                    self._send(ws, {
-                        "type": "heartbeat",
-                        "daemonId": self._daemon_id,
-                        "status": self._status_provider(),
-                    })
+                    self._send_snapshot(ws, "heartbeat")
                     ws.settimeout(1.0)
                     try:
                         message = ws.recv()
@@ -96,24 +90,69 @@ class ReverseChannelClient:
         except json.JSONDecodeError:
             return
 
-        if payload.get("type") == "command":
-            command_id = payload.get("commandId")
-            if command_id is not None:
-                self._send(ws, {
+        message_type = payload.get("type")
+        if message_type == "command":
+            self._handle_command(ws, payload)
+            return
+
+        if message_type == "request":
+            self._handle_request(ws, payload)
+
+    def _handle_command(self, ws: Any, payload: dict[str, object]) -> None:
+        command_id = payload.get("commandId")
+        if command_id is not None:
+            self._send(
+                ws,
+                {
                     "type": "command-ack",
                     "daemonId": self._daemon_id,
                     "commandId": command_id,
-                })
+                },
+            )
 
-            ok, error = self._command_handler(payload)
-            if command_id is not None:
-                self._send(ws, {
+        ok, error = self._command_handler(payload)
+        if command_id is not None:
+            self._send(
+                ws,
+                {
                     "type": "command-result",
                     "daemonId": self._daemon_id,
                     "commandId": command_id,
                     "status": "completed" if ok else "failed",
                     "error": error,
-                })
+                },
+            )
+
+    def _handle_request(self, ws: Any, payload: dict[str, object]) -> None:
+        request_id = payload.get("requestId")
+        action = str(payload.get("action", "")).strip()
+        if not request_id or not action:
+            return
+
+        raw_request_payload = payload.get("payload")
+        request_payload = raw_request_payload if isinstance(raw_request_payload, dict) else {}
+        ok, data, error = self._request_handler(action, request_payload)
+        self._send(
+            ws,
+            {
+                "type": "response",
+                "daemonId": self._daemon_id,
+                "requestId": request_id,
+                "ok": ok,
+                "data": data,
+                "error": error,
+            },
+        )
+
+    def _send_snapshot(self, ws: Any, message_type: str) -> None:
+        self._send(
+            ws,
+            {
+                "type": message_type,
+                "daemonId": self._daemon_id,
+                "snapshot": self._snapshot_provider(),
+            },
+        )
 
     @staticmethod
     def _send(ws: Any, payload: dict[str, object]) -> None:

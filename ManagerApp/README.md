@@ -89,6 +89,27 @@ Override via environment variable if needed:
 ConnectionStrings__CrawldbConnection="Host=...;Port=...;Database=...;Username=...;Password=..."
 ```
 
+The manager also honors the same `DB_*` / `PG*` environment variables as the Python crawler:
+
+```bash
+DB_HOST=localhost
+DB_PORT=5433
+DB_USER=postgres
+DB_PASSWORD=postgres
+DB_NAME=crawldb
+```
+
+This is useful when another local PostgreSQL instance already occupies `5432`.
+
+For normal local use, prefer the repo wrapper:
+
+```bash
+cd /home/tibor/Repos/EIPS-TT
+./scripts/run-manager.sh
+```
+
+It reads the persisted `.env.local` DB settings created by `./scripts/bootstrap.sh`.
+
 ## Live Updates
 
 SignalR hub is mapped in `Program.cs` at:

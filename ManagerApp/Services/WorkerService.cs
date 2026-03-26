@@ -15,6 +15,7 @@ public class WorkerService : IWorkerService
     private readonly HttpClient _httpClient;
     private readonly IConfiguration _configuration;
     private readonly ILogger<WorkerService> _logger;
+    private readonly CrawlerRelayService _crawlerRelay;
     private readonly bool _useReverseChannelCommands;
     private static readonly SemaphoreSlim _daemonStartGate = new(1, 1);
     public string? LastError { get; private set; }
@@ -23,11 +24,16 @@ public class WorkerService : IWorkerService
         PropertyNameCaseInsensitive = true
     };
 
-    public WorkerService(HttpClient httpClient, IConfiguration configuration, ILogger<WorkerService> logger)
+    public WorkerService(
+        HttpClient httpClient,
+        IConfiguration configuration,
+        ILogger<WorkerService> logger,
+        CrawlerRelayService crawlerRelay)
     {
         _httpClient = httpClient;
         _configuration = configuration;
         _logger = logger;
+        _crawlerRelay = crawlerRelay;
         _useReverseChannelCommands = configuration.GetValue("CrawlerApi:UseReverseChannelCommands", true);
     }
 
@@ -454,12 +460,23 @@ public class WorkerService : IWorkerService
         return response?.Data;
     }
 
-    public async Task<List<CrawlerEventViewModel>> GetRecentCrawlerEventsAsync(int limit = 40)
+    public Task<List<CrawlerEventViewModel>> GetRecentCrawlerEventsAsync(int limit = 40)
     {
         LastError = null;
         var boundedLimit = Math.Clamp(limit, 1, 200);
-        var response = await GetAsync<List<CrawlerEventViewModel>>($"api/crawler/events?limit={boundedLimit}");
-        return response?.Data ?? new List<CrawlerEventViewModel>();
+        var events = _crawlerRelay
+            .GetRecentEvents(boundedLimit)
+            .Select(evt => new CrawlerEventViewModel
+            {
+                TimestampUtc = evt.TimestampUtc,
+                Type = evt.Type,
+                DaemonId = evt.DaemonId,
+                WorkerId = evt.WorkerId,
+                PayloadJson = evt.PayloadJson,
+            })
+            .ToList();
+
+        return Task.FromResult(events);
     }
 
     public async Task<CommandQueueDiagnosticsViewModel> GetCommandQueueDiagnosticsAsync()

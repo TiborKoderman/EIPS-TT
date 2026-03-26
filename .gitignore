@@ -2,6 +2,7 @@
 .out
 data
 .venv
+.env.local
 __pycache__/
 *.pyc
 pa1/report/.out/*

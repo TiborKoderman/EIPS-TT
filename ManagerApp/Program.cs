@@ -3,9 +3,10 @@ using ManagerApp.Components;
 using ManagerApp.Data;
 using ManagerApp.Services;
 using ManagerApp.Hubs;
-using System.Net.Http.Headers;
+using Npgsql;
 
 var builder = WebApplication.CreateBuilder(args);
+ApplyDbEnvironmentOverrides(builder.Configuration);
 
 // Add services to the container.
 builder.Services.AddRazorComponents()
@@ -26,18 +27,7 @@ builder.Services.AddSingleton<DaemonChannelService>();
 builder.Services.AddSingleton<CrawlerRelayService>();
 builder.Services.AddHostedService<LocalDaemonHostedService>();
 builder.Services.AddHostedService<CommandDispatchHostedService>();
-builder.Services.AddHttpClient<IWorkerService, WorkerService>((sp, client) =>
-{
-    var configuration = sp.GetRequiredService<IConfiguration>();
-    var baseUrl = configuration["CrawlerApi:BaseUrl"] ?? "http://127.0.0.1:8090";
-    client.BaseAddress = new Uri(baseUrl.TrimEnd('/') + "/");
-
-    var token = configuration["CrawlerApi:Token"];
-    if (!string.IsNullOrWhiteSpace(token))
-    {
-        client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", token);
-    }
-});
+builder.Services.AddScoped<IWorkerService, ReverseChannelWorkerService>();
 
 // SignalR for real-time updates
 builder.Services.AddSignalR();
@@ -115,3 +105,51 @@ app.MapGet("/api/crawler/events", (int? limit, CrawlerRelayService relay) =>
 });
 
 app.Run();
+
+static void ApplyDbEnvironmentOverrides(ConfigurationManager configuration)
+{
+    var hasDbOverride =
+        !string.IsNullOrWhiteSpace(Environment.GetEnvironmentVariable("DB_HOST")) ||
+        !string.IsNullOrWhiteSpace(Environment.GetEnvironmentVariable("DB_PORT")) ||
+        !string.IsNullOrWhiteSpace(Environment.GetEnvironmentVariable("DB_USER")) ||
+        !string.IsNullOrWhiteSpace(Environment.GetEnvironmentVariable("DB_PASSWORD")) ||
+        !string.IsNullOrWhiteSpace(Environment.GetEnvironmentVariable("DB_NAME")) ||
+        !string.IsNullOrWhiteSpace(Environment.GetEnvironmentVariable("PGHOST")) ||
+        !string.IsNullOrWhiteSpace(Environment.GetEnvironmentVariable("PGPORT")) ||
+        !string.IsNullOrWhiteSpace(Environment.GetEnvironmentVariable("PGUSER")) ||
+        !string.IsNullOrWhiteSpace(Environment.GetEnvironmentVariable("PGPASSWORD")) ||
+        !string.IsNullOrWhiteSpace(Environment.GetEnvironmentVariable("PGDATABASE"));
+
+    if (!hasDbOverride)
+    {
+        return;
+    }
+
+    var existing = configuration.GetConnectionString("CrawldbConnection");
+    var builder = new NpgsqlConnectionStringBuilder(existing ?? string.Empty)
+    {
+        Host = Environment.GetEnvironmentVariable("DB_HOST")
+            ?? Environment.GetEnvironmentVariable("PGHOST")
+            ?? "localhost",
+        Port = ParsePort(
+            Environment.GetEnvironmentVariable("DB_PORT")
+            ?? Environment.GetEnvironmentVariable("PGPORT"),
+            fallback: 5432),
+        Username = Environment.GetEnvironmentVariable("DB_USER")
+            ?? Environment.GetEnvironmentVariable("PGUSER")
+            ?? "postgres",
+        Password = Environment.GetEnvironmentVariable("DB_PASSWORD")
+            ?? Environment.GetEnvironmentVariable("PGPASSWORD")
+            ?? "postgres",
+        Database = Environment.GetEnvironmentVariable("DB_NAME")
+            ?? Environment.GetEnvironmentVariable("PGDATABASE")
+            ?? "crawldb",
+    };
+
+    configuration["ConnectionStrings:CrawldbConnection"] = builder.ConnectionString;
+}
+
+static int ParsePort(string? rawPort, int fallback)
+{
+    return int.TryParse(rawPort, out var parsed) ? parsed : fallback;
+}
