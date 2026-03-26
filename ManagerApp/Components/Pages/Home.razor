@@ -3,6 +3,8 @@
 @using ManagerApp.Models
 @inject IStatisticsService StatisticsService
 @inject IWorkerService WorkerService
+@inject IGraphService GraphService
+@implements IAsyncDisposable
 
 <div class="page-header">
     <h1 class="page-title">Dashboard</h1>
@@ -41,9 +43,39 @@
             </div>
         }
 
-        <div class="grid grid-cols-2 mb-lg">
-            <div class="card">
-                <h2 class="card-title">Worker Status</h2>
+        <div class="dashboard-main-grid mb-lg">
+            <div class="card dashboard-graph-card">
+                <div class="card-header-inline mb-md">
+                    <h2 class="card-title mb-0">Node Graph Preview</h2>
+                    <a href="/graph" class="btn btn-primary btn-sm">
+                        <span class="mdi mdi-open-in-new"></span>
+                        Full View
+                    </a>
+                </div>
+
+                @if (isGraphLoading)
+                {
+                    <p class="text-muted">Loading graph preview...</p>
+                }
+                else if (!string.IsNullOrWhiteSpace(graphError))
+                {
+                    <p class="text-muted">@graphError</p>
+                }
+                else if (graphPreview.Nodes.Count == 0)
+                {
+                    <p class="text-muted">No graph nodes available yet.</p>
+                }
+                else
+                {
+                    <ForceGraph Data="graphPreview" Height="340" ShowToolbar="false" />
+                }
+            </div>
+
+            <div class="card dashboard-worker-status-card">
+                <div class="card-header-inline mb-sm">
+                    <h2 class="card-title mb-0">Worker Status</h2>
+                    <span class="live-pill"><span class="live-dot"></span> Live</span>
+                </div>
                 @if (workerStatusCounts != null && workerStatusCounts.Any())
                 {
                     <div class="dashboard-worker-status">
@@ -51,19 +83,18 @@
                                               SelectedStatus="selectedWorkerStatus"
                                               OnSliceClick="OnWorkerSliceClick" />
                         <div class="dashboard-worker-status-list">
-                            @foreach (var (status, count) in workerStatusCounts.OrderBy(kv => kv.Key))
+                            @foreach (var status in DashboardStatuses)
                             {
+                                var count = workerStatusCounts.GetValueOrDefault(status, 0);
                                 <button class="status-row @(selectedWorkerStatus == status ? "active" : "")"
                                         @onclick="() => ToggleWorkerStatus(status)">
-                                    <span class="badge @GetStatusBadgeClass(status)">@status</span>
-                                    <span>@count</span>
+                                    <span class="badge @GetStatusBadgeClass(status) status-pill">
+                                        <span>@status</span>
+                                        <span class="pill-count">@count</span>
+                                    </span>
                                 </button>
                             }
                         </div>
-                    </div>
-
-                    <div class="mt-md">
-                        <a href="/workers" class="btn btn-primary">View All Workers</a>
                     </div>
                 }
                 else
@@ -73,7 +104,10 @@
             </div>
 
             <div class="card">
-                <h2 class="card-title">Workers Snapshot</h2>
+                <div class="card-header-inline">
+                    <h2 class="card-title mb-0">Workers Snapshot</h2>
+                    <span class="live-pill"><span class="live-dot"></span> Live</span>
+                </div>
                 @if (visibleWorkers.Count == 0)
                 {
                     <p class="text-muted">No workers available.</p>
@@ -83,38 +117,27 @@
                     <ul class="list dashboard-worker-list">
                         @foreach (var worker in visibleWorkers.Take(6))
                         {
+                            var activity = GetWorkerActivity(worker);
                             <li class="list-item">
                                 <div class="flex items-center justify-between gap-sm">
                                     <strong>@worker.Name</strong>
                                     <span class="badge @GetStatusBadgeClass(worker.Status)">@worker.Status</span>
                                 </div>
-                                <div class="text-small text-muted">@worker.CurrentUrl</div>
+                                <div class="text-small text-muted worker-url-row">
+                                    <span class="mdi @activity.IconClass worker-activity-icon @activity.CssClass"></span>
+                                    <span class="worker-activity-label">@activity.Label:</span>
+                                    <span class="worker-url-processing @(activity.IsProcessing ? "is-processing" : "")">
+                                        @(string.IsNullOrWhiteSpace(worker.CurrentUrl) ? "Waiting for next page..." : worker.CurrentUrl)
+                                    </span>
+                                </div>
                             </li>
                         }
                     </ul>
-                }
-            </div>
-        </div>
 
-        <div class="card">
-            <h2 class="card-title">Quick Actions</h2>
-            <div class="flex gap-md">
-                <a href="/pages" class="btn">
-                    <span class="mdi mdi-file-search"></span>
-                    Search Pages
-                </a>
-                <a href="/graph" class="btn">
-                    <span class="mdi mdi-graph"></span>
-                    View Graph
-                </a>
-                <a href="/graph" class="btn">
-                    <span class="mdi mdi-open-in-new"></span>
-                    Open Full Graph
-                </a>
-                <a href="/workers" class="btn">
-                    <span class="mdi mdi-robot"></span>
-                    Manage Workers
-                </a>
+                    <div class="text-small text-muted mt-sm">
+                        Workers updated: @lastWorkerRefreshUtc.ToString("HH:mm:ss") UTC
+                    </div>
+                }
             </div>
         </div>
 
@@ -134,8 +157,16 @@
     private StatisticsViewModel? stats;
     private Dictionary<string, int>? workerStatusCounts;
     private List<WorkerViewModel> workers = new();
+    private GraphDataDto graphPreview = new();
+    private string? graphError;
     private string? selectedWorkerStatus;
     private bool isLoading = true;
+    private bool isGraphLoading = true;
+    private DateTime lastWorkerRefreshUtc = DateTime.UtcNow;
+    private PeriodicTimer? refreshTimer;
+    private CancellationTokenSource? refreshCts;
+    private readonly SemaphoreSlim workerRefreshLock = new(1, 1);
+    private static readonly string[] DashboardStatuses = ["Active", "Idle", "Paused", "Error", "Stopped"];
 
     private List<WorkerViewModel> visibleWorkers => workers
         .Where(w => selectedWorkerStatus == null || string.Equals(w.Status, selectedWorkerStatus, StringComparison.OrdinalIgnoreCase))
@@ -147,8 +178,9 @@
         try
         {
             stats = await StatisticsService.GetStatisticsAsync();
-            workerStatusCounts = await WorkerService.GetWorkerStatusCountsAsync();
-            workers = await WorkerService.GetAllWorkersAsync();
+            await RefreshWorkersAsync();
+            await LoadGraphPreviewAsync();
+            StartWorkerRefreshLoop();
         }
         catch (Exception ex)
         {
@@ -158,6 +190,71 @@
         finally
         {
             isLoading = false;
+        }
+    }
+
+    private async Task LoadGraphPreviewAsync()
+    {
+        isGraphLoading = true;
+        graphError = null;
+
+        try
+        {
+            graphPreview = await GraphService.GetGraphDataAsync(120);
+        }
+        catch (Exception ex)
+        {
+            graphError = $"Unable to load graph preview: {ex.Message}";
+        }
+        finally
+        {
+            isGraphLoading = false;
+        }
+    }
+
+    private void StartWorkerRefreshLoop()
+    {
+        refreshCts = new CancellationTokenSource();
+        refreshTimer = new PeriodicTimer(TimeSpan.FromSeconds(4));
+        _ = PollWorkersAsync(refreshTimer, refreshCts.Token);
+    }
+
+    private async Task PollWorkersAsync(PeriodicTimer timer, CancellationToken cancellationToken)
+    {
+        try
+        {
+            while (await timer.WaitForNextTickAsync(cancellationToken))
+            {
+                await RefreshWorkersAsync();
+                await InvokeAsync(StateHasChanged);
+            }
+        }
+        catch (OperationCanceledException)
+        {
+            // Normal shutdown path when leaving the page.
+        }
+    }
+
+    private async Task RefreshWorkersAsync()
+    {
+        if (!await workerRefreshLock.WaitAsync(0))
+        {
+            return;
+        }
+
+        try
+        {
+            workerStatusCounts = await WorkerService.GetWorkerStatusCountsAsync();
+            workers = await WorkerService.GetAllWorkersAsync();
+            lastWorkerRefreshUtc = DateTime.UtcNow;
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"Error refreshing worker snapshot: {ex.Message}");
+        }
+        finally
+        {
+            workerRefreshLock.Release();
         }
     }
 
@@ -184,6 +281,47 @@
             "paused" => "badge-warning",
             _ => "badge-info"
         };
+    }
+
+    private static WorkerActivity GetWorkerActivity(WorkerViewModel worker)
+    {
+        var status = worker.Status.ToLowerInvariant();
+
+        if (status == "error")
+        {
+            return new WorkerActivity("mdi-alert-circle-outline", "Issue", "activity-error", false);
+        }
+
+        if (status is "idle" or "stopped")
+        {
+            return new WorkerActivity("mdi-sleep", "Waiting", "activity-waiting", false);
+        }
+
+        if (status == "paused")
+        {
+            return new WorkerActivity("mdi-pause-circle-outline", "Paused", "activity-paused", false);
+        }
+
+        if (status == "active")
+        {
+            var isParsing = (worker.PagesProcessed + worker.ErrorCount + worker.Id) % 2 == 0;
+            return isParsing
+                ? new WorkerActivity("mdi-file-code-outline", "Parsing", "activity-parsing", true)
+                : new WorkerActivity("mdi-magnify", "Searching", "activity-searching", true);
+        }
+
+        return new WorkerActivity("mdi-cog-outline", "Processing", "activity-processing", true);
+    }
+
+    private readonly record struct WorkerActivity(string IconClass, string Label, string CssClass, bool IsProcessing);
+
+    public ValueTask DisposeAsync()
+    {
+        refreshCts?.Cancel();
+        refreshTimer?.Dispose();
+        refreshCts?.Dispose();
+        workerRefreshLock.Dispose();
+        return ValueTask.CompletedTask;
     }
 }
 

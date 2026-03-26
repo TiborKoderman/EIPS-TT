@@ -41,6 +41,38 @@
             "label": "python: run current file (.venv)",
             "type": "shell",
             "command": "bash -lc 'source .venv/bin/activate && python ${relativeFile}'"
+        },
+        {
+            "label": "manager: build",
+            "type": "shell",
+            "command": "dotnet build",
+            "options": {
+                "cwd": "${workspaceFolder}/ManagerApp"
+            },
+            "group": "build",
+            "problemMatcher": [
+                "$msCompile"
+            ]
+        },
+        {
+            "label": "manager: run (dev 5175)",
+            "type": "shell",
+            "command": "dotnet run --urls http://localhost:5175",
+            "options": {
+                "cwd": "${workspaceFolder}/ManagerApp"
+            }
+        },
+        {
+            "label": "manager: watch (hot reload 5175)",
+            "type": "shell",
+            "command": "dotnet watch run --urls http://localhost:5175",
+            "options": {
+                "cwd": "${workspaceFolder}/ManagerApp"
+            },
+            "isBackground": true,
+            "problemMatcher": [
+                "$msCompile"
+            ]
         }
     ]
 }

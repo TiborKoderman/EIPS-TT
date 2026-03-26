@@ -1,37 +1,37 @@
-/* GitLab 18.9 Light Theme Inspired Color System */
+/* GitLab-inspired light theme with green primary accents */
 :root {
     /* Primary colors */
-    --color-primary: #1f75cb;
-    --color-primary-hover: #1068bf;
-    --color-primary-light: #e1eef9;
+    --color-primary: #2e7d5b;
+    --color-primary-hover: #266b4d;
+    --color-primary-light: #e8f3ed;
 
     /* Neutral colors */
     --color-bg-base: #ffffff;
-    --color-bg-alt: #f5f5f5;
-    --color-bg-hover: #fafafa;
-    --color-border: #dbdbdb;
-    --color-border-light: #ececef;
+    --color-bg-alt: #f4f6f5;
+    --color-bg-hover: #edf1ef;
+    --color-border: #d4ddd8;
+    --color-border-light: #e5ebe8;
 
     /* Text colors */
-    --color-text-primary: #303030;
-    --color-text-secondary: #525252;
-    --color-text-tertiary: #868686;
+    --color-text-primary: #1f2d26;
+    --color-text-secondary: #44554d;
+    --color-text-tertiary: #6e7f76;
 
     /* Status colors */
     --color-success: #217645;
-    --color-success-light: #ecf4ee;
-    --color-warning: #c17d10;
-    --color-warning-light: #fef6ec;
-    --color-error: #c91c00;
-    --color-error-light: #fcf1ef;
-    --color-info: #1f75cb;
-    --color-info-light: #e9f3fc;
+    --color-success-light: #e9f5ed;
+    --color-warning: #b07a19;
+    --color-warning-light: #fbf4e5;
+    --color-error: #bf3020;
+    --color-error-light: #fbefed;
+    --color-info: #2f6db2;
+    --color-info-light: #eaf1fb;
 
     /* Component colors */
-    --color-sidebar-bg: #303030;
-    --color-sidebar-text: #ffffff;
-    --color-sidebar-hover: #404040;
-    --color-sidebar-active: #1f75cb;
+    --color-sidebar-bg: #ffffff;
+    --color-sidebar-text: #2f3a34;
+    --color-sidebar-hover: #f0f5f2;
+    --color-sidebar-active: #e3f0e9;
 
     /* Spacing */
     --spacing-xs: 4px;
@@ -55,24 +55,10 @@
     --transition-normal: 250ms ease;
 
     /* Font */
-    --font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+    --font-family: "IBM Plex Sans", "Source Sans 3", "Noto Sans", sans-serif;
     --font-size-base: 14px;
     --font-size-sm: 12px;
     --font-size-lg: 16px;
     --font-size-xl: 18px;
     --font-size-xxl: 24px;
-}
-
-/* Dark mode support (future implementation) */
-@media (prefers-color-scheme: dark) {
-    :root {
-        --color-bg-base: #1f1f1f;
-        --color-bg-alt: #2e2e2e;
-        --color-bg-hover: #3a3a3a;
-        --color-border: #404040;
-        --color-border-light: #3a3a3a;
-        --color-text-primary: #ffffff;
-        --color-text-secondary: #d4d4d4;
-        --color-text-tertiary: #a8a8a8;
-    }
 }

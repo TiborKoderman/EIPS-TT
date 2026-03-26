@@ -59,6 +59,24 @@ dotnet run
 
 4. Open shown local URL (typically `https://localhost:7xxx` or `http://localhost:5xxx`).
 
+## Recommended VS Code Dev Workflow
+
+Use the dedicated ManagerApp tasks/debug profile to avoid port conflicts and keep one shared dev server:
+
+- Task: `manager: watch (hot reload 5175)`
+- Task: `manager: run (dev 5175)`
+- Task: `manager: build`
+- Debug config: `ManagerApp: Launch (dev 5175)`
+
+These run on `http://localhost:5175` so you can keep one stable instance for manual testing and Copilot-driven iteration.
+
+If you need to run manually from terminal with the same profile:
+
+```bash
+cd /home/tibor/Repos/EIPS-TT/ManagerApp
+dotnet run --launch-profile copilot-dev
+```
+
 ## Configuration
 
 - Main config: `appsettings.json`

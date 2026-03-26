@@ -6,17 +6,29 @@
 @implements IAsyncDisposable
 
 <div class="graph-shell">
-    <div class="graph-toolbar">
-        <input type="search" placeholder="Search URL/domain..." @bind="SearchTerm" @bind:event="oninput" />
-        <button class="btn" @onclick="FocusSearch"><span class="mdi mdi-crosshairs-gps"></span> Focus</button>
-        <button class="btn" @onclick="ExportSvg"><span class="mdi mdi-file-image"></span> Export SVG</button>
-    </div>
+    @if (ShowToolbar)
+    {
+        <div class="graph-toolbar">
+            <input type="search" placeholder="Search URL/domain..." @bind="SearchTerm" @bind:event="oninput" />
+            @if (ShowFocusButton)
+            {
+                <button class="btn" @onclick="FocusSearch"><span class="mdi mdi-crosshairs-gps"></span> Focus</button>
+            }
+            @if (ShowExportButton)
+            {
+                <button class="btn" @onclick="ExportSvg"><span class="mdi mdi-file-image"></span> Export SVG</button>
+            }
+        </div>
+    }
     <div id="@GraphId" class="graph-canvas" style="height:@HeightPx;"></div>
 </div>
 
 @code {
     [Parameter] public GraphDataDto Data { get; set; } = new();
     [Parameter] public int Height { get; set; } = 600;
+    [Parameter] public bool ShowToolbar { get; set; } = true;
+    [Parameter] public bool ShowFocusButton { get; set; } = true;
+    [Parameter] public bool ShowExportButton { get; set; } = true;
 
     private readonly string GraphId = $"graph_{Guid.NewGuid():N}";
     private string? SearchTerm;
