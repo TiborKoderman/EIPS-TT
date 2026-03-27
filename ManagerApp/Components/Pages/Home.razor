@@ -230,7 +230,7 @@
                                         <td class="workers-log-ts">@log.TimestampUtc.ToLocalTime().ToString("HH:mm:ss")</td>
                                         <td class="text-small text-muted">@((log.DaemonId ?? "local-default") + " / w" + (log.WorkerId?.ToString() ?? "-"))</td>
                                         <td>
-                                            <span class="event-icon">@GetEventIcon(log.Message)</span>
+                                            <span class="event-icon mdi @GetEventIcon(log.Message)" aria-hidden="true"></span>
                                             @if (TryRenderStatusTransition(log.Message, out var fromState, out var toState, out var details))
                                             {
                                                 <span class="badge @GetStatusBadgeClass(fromState) state-badge-short" title="@details"><span class="mdi @GetStatusIcon(fromState)"></span></span>
@@ -456,14 +456,15 @@
 
     private string GetStatusBadgeClass(string status)
     {
-        return status.ToLowerInvariant() switch
+        var normalized = (status ?? string.Empty).Trim().ToLowerInvariant();
+        return normalized switch
         {
-            "active" => "badge-success",
-            "error" => "badge-error",
-            "idle" => "badge-info",
-            "paused" => "badge-warning",
-            "stopped" => "badge-warning",
-            _ => "badge-info"
+            "active" or "running" or "processing" or "fetching" or "parsing" or "claiming" => "badge-success",
+            "error" or "failed" => "badge-error",
+            "paused" or "locked" or "duplicate" => "badge-warning",
+            "stopped" or "completed" or "done" => "badge-secondary",
+            "idle" or "ready" or "waiting" or "queued" or "in_memory" => "badge-info",
+            _ => "badge-secondary"
         };
     }
 
@@ -495,13 +496,14 @@
     private static string GetEventIcon(string message)
     {
         var text = (message ?? string.Empty).ToLowerInvariant();
-        if (text.Contains("frontier-prune", StringComparison.Ordinal)) return "PRN";
-        if (text.Contains("frontier-lease", StringComparison.Ordinal)) return "LSE";
-        if (text.Contains("frontier-complete", StringComparison.Ordinal)) return "FIN";
-        if (text.Contains("worker-metric", StringComparison.Ordinal)) return "MET";
-        if (text.Contains("page-reported", StringComparison.Ordinal)) return "PGE";
-        if (text.Contains("status-change", StringComparison.Ordinal)) return "STS";
-        return "---";
+        if (text.Contains("frontier-prune", StringComparison.Ordinal)) return "mdi-content-cut";
+        if (text.Contains("frontier-lease", StringComparison.Ordinal)) return "mdi-key-outline";
+        if (text.Contains("frontier-complete", StringComparison.Ordinal)) return "mdi-check-circle-outline";
+        if (text.Contains("worker-metric", StringComparison.Ordinal)) return "mdi-chart-line";
+        if (text.Contains("page-reported", StringComparison.Ordinal)) return "mdi-file-check-outline";
+        if (text.Contains("status-change", StringComparison.Ordinal)) return "mdi-swap-horizontal";
+        if (text.Contains("queue-change", StringComparison.Ordinal)) return "mdi-tray-arrow-down";
+        return "mdi-dots-horizontal-circle-outline";
     }
 
     private static bool TryRenderStatusTransition(string message, out string fromState, out string toState, out string details)
@@ -550,11 +552,19 @@
     {
         return (status ?? string.Empty).Trim().ToLowerInvariant() switch
         {
-            "active" => "mdi-play-circle",
-            "idle" => "mdi-timer-sand",
+            "active" or "running" => "mdi-play-circle",
+            "processing" => "mdi-cog-play-outline",
+            "fetching" => "mdi-download-circle-outline",
+            "parsing" => "mdi-file-tree-outline",
+            "claiming" => "mdi-key-link",
+            "idle" or "ready" or "waiting" => "mdi-timer-sand",
+            "queued" or "in_memory" => "mdi-playlist-plus",
             "paused" => "mdi-pause-circle",
+            "locked" => "mdi-lock-outline",
             "stopped" => "mdi-stop-circle",
-            "error" => "mdi-alert-circle",
+            "completed" or "done" => "mdi-check-circle",
+            "duplicate" => "mdi-content-duplicate",
+            "error" or "failed" => "mdi-alert-circle",
             _ => "mdi-help-circle",
         };
     }

@@ -2,6 +2,7 @@ using System.Diagnostics;
 using System.Text.Json;
 using ManagerApp.Models;
 using Npgsql;
+using NpgsqlTypes;
 
 namespace ManagerApp.Services;
 
@@ -510,10 +511,10 @@ public sealed class ReverseChannelWorkerService : IWorkerService
                 """;
 
             await using var cmd = new NpgsqlCommand(sql, connection);
-            cmd.Parameters.AddWithValue("worker_id", (object?)workerId ?? DBNull.Value);
-            cmd.Parameters.AddWithValue("severity", (object?)normalizedSeverity ?? DBNull.Value);
-            cmd.Parameters.AddWithValue("search", (object?)normalizedSearch ?? DBNull.Value);
-            cmd.Parameters.AddWithValue("limit", boundedLimit);
+            cmd.Parameters.Add("worker_id", NpgsqlDbType.Integer).Value = (object?)workerId ?? DBNull.Value;
+            cmd.Parameters.Add("severity", NpgsqlDbType.Text).Value = (object?)normalizedSeverity ?? DBNull.Value;
+            cmd.Parameters.Add("search", NpgsqlDbType.Text).Value = (object?)normalizedSearch ?? DBNull.Value;
+            cmd.Parameters.Add("limit", NpgsqlDbType.Integer).Value = boundedLimit;
 
             await using var reader = await cmd.ExecuteReaderAsync();
             while (await reader.ReadAsync())
@@ -569,9 +570,9 @@ public sealed class ReverseChannelWorkerService : IWorkerService
                 """;
 
             await using var cmd = new NpgsqlCommand(sql, connection);
-            cmd.Parameters.AddWithValue("bucket_seconds", boundedBucket);
-            cmd.Parameters.AddWithValue("window_minutes", boundedWindow);
-            cmd.Parameters.AddWithValue("worker_id", (object?)workerId ?? DBNull.Value);
+            cmd.Parameters.Add("bucket_seconds", NpgsqlDbType.Integer).Value = boundedBucket;
+            cmd.Parameters.Add("window_minutes", NpgsqlDbType.Integer).Value = boundedWindow;
+            cmd.Parameters.Add("worker_id", NpgsqlDbType.Integer).Value = (object?)workerId ?? DBNull.Value;
 
             await using var reader = await cmd.ExecuteReaderAsync();
             while (await reader.ReadAsync())
