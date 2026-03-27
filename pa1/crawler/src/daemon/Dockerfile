@@ -15,6 +15,6 @@ COPY pa1/crawler /app/pa1/crawler
 
 ENV PYTHONPATH=/app/pa1/crawler/src
 
-# Compatibility wrapper entry point: delegates to unified main.py with CRAWLER_MODE=websocket
+# Compatibility wrapper entry point: delegates to websocket main entrypoint
 # Prefer pa1/crawler/src/main.py directly for new deployments
 ENTRYPOINT ["python", "/app/pa1/crawler/src/daemon/main.py"]

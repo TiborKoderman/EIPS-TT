@@ -14,7 +14,6 @@ COPY pa1/crawler /app/pa1/crawler
 
 ENV PYTHONPATH=/app/pa1/crawler/src
 
-# Unified entry point supports both standalone and websocket (daemon) modes
-# Default: webserver mode (server-managed queue via WebSocket)
-# Override: CRAWLER_MODE=standalone for direct DB access and CLI utilities
+# Unified entry point runs websocket daemon mode
+# Default: manager-controlled runtime over authenticated WebSocket
 ENTRYPOINT ["python", "/app/pa1/crawler/src/main.py"]

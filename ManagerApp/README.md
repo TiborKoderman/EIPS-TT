@@ -38,7 +38,7 @@ For local repo use, prefer the wrapper scripts instead of relying on that fallba
 because the repo may shift PostgreSQL to `5433` or another free host port and persist it in
 `.env.local`.
 
-## Setup (Standalone for ManagerApp)
+## Setup
 
 1. Start/prepare database (from repository root):
 

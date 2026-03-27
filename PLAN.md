@@ -6,6 +6,55 @@
 **Current Status:** Phase 1-5 Complete, Phase 6 In Progress
 **Last Updated:** 2026-03-26
 
+---
+
+## WebSocket-Only Refactor Execution Plan (2026-03-27)
+
+### Objective
+
+Refactor crawler architecture to remove standalone support and daemon-owned frontier persistence logic, resulting in a cleaner websocket-controlled daemon where ManagerApp owns frontier scheduling, politeness, and queue lifecycle.
+
+### Preconditions already completed
+
+1. Backup branch created: `backup/standalone-support-20260327`.
+2. Backup tag created: `backup-standalone-support-20260327`.
+
+### Detailed execution order
+
+1. Implement server frontier API in ManagerApp first.
+2. Switch daemon frontier operations to server endpoints (no local frontier ownership).
+3. Remove standalone mode and standalone queue/database frontier code from crawler.
+4. Complete daemon registration UX/command generation in manager.
+5. Verify functional behavior (frontier + robots + politeness + multi-worker lifecycle).
+6. Verify GUI behavior (worker controls and daemon registration flow).
+7. Update README/module docs and then update `.github/instructions` last.
+
+### Server responsibilities after crawler cleanup
+
+1. Frontier dequeue with lease token issuance.
+2. Frontier completion/failure/duplicate transitions with lease validation.
+3. Discovered URL enqueue with prioritization and robots policy gate.
+4. Collision prevention and queue state consistency across workers/daemons.
+5. Politeness and scheduling enforcement.
+6. Frontier observability and diagnostics endpoints for UI.
+
+### Crawler daemon responsibilities after cleanup
+
+1. Receive work from server.
+2. Fetch/parse pages and extract links.
+3. Report page results and discovered links to server.
+4. Emit worker telemetry/status over manager channel.
+5. Spawn/manage multiple workers as commanded by server.
+
+### Verification checklist (must pass)
+
+1. Daemon registers via generated command from UI and appears controllable in manager.
+2. Worker spawn/stop/pause/resume functions continue working.
+3. Queue depth and state transitions are visible and consistent in UI.
+4. Robots-disallowed URLs: persisted as discovered references, not queued for fetch.
+5. Duplicate handling: links persisted, duplicate URL not requeued.
+6. Dashboard/Workers pages remain healthy after graph-preview removal.
+
 For standalone manager setup/run instructions, see [ManagerApp/README.md](ManagerApp/README.md).
 
 ---

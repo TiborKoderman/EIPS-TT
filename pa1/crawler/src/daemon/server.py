@@ -1,4 +1,4 @@
-"""Standalone daemon runtime with websocket-only manager control."""
+"""Websocket daemon runtime with manager reverse-channel control."""
 
 from __future__ import annotations
 

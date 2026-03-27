@@ -2,6 +2,71 @@
 
 Last rebuilt: 2026-03-26
 
+## WebSocket-Only Crawler Migration Plan (2026-03-27)
+
+### Backup snapshot (before standalone removal)
+
+- [x] Created backup branch `backup/standalone-support-20260327` from current `gui` HEAD.
+- [x] Created annotated tag `backup-standalone-support-20260327` to preserve pre-removal state.
+
+### Detailed implementation phases
+
+#### Phase A - Server Frontier Ownership (ManagerApp)
+
+- [ ] [webserver] Add a dedicated frontier service in ManagerApp that owns queue claim/lease/state transitions.
+- [ ] [webserver] Expose server endpoints for daemon frontier operations (`next`, `complete`, `failed`, `duplicate`, `add_discovered`, `stats`).
+- [ ] [webserver] Ensure daemon token-auth on frontier endpoints.
+- [ ] [webserver] Make all state transitions atomic and lease-token validated.
+
+#### Phase B - Daemon Queue Simplification
+
+- [ ] [crawler] Remove daemon-local frontier queue ownership from crawler runtime.
+- [x] [crawler] Remove daemon-local frontier DB sync/lease/write paths from crawler runtime.
+- [x] [crawler] Keep crawler workers as WebSocket/HTTP controlled executors only.
+- [x] [crawler] Keep page extraction/download/reporting behavior unchanged from worker perspective.
+
+#### Phase C - Remove Standalone Support
+
+- [x] [crawler] Delete standalone mode entry points and standalone queue implementation files.
+- [x] [crawler] Refactor `pa1/crawler/src/main.py` to websocket-only daemon path.
+- [x] [crawler] Remove standalone CLI flags/docs/scripts references.
+
+#### Phase D - Registration UX Completion
+
+- [x] [webserver] Complete daemon registration section in UI with generated command output.
+- [x] [webserver] Support at least bash and docker command templates.
+- [x] [webserver] Include manager server IP/host and registration token in generated command.
+- [x] [webserver] Include daemon identifier/group in generated command.
+- [ ] [webserver] Verify generated command can register a remote daemon and be controlled from manager.
+
+#### Phase E - Verification and documentation
+
+- [ ] [crawler+webserver+database] Verify frontier, politeness, and scheduling are server-owned and functioning.
+- [ ] [crawler+webserver] Functional verification with active daemon and multiple workers.
+- [ ] [webserver] GUI verification (worker controls, queue behavior, registration flow).
+- [x] [docs] Update README/module docs for websocket-only architecture.
+- [x] [docs] Update `.github/instructions/eips-project-conventions.instructions.md` to match new architecture.
+
+### Feature replacement matrix (what is removed from crawler and must remain server-side)
+
+- [ ] Queue ordering and claim policy: server-side frontier service.
+- [ ] Lease creation/expiry/recovery: server-side frontier service.
+- [ ] Queue state transitions (`QUEUED/LOCKED/PROCESSING/COMPLETED/DUPLICATE/FAILED`): server-side frontier service.
+- [ ] Collision/duplicate queue suppression across workers/daemons: server-side frontier service.
+- [ ] Politeness scheduling (per-IP/per-domain pacing): server-side scheduler/politeness service.
+- [ ] Robots allow/disallow gate for queueing: server-side policy gate for discovered URLs.
+- [ ] Discovered URL ingest and prioritization: server-side enqueue API.
+- [ ] Frontier observability counters and diagnostics: server-side telemetry/query endpoints.
+
+### Acceptance criteria for this migration
+
+- [x] Crawler daemon can run without standalone mode.
+- [x] Crawler daemon no longer manages frontier persistence logic.
+- [ ] Server can allocate work to multiple workers safely and fairly.
+- [ ] Robots-disallowed URLs are persisted as discovered links/pages but are not queued.
+- [ ] Registration UI can generate copy/paste command for remote daemon registration.
+- [ ] GUI worker controls remain functional after migration.
+
 ## Completed in this pass
 
 - [x] Restored `ThroughputLineChart` component so worker/detail and dashboard throughput charts render.
@@ -11,7 +76,10 @@ Last rebuilt: 2026-03-26
 - [x] Confirmed animated worker activity indicators are reused in Workers tab rows.
 - [x] Confirmed manager persists worker logs/metrics to DB and rotates via retention cleanup.
 - [x] Added queue collision guards in daemon frontier enqueue paths (global/local + active lease checks).
-- [x] Added frontier DB sync/swap integration while keeping in-memory queue as primary thread-safe queue.
+- [x] Removed crawler frontier DB swap/sync persistence paths; daemon frontier now stays memory + manager relay only.
+- [x] Removed standalone crawler code paths (`standalone_runner`, standalone queue impl, standalone preset script).
+- [x] Updated crawler main entrypoint to websocket-only execution.
+- [x] Completed daemon registration UI command generator with bash/docker output, manager host override, token override, and daemon ID override.
 - [x] Added `/api/frontier/dequeue` endpoint for chunk-style claims scoped by worker IDs.
 - [x] Added manager client method `DequeueFrontierAsync(...)` for the new dequeue API.
 - [x] Improved worker failure telemetry to log fetch/parse stage in status reason and warnings.

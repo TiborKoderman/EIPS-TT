@@ -811,7 +811,7 @@ public sealed class ReverseChannelWorkerService : IWorkerService
 
             var managerDir = Directory.GetCurrentDirectory();
             var repoRoot = Path.GetFullPath(Path.Combine(managerDir, ".."));
-            var daemonArgs = _configuration["CrawlerApi:LocalDaemonArgs"] ?? "pa1/crawler/src/main.py --mode websocket";
+            var daemonArgs = _configuration["CrawlerApi:LocalDaemonArgs"] ?? "pa1/crawler/src/main.py";
             var managerHttpBaseUrl = ResolveManagerHttpBaseUrl();
             var wsUrl = ResolveManagerSocketUrl(managerHttpBaseUrl, daemonId);
 

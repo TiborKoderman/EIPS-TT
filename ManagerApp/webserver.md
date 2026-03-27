@@ -8,10 +8,10 @@ The webserver module (Blazor/.NET 10) provides a single reusable manager UI inst
 
 The manager serves two critical roles:
 
-1. **Frontier Queue Provider** (for WebSocket mode crawlers)
-   - Manages the `frontier_queue` PostgreSQL table (states: QUEUED, LOCKED, PROCESSING, COMPLETED, DUPLICATE, FAILED)
-   - Implements the `FrontierQueueProvider` protocol for worker queue operations
-   - Provides `next_url()`, `mark_complete()`, `mark_failed()`, `mark_duplicate()` via WebSocket
+1. **Frontier/Scheduling Owner**
+   - Owns queue lifecycle and scheduling decisions in manager services and DB-backed state.
+   - Receives discovered URLs and worker outcomes from connected daemons.
+   - Persists observability/ingest records and drives command dispatch.
    
 2. **Control Plane** (for daemon/worker operations)
    - Spawns/controls workers with start/pause/stop lifecycle
@@ -34,7 +34,7 @@ The manager serves two critical roles:
 On webserver startup:
 
 1. Check if local daemon is already running (connect test)
-2. If not: spawn `pa1/crawler/src/main.py --mode websocket` (or daemon/main.py)
+2. If not: spawn `pa1/crawler/src/main.py` (or compatibility wrapper `daemon/main.py`)
 3. Wait for reverse channel connection
 4. Spawn 1 initial worker as a baseline (can add more via UI)
 
@@ -57,7 +57,8 @@ UI-configurable parameters should cover:
 - `CRAWLER_DAEMON_ID`
 - `MANAGER_DAEMON_WS_URL`
 - `MANAGER_DAEMON_WS_TOKEN` (when configured)
-- `python pa1/crawler/src/main.py --mode websocket`
+- `python pa1/crawler/src/main.py`
+- Optional docker command format for remote worker hosts
 
 ## Worker State Machine Integration
 
@@ -74,7 +75,7 @@ All transitions are logged with timestamp and reason.
 
 ## Queue Management Features
 
-- **Live frontier stats:** QUEUED count, LOCKED count, COMPLETED/FAILED counts
+- **Live frontier stats:** queued, active lease, and completion/failure counters
 - **Duplicate detection:** Identify and link duplicate URLs
 - **Lease management:** Automatic requeue on worker timeout/failure
 - **Priority visualization:** Show high-priority pending URLs to operators
@@ -92,17 +93,15 @@ For complex UI/visual changes, use Playwright-assisted verification flows and re
 ```mermaid
 flowchart TD
     A[Manager UI / Operator] -->|WebSocket commands| B[Manager Services]
-    B -->|Queue CRUD ops| C[(PostgreSQL frontier_queue)]
+   B -->|Queue + scheduler state| C[(PostgreSQL manager/crawldb)]
     B -->|ReverseChannel WebSocket| D[Unified Crawler Process]
-    D -->|--mode websocket| E[WebSocket Runtime]
+   D --> E[WebSocket Runtime]
     E -->|Worker Pool| F[Worker 1: IDLE/ACTIVE/PAUSED/STOPPED]
     E -->|Worker Pool| G[Worker 2: IDLE/ACTIVE/PAUSED/STOPPED]
-    F -->|next_url request| B
-    G -->|next_url request| B
-    F -->|mark_complete, state change| B
-    G -->|mark_complete, state change| B
-    B -->|Frontier stats, Worker snapshots| H[UI Live Updates]
-    C -->|queue state| B
+   F -->|crawl events + discoveries| B
+   G -->|crawl events + discoveries| B
+   B -->|commands + snapshots| E
+   B -->|Frontier stats, worker snapshots| H[UI Live Updates]
 ```
 
 ## Dockerfile Impact

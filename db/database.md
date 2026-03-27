@@ -59,11 +59,9 @@ SELECT state, COUNT(*) FROM frontier_queue GROUP BY state
 - `idx_frontier_queue_memory_cached`: Flag in-memory vs database-only frontier items
 - `idx_frontier_queue_locked_at`: Lease expiration detection for timeout/reassignment
 
-**Memory Cache Layer:**
-- Frontier keeps hot (QUEUED, LOCKED) items in Python heap
-- `memory_cached` flag tracks cache membership
-- Spillover to PostgreSQL when in-memory limit reached
-- Cache invalidation on state changes
+**Current usage note:**
+- Crawler-side frontier DB spill/sync paths were removed in websocket-only mode.
+- Manager services and DB-backed control-plane components remain the source of truth for persisted queue state.
 
 ## Migration Policy
 
@@ -74,7 +72,7 @@ SELECT state, COUNT(*) FROM frontier_queue GROUP BY state
 
 ## Operational Notes
 
-- Database schema is a shared contract across crawler (standalone), daemon/server, and manager UI
+- Database schema is a shared contract across crawler daemon runtime and manager UI/services
 - Schema changes should be coordinated with related module docs, Dockerfiles, and TODO updates
 - Frontier queue performance is critical: verify indexes and query plans after schema changes
 
@@ -84,7 +82,7 @@ SELECT state, COUNT(*) FROM frontier_queue GROUP BY state
 flowchart TD
     A[Schema change need identified] --> B[Create new SQL migration]
     B --> C[Apply migration in development environment]
-    C --> D[Test with crawler/daemon/manager in both modes]
+    C --> D[Test with websocket daemon plus manager control plane]
     D --> E[Update module docs and TODO]
     E --> F[Merge and verify in Docker containers]
 ```

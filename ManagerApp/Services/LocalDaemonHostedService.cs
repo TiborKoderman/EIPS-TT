@@ -89,7 +89,7 @@ public sealed class LocalDaemonHostedService : IHostedService
     private async Task StartProcessDaemonAsync(CancellationToken cancellationToken)
     {
         var daemonArgs = _configuration["CrawlerApi:LocalDaemonArgs"]
-            ?? "pa1/crawler/src/main.py --mode websocket";
+            ?? "pa1/crawler/src/main.py";
         var daemonId = ResolveLocalDaemonId();
 
         var managerDir = Directory.GetCurrentDirectory();

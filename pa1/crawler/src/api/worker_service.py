@@ -29,13 +29,11 @@ from api.contracts import (
 from core.config import load_crawler_config
 from api.service_protocol import WorkerControlService
 from core.downloader import DownloadResult, Downloader
-from core.frontier import FrontierEntry
 from core.link_extractor import LinkExtractor
 from core.politeness import PerIpRateLimiter
 from core.relevance import RelevancePolicy, score_url
 from core.robots import RobotsPolicy
 from core.robots import RobotsPolicyManager
-from db.frontier_store import PostgresFrontierSwapStore
 from db.pg_connect import get_connection
 from utils.url_canonicalizer import DefaultUrlCanonicalizer
 
@@ -153,28 +151,16 @@ class DaemonWorkerService(WorkerControlService):
         self._manager_api_token = os.getenv("MANAGER_INGEST_API_TOKEN", "").strip() or None
         self._pending_manager_events: deque[dict[str, object | None]] = deque(maxlen=1000)
         self._manager_event_relay_degraded = False
-        self._allow_daemon_db_fallback = os.getenv(
-            "CRAWLER_DAEMON_ALLOW_DB_FALLBACK", "true"
-        ).strip().lower() in {"1", "true", "yes", "on"}
+        allow_local_fallback_raw = os.getenv(
+            "CRAWLER_DAEMON_ALLOW_LOCAL_FALLBACK",
+            os.getenv("CRAWLER_DAEMON_ALLOW_DB_FALLBACK", "true"),
+        )
+        self._allow_daemon_local_fallback = str(allow_local_fallback_raw).strip().lower() in {"1", "true", "yes", "on"}
         self._max_extracted_links_per_page = max(
             5,
             _coerce_int(os.getenv("CRAWLER_MAX_EXTRACTED_LINKS_PER_PAGE", "30"), 30),
         )
-        self._frontier_swap_refill_batch_size = max(
-            20,
-            _coerce_int(os.getenv("CRAWLER_FRONTIER_SWAP_REFILL_BATCH_SIZE", "250"), 250),
-        )
-        self._frontier_db_sync_enabled = _coerce_bool(
-            os.getenv("CRAWLER_FRONTIER_DB_SYNC_ENABLED", "true"),
-            True,
-        )
-        self._frontier_remove_terminal_rows = _coerce_bool(
-            os.getenv("CRAWLER_FRONTIER_REMOVE_TERMINAL_ROWS", "false"),
-            False,
-        )
         self._site_next_available_monotonic: dict[str, float] = {}
-        self._frontier_swap_conn = None
-        self._frontier_swap_store: PostgresFrontierSwapStore | None = None
         self._link_extractor = LinkExtractor()
         self._url_canonicalizer = DefaultUrlCanonicalizer()
         self._crawler_config = load_crawler_config()
@@ -183,7 +169,6 @@ class DaemonWorkerService(WorkerControlService):
 
         for worker in self._workers.values():
             self._append_log(worker.id, "Info", f"{worker.name} initialized in {worker.mode} mode.")
-        self._init_frontier_swap_store()
 
         self._simulator_thread = threading.Thread(target=self._simulation_loop, daemon=True)
         self._simulator_thread.start()
@@ -243,7 +228,7 @@ class DaemonWorkerService(WorkerControlService):
                 "architecture": {
                     "pipelineOrder": "server-api -> daemon -> workers",
                     "workerDirectDb": False,
-                    "daemonDbFallbackEnabled": self._allow_daemon_db_fallback,
+                    "daemonLocalFallbackEnabled": self._allow_daemon_local_fallback,
                 },
             }
 
@@ -1147,8 +1132,6 @@ class DaemonWorkerService(WorkerControlService):
                         reason="fetching",
                         current_url=lease.url,
                     )
-                    if self._frontier_db_sync_enabled:
-                        self._mark_frontier_state(url=lease.url, state="processing")
 
                 processing = self._download_and_extract_links(lease.url)
 
@@ -1268,174 +1251,6 @@ class DaemonWorkerService(WorkerControlService):
                             worker.pid = None
                             self._append_log(worker_id, "Info", "Local process finished (reason=process-exit).")
                         self._local_processes.pop(worker_id, None)
-
-    def _init_frontier_swap_store(self) -> None:
-        if not self._frontier_db_sync_enabled:
-            return
-        try:
-            self._frontier_swap_conn = get_connection()
-            self._frontier_swap_store = PostgresFrontierSwapStore(self._frontier_swap_conn)
-            self._append_log(1, "Info", "Frontier DB swap/log enabled.")
-        except Exception as exc:
-            self._frontier_swap_store = None
-            self._frontier_swap_conn = None
-            self._append_log(1, "Warning", f"Frontier DB swap unavailable; using memory-only queue: {exc}")
-
-    def _persist_frontier_row(
-        self,
-        *,
-        url: str,
-        priority: int = 0,
-        source_url: str | None = None,
-        depth: int = 0,
-        state: str = "queued",
-    ) -> None:
-        if self._frontier_swap_conn is None:
-            return
-        try:
-            with self._frontier_swap_conn.cursor() as cur:
-                try:
-                    cur.execute(
-                        """
-                        INSERT INTO crawldb.frontier_queue (
-                            url,
-                            priority,
-                            source_url,
-                            depth,
-                            state,
-                            discovered_at,
-                            dequeued_at,
-                            finished_at
-                        )
-                        VALUES (
-                            %s,
-                            %s,
-                            %s,
-                            %s,
-                            %s,
-                            NOW(),
-                            CASE WHEN %s IN ('locked', 'processing') THEN NOW() ELSE NULL END,
-                            CASE WHEN %s IN ('completed', 'failed', 'done') THEN NOW() ELSE NULL END
-                        )
-                        ON CONFLICT (url)
-                        DO UPDATE
-                            SET priority = GREATEST(crawldb.frontier_queue.priority, EXCLUDED.priority),
-                                source_url = COALESCE(EXCLUDED.source_url, crawldb.frontier_queue.source_url),
-                                depth = LEAST(crawldb.frontier_queue.depth, EXCLUDED.depth),
-                                state = EXCLUDED.state,
-                                dequeued_at = CASE WHEN EXCLUDED.state IN ('locked', 'processing') THEN NOW() ELSE crawldb.frontier_queue.dequeued_at END,
-                                finished_at = CASE WHEN EXCLUDED.state IN ('completed', 'failed', 'done') THEN NOW() ELSE NULL END;
-                        """,
-                        (url, priority, source_url, depth, state, state, state),
-                    )
-                except Exception:
-                    self._frontier_swap_conn.rollback()
-                    cur.execute(
-                        """
-                        INSERT INTO crawldb.frontier_queue (
-                            url,
-                            priority,
-                            source_url,
-                            depth,
-                            state,
-                            discovered_at,
-                            dequeued_at
-                        )
-                        VALUES (%s, %s, %s, %s, %s, NOW(), CASE WHEN %s IN ('locked', 'processing') THEN NOW() ELSE NULL END)
-                        ON CONFLICT (url)
-                        DO UPDATE
-                            SET priority = GREATEST(crawldb.frontier_queue.priority, EXCLUDED.priority),
-                                source_url = COALESCE(EXCLUDED.source_url, crawldb.frontier_queue.source_url),
-                                depth = LEAST(crawldb.frontier_queue.depth, EXCLUDED.depth),
-                                state = EXCLUDED.state,
-                                dequeued_at = CASE WHEN EXCLUDED.state IN ('locked', 'processing') THEN NOW() ELSE crawldb.frontier_queue.dequeued_at END;
-                        """,
-                        (url, priority, source_url, depth, state, state),
-                    )
-            self._frontier_swap_conn.commit()
-        except Exception:
-            try:
-                self._frontier_swap_conn.rollback()
-            except Exception:
-                pass
-
-    def _mark_frontier_state(self, *, url: str, state: str) -> None:
-        if self._frontier_swap_conn is None:
-            return
-        try:
-            with self._frontier_swap_conn.cursor() as cur:
-                normalized_state = state.strip().lower()
-                if self._frontier_remove_terminal_rows and normalized_state in {"done", "failed", "completed"}:
-                    cur.execute(
-                        """
-                        DELETE FROM crawldb.frontier_queue
-                        WHERE url = %s;
-                        """,
-                        (url,),
-                    )
-                else:
-                    try:
-                        cur.execute(
-                            """
-                            UPDATE crawldb.frontier_queue
-                            SET state = %s,
-                                dequeued_at = CASE WHEN %s IN ('locked', 'processing') THEN NOW() WHEN %s = 'queued' THEN NULL ELSE dequeued_at END,
-                                finished_at = CASE WHEN %s IN ('completed', 'failed', 'done') THEN NOW() ELSE NULL END
-                            WHERE url = %s;
-                            """,
-                            (state, state, state, state, url),
-                        )
-                    except Exception:
-                        self._frontier_swap_conn.rollback()
-                        cur.execute(
-                            """
-                            UPDATE crawldb.frontier_queue
-                            SET state = %s,
-                                dequeued_at = CASE WHEN %s IN ('locked', 'processing') THEN NOW() WHEN %s = 'queued' THEN NULL ELSE dequeued_at END
-                            WHERE url = %s;
-                            """,
-                            (state, state, state, url),
-                        )
-            self._frontier_swap_conn.commit()
-        except Exception:
-            try:
-                self._frontier_swap_conn.rollback()
-            except Exception:
-                pass
-
-    def _hydrate_frontier_from_swap_store_if_needed(self) -> None:
-        if self._frontier_swap_store is None or self._frontier_queue:
-            return
-        try:
-            refill = self._frontier_swap_store.dequeue_batch(limit=self._frontier_swap_refill_batch_size)
-        except Exception:
-            return
-
-        loaded = 0
-        for entry in refill:
-            if self._is_tombstoned(entry.url):
-                continue
-            if self._is_url_active_any_queue(entry.url):
-                continue
-            self._known_frontier_urls.add(entry.url)
-            self._frontier_queue.append(entry.url)
-            self._frontier_metadata[entry.url] = FrontierMetadata(
-                priority=int(entry.priority),
-                depth=int(entry.depth),
-                source_url=entry.source_url,
-                discovered_at_monotonic=time.monotonic(),
-            )
-            loaded += 1
-
-        if loaded > 0:
-            self._emit_manager_event(
-                "queue-change",
-                payload={
-                    "action": "swap-refill",
-                    "loaded": loaded,
-                    "inMemoryQueued": len(self._frontier_queue),
-                },
-            )
 
     def _is_url_active_any_queue(self, url: str) -> bool:
         if url in self._known_frontier_urls:
@@ -1594,7 +1409,7 @@ class DaemonWorkerService(WorkerControlService):
             )
 
         should_enqueue_local = queue_mode in {"local", "both"}
-        if queue_mode == "server" and not relayed and self._allow_daemon_db_fallback:
+        if queue_mode == "server" and not relayed and self._allow_daemon_local_fallback:
             should_enqueue_local = True
 
         if not relayed and not should_enqueue_local:
@@ -1616,32 +1431,8 @@ class DaemonWorkerService(WorkerControlService):
                 source_url=source_url,
                 discovered_at_monotonic=time.monotonic(),
             )
-        spilled_to_db = False
         if should_enqueue_local:
-            entry = FrontierEntry(
-                url=candidate,
-                priority=priority_value,
-                source_url=source_url,
-                depth=depth,
-            )
-            max_in_memory = max(1, self._global_config.max_frontier_in_memory)
-            if len(self._frontier_queue) >= max_in_memory and self._frontier_swap_store is not None:
-                try:
-                    self._frontier_swap_store.enqueue(entry)
-                    spilled_to_db = True
-                except Exception:
-                    self._frontier_queue.append(candidate)
-            else:
-                self._frontier_queue.append(candidate)
-
-        if self._frontier_db_sync_enabled:
-            self._persist_frontier_row(
-                url=candidate,
-                priority=priority_value,
-                source_url=source_url,
-                depth=depth,
-                state="queued",
-            )
+            self._frontier_queue.append(candidate)
         self._emit_manager_event(
             "queue-change",
             payload={
@@ -1652,7 +1443,6 @@ class DaemonWorkerService(WorkerControlService):
                 "localQueued": sum(len(queue) for queue in self._worker_local_queues.values()),
                 "knownUrls": len(self._known_frontier_urls),
                 "relayed": relayed,
-                "spilledToDb": spilled_to_db,
                 "priority": priority_value,
                 "depth": depth,
             },
@@ -1731,14 +1521,6 @@ class DaemonWorkerService(WorkerControlService):
             source_url=source_url,
             discovered_at_monotonic=time.monotonic(),
         )
-        if self._frontier_db_sync_enabled:
-            self._persist_frontier_row(
-                url=candidate,
-                priority=priority_value,
-                source_url=source_url,
-                depth=depth,
-                state="queued",
-            )
         self._emit_manager_event(
             "queue-change",
             worker_id=worker_id,
@@ -1765,8 +1547,6 @@ class DaemonWorkerService(WorkerControlService):
         local_lease = self._claim_from_worker_local_queue(worker_id)
         if local_lease is not None:
             return local_lease
-
-        self._hydrate_frontier_from_swap_store_if_needed()
 
         attempts = len(self._frontier_queue)
         while self._frontier_queue and attempts > 0:
@@ -1898,8 +1678,6 @@ class DaemonWorkerService(WorkerControlService):
         self._frontier_leases[url] = lease
         self._active_claim_by_worker[worker_id] = lease
         self._reserve_site_slot(url)
-        if self._frontier_db_sync_enabled:
-            self._mark_frontier_state(url=url, state="locked")
         self._emit_manager_event(
             "frontier-lease",
             worker_id=worker_id,
@@ -1937,9 +1715,6 @@ class DaemonWorkerService(WorkerControlService):
         self._worker_local_metadata[worker_id].pop(url, None)
 
         self._completed_tombstones[url] = time.monotonic() + self._tombstone_ttl_seconds
-        if self._frontier_db_sync_enabled:
-            db_state = "completed" if status == "completed" else "failed"
-            self._mark_frontier_state(url=url, state=db_state)
         self._emit_manager_event(
             "frontier-complete",
             worker_id=worker_id,
@@ -1994,10 +1769,6 @@ class DaemonWorkerService(WorkerControlService):
                 source_url=active.source_url,
                 discovered_at_monotonic=time.monotonic(),
             )
-            if self._frontier_db_sync_enabled:
-                self._mark_frontier_state(url=active.url, state="queued")
-        elif self._frontier_db_sync_enabled:
-            self._mark_frontier_state(url=active.url, state="failed")
 
         self._prune_site_access_registry()
 
@@ -2034,8 +1805,6 @@ class DaemonWorkerService(WorkerControlService):
                     source_url=lease.source_url,
                     discovered_at_monotonic=time.monotonic(),
                 )
-                if self._frontier_db_sync_enabled:
-                    self._mark_frontier_state(url=url, state="queued")
                 self._emit_manager_event(
                     "frontier-lease-expired",
                     worker_id=lease.worker_id,

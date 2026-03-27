@@ -1,13 +1,9 @@
 """Daemon entrypoint (compatibility wrapper).
 
-This is a compatibility wrapper that delegates to the unified main.py entry point
-with CRAWLER_MODE=websocket.
+This wrapper delegates to the crawler websocket entrypoint in ``main.py``.
 
 New code should use:
-    python pa1/crawler/src/main.py  # defaults to websocket mode
-    
-Or explicitly:
-    python pa1/crawler/src/main.py --mode websocket
+    python pa1/crawler/src/main.py
     
 See pa1/crawler/src/main.py for comprehensive entry point documentation.
 """
@@ -24,7 +20,7 @@ CRAWLER_SRC = Path(__file__).resolve().parents[1]
 if str(CRAWLER_SRC) not in sys.path:
     sys.path.insert(0, str(CRAWLER_SRC))
 
-# Set CRAWLER_MODE=websocket for daemon runtime
+# Force websocket daemon mode for compatibility callers using daemon/main.py.
 os.environ["CRAWLER_MODE"] = "websocket"
 
 # Load the unified entry point module (avoiding 'main' name collision)

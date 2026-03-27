@@ -2,7 +2,7 @@
 
 ## Manager GUI Docs
 
-For standalone setup and operation of the Blazor manager app, see [ManagerApp/README.md](ManagerApp/README.md).
+For setup and operation of the Blazor manager app, see [ManagerApp/README.md](ManagerApp/README.md).
 
 Single-compose setup with two modes:
 - host mode: local `.venv` + `db` service
@@ -89,27 +89,6 @@ bash scripts/db-info.sh
 docker compose logs -f db
 ```
 
-## Standalone Crawler Preset
-
-For quick local crawler testing without ManagerApp orchestration, use:
-
-```bash
-bash scripts/crawler-standalone-preset.sh frontier
-```
-
-Supported modes:
-
-- `frontier`: runs preferential frontier demo with sensible health/government seeds
-- `crawl-once`: executes one crawl pipeline pass using preset runtime variables
-- `api`: starts daemon API server with standalone preset runtime variables
-
-Examples:
-
-```bash
-bash scripts/crawler-standalone-preset.sh crawl-once
-bash scripts/crawler-standalone-preset.sh api
-```
-
 ## Daemon Control Plane
 
 The current architecture is:
@@ -137,7 +116,7 @@ If you need to start a daemon manually for debugging, point it at the manager we
 ```bash
 CRAWLER_DAEMON_ID=local-default \
 MANAGER_DAEMON_WS_URL=ws://127.0.0.1:5160/api/daemon-channel?daemonId=local-default \
-.venv/bin/python pa1/crawler/src/daemon/main.py
+.venv/bin/python pa1/crawler/src/main.py
 ```
 
 Because the daemon initiates the connection, the daemon host does not need inbound port forwarding.

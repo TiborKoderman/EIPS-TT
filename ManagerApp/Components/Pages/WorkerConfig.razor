@@ -32,9 +32,9 @@
         <div class="card mb-lg">
             <h2 class="card-title">Defaults</h2>
             <div class="flex items-center gap-sm mb-sm">
-                <button class="btn" type="button" @onclick="ApplyStandalonePreset">
+                <button class="btn" type="button" @onclick="ApplyWebsocketPreset">
                     <span class="mdi mdi-flask-outline"></span>
-                    Apply Standalone Test Preset
+                    Apply Websocket Daemon Preset
                 </button>
             </div>
             <div class="workers-config-grid">
@@ -56,11 +56,7 @@
                 </label>
                 <label>
                     <span class="text-small text-muted">Queue Mode</span>
-                    <select @bind="config.QueueMode">
-                        <option value="local">Local</option>
-                        <option value="server">Server</option>
-                        <option value="both">Both</option>
-                    </select>
+                    <input type="text" value="Server (manager-owned frontier)" readonly />
                 </label>
                 <label>
                     <span class="text-small text-muted">Strategy Mode</span>
@@ -185,7 +181,7 @@
                 <span class="mdi mdi-information-outline"></span> Integration note
             </div>
             <ul class="placeholder-note-list">
-                <li>Queue mode controls crawl queue ownership: local daemon queue, server queue, or hybrid.</li>
+                <li>Websocket daemon mode uses manager-owned frontier queueing, scheduling, and command dispatch.</li>
                 <li>Strategy mode tunes crawler behavior for coverage, freshness, focused crawling, or balanced operation.</li>
             </ul>
         </div>
@@ -195,6 +191,27 @@
             <p class="text-small text-muted mb-sm">
                 Use this script on a worker host to start crawler websocket mode and register with this manager.
             </p>
+            <div class="workers-config-grid">
+                <label>
+                    <span class="text-small text-muted">Command Format</span>
+                    <select @bind="daemonCommandFormat">
+                        <option value="bash">Bash</option>
+                        <option value="docker">Docker</option>
+                    </select>
+                </label>
+                <label>
+                    <span class="text-small text-muted">Daemon ID</span>
+                    <input type="text" @bind="daemonIdOverride" placeholder="local-default" />
+                </label>
+                <label>
+                    <span class="text-small text-muted">Manager IP / URL</span>
+                    <input type="text" @bind="managerEndpointOverride" placeholder="http://127.0.0.1:5175" />
+                </label>
+                <label>
+                    <span class="text-small text-muted">Channel Token (optional)</span>
+                    <input type="text" @bind="daemonTokenOverride" placeholder="Bearer token configured in manager" />
+                </label>
+            </div>
             <label>
                 <span class="text-small text-muted">Generated Script</span>
                 <textarea rows="8" readonly>@daemonStartScript</textarea>
@@ -213,6 +230,10 @@
     private bool isLoading = true;
     private string? statusMessage;
     private string daemonStartScript = string.Empty;
+    private string daemonCommandFormat = "bash";
+    private string daemonIdOverride = string.Empty;
+    private string managerEndpointOverride = string.Empty;
+    private string daemonTokenOverride = string.Empty;
 
     protected override async Task OnInitializedAsync()
     {
@@ -283,10 +304,7 @@
             .Distinct(StringComparer.OrdinalIgnoreCase)
             .ToList();
 
-        if (!new[] { "local", "server", "both" }.Contains(config.QueueMode))
-        {
-            config.QueueMode = "both";
-        }
+        config.QueueMode = "server";
 
         if (!new[] { "balanced", "coverage", "focused", "freshness" }.Contains(config.StrategyMode))
         {
@@ -352,7 +370,7 @@
         config.SeedUrlsText = string.Join("\n", config.SeedEntries.Where(entry => entry.Enabled).Select(entry => entry.Url));
     }
 
-    private void ApplyStandalonePreset()
+    private void ApplyWebsocketPreset()
     {
         if (config == null)
         {
@@ -395,23 +413,54 @@
         };
 
         config.SeedUrlsText = string.Join("\n", config.SeedEntries.Where(entry => entry.Enabled).Select(entry => entry.Url));
-        statusMessage = "Standalone preset applied. Save to persist.";
+        statusMessage = "Websocket daemon preset applied. Save to persist.";
     }
 
     private void RefreshDaemonStartScript()
     {
-        var daemonId = (Configuration["CrawlerApi:LocalDaemonId"] ?? "local-default").Trim();
+        var daemonId = daemonIdOverride.Trim();
+        if (string.IsNullOrWhiteSpace(daemonId))
+        {
+            daemonId = (Configuration["CrawlerApi:LocalDaemonId"] ?? "local-default").Trim();
+        }
         if (string.IsNullOrWhiteSpace(daemonId))
         {
             daemonId = "local-default";
         }
 
-        var token = (Configuration["CrawlerApi:DaemonChannelToken"] ?? string.Empty).Trim();
-        var managerSocketUrl = ResolveManagerSocketUrl(daemonId);
+        var token = daemonTokenOverride.Trim();
+        if (string.IsNullOrWhiteSpace(token))
+        {
+            token = (Configuration["CrawlerApi:DaemonChannelToken"] ?? string.Empty).Trim();
+        }
+
+        var endpointHint = managerEndpointOverride.Trim();
+        var managerSocketUrl = ResolveManagerSocketUrl(daemonId, endpointHint);
 
         var tokenLine = string.IsNullOrWhiteSpace(token)
             ? "# export MANAGER_DAEMON_WS_TOKEN=\"<set-if-configured-on-manager>\""
             : $"export MANAGER_DAEMON_WS_TOKEN=\"{token}\"";
+
+        if (string.Equals(daemonCommandFormat, "docker", StringComparison.OrdinalIgnoreCase))
+        {
+            var dockerTokenLine = string.IsNullOrWhiteSpace(token)
+                ? "  # -e MANAGER_DAEMON_WS_TOKEN=\"<set-if-configured-on-manager>\" \\"
+                : $"  -e MANAGER_DAEMON_WS_TOKEN=\"{token}\" \\";
+
+            daemonStartScript = string.Join("\n", new[]
+            {
+                "docker run --rm \\",
+                $"  --name crawler-daemon-{SanitizeContainerName(daemonId)} \\",
+                $"  -e CRAWLER_DAEMON_ID=\"{daemonId}\" \\",
+                $"  -e MANAGER_DAEMON_WS_URL=\"{managerSocketUrl}\" \\",
+                dockerTokenLine,
+                "  -v \"$(pwd)\":/workspace \\",
+                "  -w /workspace \\",
+                "  python:3.12-slim \\",
+                "  bash -lc \"pip install -r requirements.txt && python pa1/crawler/src/main.py\"",
+            });
+            return;
+        }
 
         daemonStartScript = string.Join("\n", new[]
         {
@@ -420,22 +469,54 @@
             $"export CRAWLER_DAEMON_ID=\"{daemonId}\"",
             $"export MANAGER_DAEMON_WS_URL=\"{managerSocketUrl}\"",
             tokenLine,
-            "python pa1/crawler/src/main.py --mode websocket",
+            "python pa1/crawler/src/main.py",
         });
     }
 
-    private string ResolveManagerSocketUrl(string daemonId)
+    private static string SanitizeContainerName(string daemonId)
+    {
+        var cleaned = new string(daemonId
+            .Trim()
+            .ToLowerInvariant()
+            .Select(ch => char.IsLetterOrDigit(ch) || ch == '-' || ch == '_' ? ch : '-')
+            .ToArray());
+        return string.IsNullOrWhiteSpace(cleaned) ? "local-default" : cleaned;
+    }
+
+    private string ResolveManagerSocketUrl(string daemonId, string endpointHint)
     {
         var configuredSocket = (Configuration["CrawlerApi:ManagerSocketUrl"] ?? string.Empty).Trim();
-        if (!string.IsNullOrWhiteSpace(configuredSocket))
+        if (!string.IsNullOrWhiteSpace(endpointHint) &&
+            (endpointHint.StartsWith("ws://", StringComparison.OrdinalIgnoreCase)
+             || endpointHint.StartsWith("wss://", StringComparison.OrdinalIgnoreCase)))
         {
-            return configuredSocket;
+            var normalizedSocket = endpointHint.TrimEnd('/');
+            if (!normalizedSocket.Contains("/api/daemon-channel", StringComparison.OrdinalIgnoreCase))
+            {
+                normalizedSocket = $"{normalizedSocket}/api/daemon-channel";
+            }
+            return AppendDaemonIdQuery(normalizedSocket, daemonId);
         }
 
-        var configuredBase = (Configuration["CrawlerApi:ManagerBaseUrl"] ?? string.Empty).Trim();
+        if (!string.IsNullOrWhiteSpace(configuredSocket))
+        {
+            return AppendDaemonIdQuery(configuredSocket, daemonId);
+        }
+
+        var configuredBase = endpointHint;
+        if (string.IsNullOrWhiteSpace(configuredBase))
+        {
+            configuredBase = (Configuration["CrawlerApi:ManagerBaseUrl"] ?? string.Empty).Trim();
+        }
         if (string.IsNullOrWhiteSpace(configuredBase))
         {
             configuredBase = Navigation.BaseUri.TrimEnd('/');
+        }
+
+        if (!configuredBase.StartsWith("http://", StringComparison.OrdinalIgnoreCase)
+            && !configuredBase.StartsWith("https://", StringComparison.OrdinalIgnoreCase))
+        {
+            configuredBase = $"http://{configuredBase.TrimStart('/')}";
         }
 
         if (configuredBase.StartsWith("https://", StringComparison.OrdinalIgnoreCase))
@@ -449,5 +530,17 @@
         }
 
         return $"ws://127.0.0.1:5160/api/daemon-channel?daemonId={Uri.EscapeDataString(daemonId)}";
+    }
+
+    private static string AppendDaemonIdQuery(string socketUrl, string daemonId)
+    {
+        var encodedDaemonId = Uri.EscapeDataString(daemonId);
+        if (socketUrl.Contains("daemonId=", StringComparison.OrdinalIgnoreCase))
+        {
+            return socketUrl;
+        }
+
+        var separator = socketUrl.Contains('?') ? "&" : "?";
+        return $"{socketUrl}{separator}daemonId={encodedDaemonId}";
     }
 }

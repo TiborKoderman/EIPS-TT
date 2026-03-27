@@ -1,19 +1,12 @@
-"""Unified crawler entry point supporting standalone and websocket modes.
+"""WebSocket daemon entry point.
 
 Usage:
-    # Standalone mode (direct DB access):
-    python main.py --mode standalone [CLI actions]
-    export CRAWLER_MODE=standalone
-    python main.py [CLI actions]
-
-    # WebSocket mode (server-managed queue, default):
+    python main.py
     python main.py --mode websocket
-    python main.py  # defaults to websocket if CRAWLER_MODE not set
 """
 
 from __future__ import annotations
 
-import argparse
 import os
 import sys
 from pathlib import Path
@@ -25,41 +18,31 @@ if str(CRAWLER_SRC) not in sys.path:
 
 
 def run_unified() -> int:
-    """Main entry point routing to standalone or websocket mode."""
-    
-    # Read mode from CLI argument or environment variable
-    # Environment variable takes precedence for subprocess invocations
-    mode_env = os.environ.get("CRAWLER_MODE", "").strip().lower()
-    
-    # Check for --mode flag in sys.argv
-    mode_cli = None
+    """Main entry point routing to websocket daemon runtime."""
+
+    # Backward-compatibility shim: accept --mode websocket and --run-api.
+    mode = os.environ.get("CRAWLER_MODE", "").strip().lower()
+
     if "--mode" in sys.argv:
         mode_idx = sys.argv.index("--mode")
-        if mode_idx + 1 < len(sys.argv):
-            mode_cli = sys.argv[mode_idx + 1].lower()
-            # Remove --mode and its argument from sys.argv so downstream parsers don't see it
-            sys.argv.pop(mode_idx)
-            sys.argv.pop(mode_idx)
-    
-    # Determine effective mode
-    mode = mode_cli or mode_env or "websocket"  # Default to websocket (daemon mode)
-    
-    # Validate and dispatch
-    if mode == "standalone":
-        # Standalone CLI mode: direct DB access for utilities and one-off commands
-        from core.standalone_runner import run_cli
-        return run_cli()
-    
-    elif mode == "websocket":
-        # WebSocket mode: daemon runtime with server-managed queue
-        from daemon.server import main as run_daemon_runtime
-        return run_daemon_runtime()
-    
-    else:
-        print(f"ERROR: Unknown CRAWLER_MODE '{mode}'")
-        print(f"       Supported modes: 'standalone', 'websocket'")
-        print(f"       Set via: --mode={{standalone,websocket}} or CRAWLER_MODE={{standalone,websocket}}")
+        if mode_idx + 1 >= len(sys.argv):
+            print("ERROR: --mode requires a value.")
+            return 1
+        mode = sys.argv[mode_idx + 1].strip().lower()
+        del sys.argv[mode_idx : mode_idx + 2]
+
+    if "--run-api" in sys.argv:
+        sys.argv.remove("--run-api")
+
+    if mode and mode != "websocket":
+        print(f"ERROR: Unsupported crawler mode '{mode}'.")
+        print("       Only websocket daemon mode is supported.")
+        print("       Use: python main.py")
         return 1
+
+    from daemon.server import main as run_daemon_runtime
+
+    return run_daemon_runtime()
 
 
 if __name__ == "__main__":
