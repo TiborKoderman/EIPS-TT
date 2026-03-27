@@ -10,7 +10,8 @@
       "cwd": "${workspaceFolder}/ManagerApp",
       "env": {
         "ASPNETCORE_ENVIRONMENT": "Development",
-        "ASPNETCORE_URLS": "http://localhost:5175"
+        "ASPNETCORE_URLS": "http://localhost:5175",
+        "CrawlerApi__ManagerBaseUrl": "http://localhost:5175"
       },
       "serverReadyAction": {
         "action": "openExternally",
@@ -21,7 +22,16 @@
     {
       "name": "ManagerApp: Attach",
       "type": "coreclr",
-      "request": "attach"
+      "request": "attach",
+      "processId": "${command:pickProcess}"
+    },
+    {
+      "name": "ManagerApp: Reuse Watch Task (attach)",
+      "type": "coreclr",
+      "request": "attach",
+      "preLaunchTask": "manager: watch (hot reload 5175)",
+      "processName": "dotnet",
+      "justMyCode": true
     }
   ]
 }

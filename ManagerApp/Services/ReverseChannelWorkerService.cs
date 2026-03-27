@@ -1049,7 +1049,7 @@ public sealed class ReverseChannelWorkerService : IWorkerService
         var configuredHttp = _configuration["CrawlerApi:ManagerBaseUrl"];
         if (!string.IsNullOrWhiteSpace(configuredHttp))
         {
-            return configuredHttp.TrimEnd('/');
+            return NormalizeHttpUrlCandidate(configuredHttp) ?? configuredHttp.TrimEnd('/');
         }
 
         var configuredSocket = _configuration["CrawlerApi:ManagerSocketUrl"];
@@ -1069,22 +1069,29 @@ public sealed class ReverseChannelWorkerService : IWorkerService
         var urls = Environment.GetEnvironmentVariable("ASPNETCORE_URLS");
         if (string.IsNullOrWhiteSpace(urls))
         {
-            // `dotnet run --urls ...` may be available only through configuration.
-            urls = _configuration["urls"];
+            // `dotnet run --urls ...` may be available only through configuration keys.
+            urls = _configuration["ASPNETCORE_URLS"]
+                ?? _configuration["URLS"]
+                ?? _configuration["urls"];
         }
         if (!string.IsNullOrWhiteSpace(urls))
         {
             var candidates = urls.Split(';', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
-            var httpUrl = candidates.FirstOrDefault(url => url.StartsWith("http://", StringComparison.OrdinalIgnoreCase));
+            var normalized = candidates
+                .Select(NormalizeHttpUrlCandidate)
+                .Where(url => !string.IsNullOrWhiteSpace(url))
+                .ToList();
+
+            var httpUrl = normalized.FirstOrDefault(url => url!.StartsWith("http://", StringComparison.OrdinalIgnoreCase));
             if (!string.IsNullOrWhiteSpace(httpUrl))
             {
-                return httpUrl.TrimEnd('/');
+                return httpUrl!;
             }
 
-            var httpsUrl = candidates.FirstOrDefault(url => url.StartsWith("https://", StringComparison.OrdinalIgnoreCase));
+            var httpsUrl = normalized.FirstOrDefault(url => url!.StartsWith("https://", StringComparison.OrdinalIgnoreCase));
             if (!string.IsNullOrWhiteSpace(httpsUrl))
             {
-                return httpsUrl.TrimEnd('/');
+                return httpsUrl!;
             }
         }
 
@@ -1093,17 +1100,43 @@ public sealed class ReverseChannelWorkerService : IWorkerService
 
     private string ResolveManagerSocketUrl(string managerHttpBaseUrl, string daemonId)
     {
-        if (managerHttpBaseUrl.StartsWith("https://", StringComparison.OrdinalIgnoreCase))
+        var normalizedBaseUrl = NormalizeHttpUrlCandidate(managerHttpBaseUrl) ?? managerHttpBaseUrl.TrimEnd('/');
+
+        if (normalizedBaseUrl.StartsWith("https://", StringComparison.OrdinalIgnoreCase))
         {
-            return $"wss://{managerHttpBaseUrl[8..].TrimEnd('/')}/api/daemon-channel?daemonId={daemonId}";
+            return $"wss://{normalizedBaseUrl[8..].TrimEnd('/')}/api/daemon-channel?daemonId={daemonId}";
         }
 
-        if (managerHttpBaseUrl.StartsWith("http://", StringComparison.OrdinalIgnoreCase))
+        if (normalizedBaseUrl.StartsWith("http://", StringComparison.OrdinalIgnoreCase))
         {
-            return $"ws://{managerHttpBaseUrl[7..].TrimEnd('/')}/api/daemon-channel?daemonId={daemonId}";
+            return $"ws://{normalizedBaseUrl[7..].TrimEnd('/')}/api/daemon-channel?daemonId={daemonId}";
         }
 
-        return $"ws://127.0.0.1:5160/api/daemon-channel?daemonId={daemonId}";
+        return $"ws://127.0.0.1:5000/api/daemon-channel?daemonId={daemonId}";
+    }
+
+    private static string? NormalizeHttpUrlCandidate(string? candidate)
+    {
+        if (string.IsNullOrWhiteSpace(candidate))
+        {
+            return null;
+        }
+
+        var value = candidate.Trim().TrimEnd('/');
+        if (value.StartsWith("http://", StringComparison.OrdinalIgnoreCase)
+            || value.StartsWith("https://", StringComparison.OrdinalIgnoreCase))
+        {
+            return value;
+        }
+
+        if (value.StartsWith("localhost", StringComparison.OrdinalIgnoreCase)
+            || value.StartsWith("127.0.0.1", StringComparison.OrdinalIgnoreCase)
+            || value.StartsWith("0.0.0.0", StringComparison.OrdinalIgnoreCase))
+        {
+            return "http://" + value;
+        }
+
+        return null;
     }
 
     private static void NormalizeGlobalConfig(WorkerGlobalConfigViewModel config)

@@ -253,7 +253,7 @@
                                                 </button>
                                                 @if (workerActionInProgress.Contains(worker.Id))
                                                 {
-                                                    <span class="badge badge-info">Working...</span>
+                                                    <span class="badge badge-info">@GetWorkerProgressLabel(worker.Id)</span>
                                                 }
                                                 <button class="btn btn-icon" title="Start" aria-label="Start" @onclick="() => Start(worker.Id)" type="button" disabled="@workerActionInProgress.Contains(worker.Id)">
                                                     <span class="mdi mdi-play"></span>
@@ -395,6 +395,7 @@
     private string? daemonActionType;
     private bool daemonBulkInProgress;
     private readonly HashSet<int> workerActionInProgress = new();
+    private readonly Dictionary<int, string> workerActionTypeInProgress = new();
     private readonly Dictionary<int, int> daemonSpawnCounts = new();
 
     private IReadOnlyList<string> WorkerApiPending =>
@@ -735,6 +736,7 @@
         }
 
         workerActionInProgress.Add(workerId);
+        workerActionTypeInProgress[workerId] = actionName;
         actionStatus = $"Worker {workerId}: {actionName}...";
         StateHasChanged();
 
@@ -749,6 +751,7 @@
         finally
         {
             workerActionInProgress.Remove(workerId);
+            workerActionTypeInProgress.Remove(workerId);
         }
     }
 
@@ -1024,6 +1027,22 @@
     {
         return level.Equals("Warning", StringComparison.OrdinalIgnoreCase)
             || level.Equals("Error", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private string GetWorkerProgressLabel(int workerId)
+    {
+        if (!workerActionTypeInProgress.TryGetValue(workerId, out var actionName))
+        {
+            return "Working...";
+        }
+
+        return actionName.ToLowerInvariant() switch
+        {
+            "start" => "Starting...",
+            "pause" => "Pausing...",
+            "stop" => "Stopping...",
+            _ => "Working...",
+        };
     }
 
     private static string ToShortSeverity(string level)
