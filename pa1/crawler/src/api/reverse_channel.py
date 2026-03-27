@@ -61,19 +61,27 @@ class ReverseChannelClient:
                 ws = websocket.create_connection(self._manager_ws_url, timeout=10)
                 self._logger(f"reverse channel connected to {self._manager_ws_url}")
                 self._send_snapshot(ws, "register")
-
+                next_heartbeat = time.monotonic() + 4.0
+                ws.settimeout(0.5)
                 while not self._stop_event.is_set():
-                    self._send_snapshot(ws, "heartbeat")
-                    ws.settimeout(1.0)
+                    now = time.monotonic()
+                    if now >= next_heartbeat:
+                        self._send_snapshot(ws, "heartbeat")
+                        next_heartbeat = now + 4.0
+
                     try:
                         message = ws.recv()
-                    except Exception:
+                    except websocket.WebSocketTimeoutException:
                         message = None
+                    except Exception:
+                        raise
                     if message:
                         if isinstance(message, bytes):
                             message = message.decode("utf-8", errors="ignore")
                         self._handle_message(ws, str(message))
-                    time.sleep(4.0)
+                        continue
+
+                    time.sleep(0.05)
             except Exception as exc:
                 self._logger(f"reverse channel reconnecting after error: {exc}")
                 time.sleep(3.0)
