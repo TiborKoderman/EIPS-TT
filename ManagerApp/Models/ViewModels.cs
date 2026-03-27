@@ -71,6 +71,26 @@ public class PageSearchDto
     public DateTime? AccessedTime { get; set; }
     public string? SiteDomain { get; set; }
     public bool IsDuplicate { get; set; }
+    public double RelevanceScore { get; set; }
+    public bool HasKeywordEvidence { get; set; }
+    public bool HasAllowedSuffixEvidence { get; set; }
+    public bool HasSameHostEvidence { get; set; }
+    public int? FrontierDepth { get; set; }
+}
+
+public class PageEvaluationSummaryDto
+{
+    public int TargetPageCount { get; set; } = 5000;
+    public int TotalPages { get; set; }
+    public int EvaluatedPages { get; set; }
+    public int PositiveScorePages { get; set; }
+    public int EstimatedRelevantPages { get; set; }
+    public int KeywordEvidencePages { get; set; }
+    public int AllowedSuffixEvidencePages { get; set; }
+    public int SameHostEvidencePages { get; set; }
+    public double AverageScore { get; set; }
+    public double MedianScore { get; set; }
+    public double TopScore { get; set; }
 }
 
 /// <summary>

@@ -977,7 +977,7 @@ textarea:focus {
 
 .pages-toolbar-row {
     display: grid;
-    grid-template-columns: minmax(0, 1fr) 220px auto auto auto;
+    grid-template-columns: minmax(0, 1fr) 220px 190px auto auto auto;
     gap: var(--spacing-sm);
     align-items: center;
 }
@@ -1071,6 +1071,11 @@ textarea:focus {
 .pages-search-button {
     min-height: 44px;
     min-width: 130px;
+}
+
+.pages-order-select {
+    min-height: 44px;
+    border-radius: var(--radius-md);
 }
 
 .page-results-table-wrap {

@@ -51,6 +51,11 @@
                 }
             </div>
 
+            <select class="pages-order-select" @bind="OrderBy" @bind:after="OnOrderChangedAsync">
+                <option value="latest">Order by latest</option>
+                <option value="best_score">Order by best score</option>
+            </select>
+
             <button class="btn btn-primary pages-search-button" @onclick="() => ReloadAsync(keepSelection: true)">
                 <span class="mdi mdi-magnify"></span>
                 <span>Search</span>
@@ -58,6 +63,34 @@
 
             <span class="live-pill"><span class="live-dot"></span> Live</span>
             <span class="text-small text-muted">updated @GetSinceUpdateText()</span>
+        </div>
+    </div>
+
+    <div class="card mb-lg">
+        <div class="card-header-inline">
+            <h2 class="card-title">Relevance evaluation (full database)</h2>
+            <span class="text-small text-muted">heuristic, no classifier</span>
+        </div>
+        <div class="grid grid-cols-4">
+            <div>
+                <div class="stat-label">Pages / target</div>
+                <div class="stat-value">@Evaluation.TotalPages / @Evaluation.TargetPageCount</div>
+            </div>
+            <div>
+                <div class="stat-label">Estimated relevant</div>
+                <div class="stat-value">@Evaluation.EstimatedRelevantPages (@Percent(Evaluation.EstimatedRelevantPages, Evaluation.EvaluatedPages))</div>
+            </div>
+            <div>
+                <div class="stat-label">Keyword evidence</div>
+                <div class="stat-value">@Evaluation.KeywordEvidencePages</div>
+            </div>
+            <div>
+                <div class="stat-label">Avg / median / top</div>
+                <div class="stat-value">@Evaluation.AverageScore.ToString("0.00") / @Evaluation.MedianScore.ToString("0.00") / @Evaluation.TopScore.ToString("0.00")</div>
+            </div>
+        </div>
+        <div class="text-small text-muted mt-sm">
+            Signals used: allowed domain suffix match, keyword hits in URL path/query, same-host parent boost, and depth penalty from frontier metadata.
         </div>
     </div>
 
@@ -77,6 +110,7 @@
                                 <th>TS</th>
                                 <th>Type</th>
                                 <th>HTTP</th>
+                                <th>Score</th>
                                 <th>URL</th>
                             </tr>
                         </thead>
@@ -94,6 +128,7 @@
                                         }
                                     </td>
                                     <td>@(row.HttpStatus?.ToString() ?? "-")</td>
+                                    <td>@row.RelevanceScore.ToString("0.00")</td>
                                     <td>
                                         <div class="page-url-row">
                                             <button type="button"
@@ -148,6 +183,17 @@
                     <div><strong>Type:</strong> @SelectedPage.PageTypeCode</div>
                     <div><strong>HTTP:</strong> @SelectedPage.HttpStatusCode</div>
                     <div><strong>Accessed:</strong> @SelectedPage.AccessedTime</div>
+                    @if (SelectedRow is not null)
+                    {
+                        <div><strong>Relevance score:</strong> @SelectedRow.RelevanceScore.ToString("0.00")</div>
+                        <div class="text-small text-muted">
+                            Evidence:
+                            @(SelectedRow.HasKeywordEvidence ? " keyword" : "")
+                            @(SelectedRow.HasAllowedSuffixEvidence ? " allowed-suffix" : "")
+                            @(SelectedRow.HasSameHostEvidence ? " same-host" : "")
+                            @(SelectedRow.FrontierDepth.HasValue ? $" depth={SelectedRow.FrontierDepth.Value}" : string.Empty)
+                        </div>
+                    }
                     <div><strong>Images:</strong> @SelectedPage.Images.Count</div>
                     @if (SelectedPage.Images.Count == 0)
                     {
@@ -250,10 +296,12 @@
 @code {
     private string SearchTerm { get; set; } = "";
     private string PageTypeFilter { get; set; } = "ALL";
+    private string OrderBy { get; set; } = "latest";
     private int Total;
     private bool ShowFilterDropdown;
     private string? _copiedUrl;
     private DateTime _copiedUrlAtUtc;
+    private PageEvaluationSummaryDto Evaluation = new();
 
     private static readonly IReadOnlyList<(string Value, string Label)> FilterOptions =
     [
@@ -270,6 +318,7 @@
     private CancellationTokenSource? _liveCts;
     private CancellationTokenSource? _searchDebounceCts;
     private DateTime _lastUpdatedUtc = DateTime.UtcNow;
+    private PageSearchDto? SelectedRow => SelectedPage is null ? null : Rows.FirstOrDefault(row => row.Id == SelectedPage.Id);
 
     protected override async Task OnInitializedAsync()
     {
@@ -321,11 +370,17 @@
         await ReloadAsync(keepSelection: true);
     }
 
+    private async Task OnOrderChangedAsync()
+    {
+        await ReloadAsync(keepSelection: true);
+    }
+
     private async Task ReloadAsync(bool keepSelection)
     {
         var selectedId = keepSelection ? SelectedPage?.Id : null;
-        Rows = await PageService.SearchPagesAsync(SearchTerm, PageTypeFilter, 0, 120);
+        Rows = await PageService.SearchPagesAsync(SearchTerm, PageTypeFilter, OrderBy, 0, 120);
         Total = await PageService.GetSearchResultsCountAsync(SearchTerm, PageTypeFilter);
+        Evaluation = await PageService.GetEvaluationSummaryAsync();
         _lastUpdatedUtc = DateTime.UtcNow;
 
         if (Rows.Count == 0)
@@ -353,6 +408,16 @@
     {
         var seconds = Math.Max(0, (int)(DateTime.UtcNow - _lastUpdatedUtc).TotalSeconds);
         return $"{seconds}s ago";
+    }
+
+    private static string Percent(int part, int whole)
+    {
+        if (whole <= 0)
+        {
+            return "0%";
+        }
+
+        return $"{(part * 100.0 / whole):0.0}%";
     }
 
     private static string GetFilterLabel(string value)

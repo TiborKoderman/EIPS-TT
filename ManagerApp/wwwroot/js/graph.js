@@ -14,6 +14,37 @@ function clamp(value, min, max) {
   return Math.max(min, Math.min(max, value));
 }
 
+function safeHostFromUrl(rawUrl) {
+  try {
+    const parsed = new URL(String(rawUrl || ""));
+    return (parsed.hostname || "").toLowerCase();
+  } catch {
+    return "";
+  }
+}
+
+function toRegistrableDomain(hostname) {
+  const host = String(hostname || "").toLowerCase().trim();
+  if (!host) return "unknown";
+  const parts = host.split(".").filter(Boolean);
+  if (parts.length <= 2) return parts.join(".");
+
+  // Heuristic for ccTLD (e.g. gov.si -> keep last 3 when plausible)
+  const last = parts[parts.length - 1];
+  const second = parts[parts.length - 2];
+  if (last.length === 2 && second.length <= 3 && parts.length >= 3) {
+    return parts.slice(-3).join(".");
+  }
+
+  return parts.slice(-2).join(".");
+}
+
+function compactLabel(raw, max = 28) {
+  const text = String(raw || "");
+  if (text.length <= max) return text;
+  return `${text.slice(0, max - 1)}...`;
+}
+
 function stableHash(text) {
   const raw = String(text || "");
   let hash = 2166136261;
@@ -291,10 +322,138 @@ function initializeGraph(hostId, host, queueMode) {
     workerSelection: null,
     clusterSelection: null,
     gradientSelection: null,
+    groupNodePositions: new Map(),
+    currentViewLevel: "item",
   };
 
   state.set(hostId, graph);
   return graph;
+}
+
+function getViewLevel(scale) {
+  if (scale < 0.55) {
+    return "domain";
+  }
+
+  if (scale < 1.45) {
+    return "subdomain";
+  }
+
+  return "item";
+}
+
+function groupKeyForNode(node, level) {
+  const host = safeHostFromUrl(node.url) || String(node.domain || "").toLowerCase();
+  if (level === "domain") {
+    return `domain:${toRegistrableDomain(host)}`;
+  }
+
+  return `subdomain:${host || "unknown"}`;
+}
+
+function groupLabelForKey(key) {
+  const [, label] = String(key || "").split(":", 2);
+  return label || "unknown";
+}
+
+function buildRenderData(graph, level) {
+  if (level === "item") {
+    const linkData = graph.visibleLinks.map((link) => {
+      const sourceId = linkSourceId(link);
+      const targetId = linkTargetId(link);
+      return {
+        source: graph.nodeById.get(sourceId),
+        target: graph.nodeById.get(targetId),
+        _key: edgeKey(sourceId, targetId),
+        _gradientId: linkGradientId(graph, edgeKey(sourceId, targetId)),
+        _kind: "item",
+      };
+    }).filter((item) => item.source && item.target);
+
+    const nodeData = graph.visibleNodes.map((node) => ({ ...node, _kind: "item" }));
+    return { nodeData, linkData };
+  }
+
+  const members = graph.visibleNodes;
+  const groups = new Map();
+  for (const node of members) {
+    const key = groupKeyForNode(node, level);
+    let group = groups.get(key);
+    if (!group) {
+      group = {
+        id: key,
+        label: groupLabelForKey(key),
+        x: 0,
+        y: 0,
+        count: 0,
+        totalScore: 0,
+        queueCount: 0,
+        members: [],
+        _kind: level,
+      };
+      groups.set(key, group);
+    }
+
+    group.count += 1;
+    group.totalScore += Number(node._score || 0);
+    group.queueCount += node._isQueue ? 1 : 0;
+    group.members.push(node.id);
+    group.x += Number(node.x || graph.width / 2);
+    group.y += Number(node.y || graph.height / 2);
+  }
+
+  const nodeData = [...groups.values()].map((group) => {
+    const prev = graph.groupNodePositions.get(group.id);
+    const centroidX = group.count > 0 ? group.x / group.count : graph.width / 2;
+    const centroidY = group.count > 0 ? group.y / group.count : graph.height / 2;
+    const stabilizedX = prev ? (prev.x * 0.65 + centroidX * 0.35) : centroidX;
+    const stabilizedY = prev ? (prev.y * 0.65 + centroidY * 0.35) : centroidY;
+    graph.groupNodePositions.set(group.id, { x: stabilizedX, y: stabilizedY });
+
+    return {
+      ...group,
+      avgScore: group.count > 0 ? group.totalScore / group.count : 0,
+      x: stabilizedX,
+      y: stabilizedY,
+    };
+  });
+
+  const nodeByGroup = new Map(nodeData.map((group) => [group.id, group]));
+  const edgeMap = new Map();
+  for (const link of graph.visibleLinks) {
+    const sourceNode = graph.nodeById.get(linkSourceId(link));
+    const targetNode = graph.nodeById.get(linkTargetId(link));
+    if (!sourceNode || !targetNode) {
+      continue;
+    }
+
+    const sourceGroup = groupKeyForNode(sourceNode, level);
+    const targetGroup = groupKeyForNode(targetNode, level);
+    if (sourceGroup === targetGroup) {
+      continue;
+    }
+
+    const pair = sourceGroup < targetGroup
+      ? `${sourceGroup}|${targetGroup}`
+      : `${targetGroup}|${sourceGroup}`;
+
+    const existing = edgeMap.get(pair);
+    if (existing) {
+      existing.weight += 1;
+      continue;
+    }
+
+    edgeMap.set(pair, {
+      _key: pair,
+      _kind: level,
+      source: nodeByGroup.get(sourceGroup),
+      target: nodeByGroup.get(targetGroup),
+      weight: 1,
+    });
+  }
+
+  const linkData = [...edgeMap.values()].filter((edge) => edge.source && edge.target);
+  return { nodeData, linkData };
 }
 
 function ensureSimulation(graph) {
@@ -304,10 +463,12 @@ function ensureSimulation(graph) {
 
   graph.simulation = d3
     .forceSimulation(graph.nodes)
-    .force("link", d3.forceLink(graph.links).id((d) => d.id).distance(62).strength(0.18))
-    .force("charge", d3.forceManyBody().strength(-130))
+    .force("link", d3.forceLink(graph.links).id((d) => d.id).distance(58).strength(0.2))
+    .force("charge", d3.forceManyBody().strength(-58).distanceMax(180))
     .force("center", d3.forceCenter(graph.width / 2, graph.height / 2))
-    .force("collision", d3.forceCollide().radius((d) => 5 + Math.sqrt(Number(d.size || 1)) * 2.1));
+    .force("collision", d3.forceCollide().radius((d) => 5 + Math.sqrt(Number(d.size || 1)) * 1.8))
+    .velocityDecay(0.42)
+    .alphaDecay(0.06);
 
   graph.simulation.on("tick", () => {
     if (graph.linkSelection) {
@@ -353,7 +514,7 @@ function currentWorkerCentroid(graph) {
 
   const points = graph.workers
     .map((worker) => {
-      const node = graph.nodeById.get(worker.currentNodeId);
+      const node = graph.nodeById.get(worker.frontierNodeId);
       if (!node) return null;
       return { x: Number(node.x || graph.width / 2), y: Number(node.y || graph.height / 2) };
     })
@@ -411,6 +572,8 @@ function applyInitialSeedLayout(graph, seedNodes, allNodes) {
 }
 
 function mergeGraphData(graph, incomingNodes, incomingLinks) {
+  let addedNodes = 0;
+  let addedLinks = 0;
   const prevIds = new Set(graph.nodeById.keys());
   const seenIds = new Set();
   const spawnCenter = currentWorkerCentroid(graph);
@@ -451,6 +614,7 @@ function mergeGraphData(graph, incomingNodes, incomingLinks) {
 
     graph.nodes.push(spawned);
     graph.nodeById.set(id, spawned);
+    addedNodes += 1;
   }
 
   const removedIds = [...prevIds].filter((id) => !seenIds.has(id));
@@ -481,11 +645,14 @@ function mergeGraphData(graph, incomingNodes, incomingLinks) {
     const created = { source: link.source, target: link.target, _key: key };
     graph.linkByKey.set(key, created);
     nextLinks.push(created);
+    addedLinks += 1;
   }
 
+  let removedLinks = 0;
   for (const key of [...graph.linkByKey.keys()]) {
     if (!nextKeySet.has(key)) {
       graph.linkByKey.delete(key);
+      removedLinks += 1;
     }
   }
 
@@ -502,7 +669,10 @@ function mergeGraphData(graph, incomingNodes, incomingLinks) {
     graph.hasInitialLayout = true;
   }
 
-  return seeds;
+  return {
+    seeds,
+    topologyChanged: addedNodes > 0 || removedIds.length > 0 || addedLinks > 0 || removedLinks > 0,
+  };
 }
 
 function buildAdjacency(graph) {
@@ -552,11 +722,32 @@ function updateVisibleSubset(graph) {
     }
   }
 
-  const prioritized = (inViewport.length > 0 ? inViewport : graph.nodes)
+  const prioritizedInViewport = inViewport
     .slice()
     .sort((a, b) => Number(b.size || 0) - Number(a.size || 0));
+  const visibleNodes = prioritizedInViewport.slice(0, limit);
 
-  const visibleNodes = prioritized.slice(0, limit);
+  // Fill remaining slots from the global graph to keep the visible subset stable.
+  if (visibleNodes.length < limit) {
+    const selectedIds = new Set(visibleNodes.map((node) => node.id));
+    const overflow = graph.nodes
+      .slice()
+      .sort((a, b) => Number(b.size || 0) - Number(a.size || 0));
+
+    for (const node of overflow) {
+      if (visibleNodes.length >= limit) {
+        break;
+      }
+
+      if (selectedIds.has(node.id)) {
+        continue;
+      }
+
+      selectedIds.add(node.id);
+      visibleNodes.push(node);
+    }
+  }
+
   const visibleNodeIds = new Set(visibleNodes.map((node) => node.id));
   const visibleLinks = graph.links.filter((link) => {
     const sourceId = linkSourceId(link);
@@ -735,6 +926,8 @@ function applyZoomDetail(graph, scale) {
     return;
   }
 
+  graph.currentViewLevel = getViewLevel(scale);
+
   graph.clusterLayer.style("display", "none");
   graph.linkLayer.style("display", null);
   graph.nodeLayer.style("display", null);
@@ -745,7 +938,12 @@ function applyZoomDetail(graph, scale) {
 
   graph.nodeSelection
     .attr("opacity", 1)
-    .attr("r", (d) => seedRadius(d));
+    .attr("r", (d) => {
+      if (d._kind === "item") {
+        return seedRadius(d);
+      }
+      return clamp(12 + Math.sqrt(Number(d.count || 1)) * 4.2, 14, 48);
+    });
 }
 
 function applyLinkStyles(graph) {
@@ -784,6 +982,19 @@ function renderNodeDetails(graph, node) {
     return;
   }
 
+  if (node._kind === "domain" || node._kind === "subdomain") {
+    graph.detailsPanel.classList.remove("hidden");
+    graph.detailsPanel.innerHTML = [
+      `<h3>${sanitize(node.label || "group")}</h3>`,
+      `<p><strong>View:</strong> ${sanitize(node._kind)}</p>`,
+      `<p><strong>Grouped pages:</strong> ${sanitize(node.count || 0)}</p>`,
+      `<p><strong>Queue candidates:</strong> ${sanitize(node.queueCount || 0)}</p>`,
+      `<p><strong>Average score:</strong> ${sanitize((node.avgScore || 0).toFixed(2))}</p>`,
+      `<p class='text-small text-muted'>Zoom or click to drill down.</p>`,
+    ].join("");
+    return;
+  }
+
   graph.detailsPanel.classList.remove("hidden");
   const neighbors = graph.adjacency.get(node.id) || [];
   graph.detailsPanel.innerHTML = [
@@ -797,12 +1008,12 @@ function renderNodeDetails(graph, node) {
 
 function applySelectionFocus(graph) {
   const selectedId = graph.selectedNodeId;
-  if (!selectedId || !graph.visibleNodeIds.has(selectedId)) {
+  if (!selectedId) {
     if (graph.nodeSelection) {
       graph.nodeSelection
         .attr("opacity", 1)
-        .attr("stroke", (d) => d._seed ? "#d58a00" : "#ffffff")
-        .attr("stroke-width", (d) => d._seed ? 2.2 : 1.2);
+        .attr("stroke", (d) => d._kind === "item" ? (d._seed ? "#d58a00" : "#ffffff") : "#1f3a5f")
+        .attr("stroke-width", (d) => d._kind === "item" ? (d._seed ? 2.2 : 1.2) : 2.2);
     }
     if (graph.linkSelection) {
       graph.linkSelection
@@ -811,6 +1022,31 @@ function applySelectionFocus(graph) {
       applyLinkStyles(graph);
     }
     renderNodeDetails(graph, null);
+    return;
+  }
+
+  if (graph.currentViewLevel !== "item") {
+    if (graph.nodeSelection) {
+      graph.nodeSelection
+        .attr("opacity", (d) => (d.id === selectedId ? 1 : 0.3))
+        .attr("stroke", (d) => (d.id === selectedId ? "#ff7f0e" : "#1f3a5f"))
+        .attr("stroke-width", (d) => (d.id === selectedId ? 3.4 : 2));
+    }
+
+    if (graph.linkSelection) {
+      graph.linkSelection
+        .attr("opacity", (d) => (d.source.id === selectedId || d.target.id === selectedId ? 0.95 : 0.12))
+        .attr("stroke-opacity", (d) => (d.source.id === selectedId || d.target.id === selectedId ? 0.95 : 0.12));
+    }
+
+    const selectedNode = graph.nodeSelection?.data().find((node) => node.id === selectedId) || null;
+    renderNodeDetails(graph, selectedNode);
+    return;
+  }
+
+  if (!graph.visibleNodeIds.has(selectedId)) {
+    graph.selectedNodeId = null;
+    applySelectionFocus(graph);
     return;
   }
 
@@ -855,20 +1091,13 @@ function applySelectionFocus(graph) {
 function updateSelections(graph, seedNodes) {
   const visibleSeedIds = new Set(seedNodes.map((node) => node.id));
 
-  const linkData = graph.visibleLinks.map((link) => {
-    const sourceId = linkSourceId(link);
-    const targetId = linkTargetId(link);
-    return {
-      source: graph.nodeById.get(sourceId),
-      target: graph.nodeById.get(targetId),
-      _key: edgeKey(sourceId, targetId),
-      _gradientId: linkGradientId(graph, edgeKey(sourceId, targetId)),
-    };
-  }).filter((item) => item.source && item.target);
+  const level = getViewLevel(graph.currentTransform?.k || 1);
+  graph.currentViewLevel = level;
+  const { nodeData, linkData } = buildRenderData(graph, level);
 
   graph.gradientSelection = graph.defs
     .selectAll("linearGradient")
-    .data(linkData, (d) => d._key)
+    .data(level === "item" ? linkData : [], (d) => d._key)
     .join((enter) => {
       const gradient = enter
         .append("linearGradient")
@@ -883,40 +1112,66 @@ function updateSelections(graph, seedNodes) {
     .attr("x2", (d) => d.target.x || 0)
     .attr("y2", (d) => d.target.y || 0);
 
-  graph.gradientSelection.each(function(d) {
-    const gradient = d3.select(this);
-    gradient.select("stop[offset='0%']").attr("stop-color", makeNodeColor(d.source));
-    gradient.select("stop[offset='100%']").attr("stop-color", makeNodeColor(d.target));
-  });
+  if (level === "item") {
+    graph.gradientSelection.each(function(d) {
+      const gradient = d3.select(this);
+      gradient.select("stop[offset='0%']").attr("stop-color", makeNodeColor(d.source));
+      gradient.select("stop[offset='100%']").attr("stop-color", makeNodeColor(d.target));
+    });
+  }
 
   graph.linkSelection = graph.linkLayer
     .selectAll("line")
     .data(linkData, (d) => d._key)
     .join("line");
 
-  applyLinkStyles(graph);
+  if (level === "item") {
+    applyLinkStyles(graph);
+  } else {
+    graph.linkSelection
+      .attr("stroke", "#5e7697")
+      .attr("stroke-width", (d) => clamp(1 + Math.log10((d.weight || 1) + 1), 1, 4))
+      .attr("stroke-opacity", 0.55);
+  }
 
   graph.nodeSelection = graph.nodeLayer
     .selectAll("circle")
-    .data(graph.visibleNodes, (d) => d.id)
+    .data(nodeData, (d) => d.id)
     .join("circle")
-    .attr("r", (d) => seedRadius(d))
-    .attr("fill", (d) => makeNodeColor(d))
-    .attr("stroke", (d) => d._seed ? "#d58a00" : "#ffffff")
-    .attr("stroke-width", (d) => d._seed ? 2.2 : 1.2)
+    .attr("r", (d) => d._kind === "item"
+      ? seedRadius(d)
+      : clamp(12 + Math.sqrt(Number(d.count || 1)) * 4.2, 14, 48))
+    .attr("fill", (d) => {
+      if (d._kind === "item") {
+        return makeNodeColor(d);
+      }
+
+      return d._kind === "domain" ? "hsl(204 42% 58%)" : "hsl(164 42% 52%)";
+    })
+    .attr("stroke", (d) => d._kind === "item" ? (d._seed ? "#d58a00" : "#ffffff") : "#1f3a5f")
+    .attr("stroke-width", (d) => d._kind === "item" ? (d._seed ? 2.2 : 1.2) : 2.2)
     .call(
       d3
         .drag()
         .on("start", (event, d) => {
+          if (d._kind !== "item") {
+            return;
+          }
           if (!event.active) graph.simulation.alphaTarget(0.3).restart();
           d.fx = d.x;
           d.fy = d.y;
         })
         .on("drag", (event, d) => {
+          if (d._kind !== "item") {
+            return;
+          }
           d.fx = event.x;
           d.fy = event.y;
         })
         .on("end", (event, d) => {
+          if (d._kind !== "item") {
+            return;
+          }
           if (!event.active) graph.simulation.alphaTarget(0);
           d.fx = null;
           d.fy = null;
@@ -928,10 +1183,14 @@ function updateSelections(graph, seedNodes) {
       graph.tooltip
         .style("opacity", 1)
         .html(
-          `<div><strong>${sanitize(d.domain || "unknown")}</strong></div>` +
-            `<div>${sanitize(d.url)}</div>` +
-            `<div>backlinks: ${sanitize(d.size || 0)}</div>` +
-            `<div>score: ${sanitize((d._score || 0).toFixed(2))}</div>`
+          d._kind === "item"
+            ? (`<div><strong>${sanitize(d.domain || "unknown")}</strong></div>` +
+              `<div>${sanitize(d.url)}</div>` +
+              `<div>backlinks: ${sanitize(d.size || 0)}</div>` +
+              `<div>score: ${sanitize((d._score || 0).toFixed(2))}</div>`)
+            : (`<div><strong>${sanitize(d.label || "group")}</strong></div>` +
+              `<div>grouped pages: ${sanitize(d.count || 0)}</div>` +
+              `<div>avg score: ${sanitize((d.avgScore || 0).toFixed(2))}</div>`)
         );
     })
     .on("mousemove", (event) => {
@@ -939,13 +1198,28 @@ function updateSelections(graph, seedNodes) {
     })
     .on("mouseout", () => graph.tooltip.style("opacity", 0))
     .on("click", (_, d) => {
+      if (d._kind !== "item") {
+        const nextScale = d._kind === "domain" ? 1.0 : 2.0;
+        const targetTransform = d3.zoomIdentity
+          .translate(graph.width / 2 - (d.x || graph.width / 2) * nextScale, graph.height / 2 - (d.y || graph.height / 2) * nextScale)
+          .scale(nextScale);
+
+        graph.currentTransform = targetTransform;
+        graph.selectedNodeId = d.id;
+        graph.svg
+          .transition()
+          .duration(360)
+          .call(graph.zoom.transform, targetTransform);
+        return;
+      }
+
       graph.selectedNodeId = graph.selectedNodeId === d.id ? null : d.id;
       applySelectionFocus(graph);
     });
 
   graph.seedSelection = graph.seedLayer
     .selectAll("circle")
-    .data(graph.visibleNodes.filter((node) => visibleSeedIds.has(node.id)), (d) => d.id)
+    .data(level === "item" ? graph.visibleNodes.filter((node) => visibleSeedIds.has(node.id)) : [], (d) => d.id)
     .join("circle")
     .attr("r", (d) => seedRadius(d) + 4)
     .attr("fill", "none")
@@ -955,7 +1229,7 @@ function updateSelections(graph, seedNodes) {
 
   graph.workerSelection = graph.workerLayer
     .selectAll("g")
-    .data(graph.workers, (d) => d.id)
+    .data(level === "item" ? graph.workers : [], (d) => d.id)
     .join((enter) => {
       const group = enter.append("g").attr("class", "graph-worker");
       group
@@ -976,6 +1250,25 @@ function updateSelections(graph, seedNodes) {
     });
 
   graph.workerSelection.select("text").text((d) => d.label || `Q${d.id}`);
+
+  const groupLabels = graph.nodeLayer
+    .selectAll("text.graph-group-label")
+    .data(level === "item" ? [] : nodeData, (d) => d.id)
+    .join("text")
+    .attr("class", "graph-group-label")
+    .attr("text-anchor", "middle")
+    .attr("dominant-baseline", "middle")
+    .attr("font-size", 11)
+    .attr("font-weight", 700)
+    .attr("fill", "#ffffff")
+    .style("pointer-events", "none")
+    .text((d) => `${compactLabel(d.label, 18)} (${d.count})`)
+    .attr("x", (d) => d.x)
+    .attr("y", (d) => d.y);
+
+  if (level === "item") {
+    graph.nodeLayer.selectAll("text.graph-group-label").remove();
+  }
 
   applySelectionFocus(graph);
   updateWorkerVisuals(graph);
@@ -1002,20 +1295,22 @@ export function renderGraph(hostId, payloadJson) {
 
   graph.visibleNodeLimit = Math.max(50, Number(payload.visibleNodeLimit || graph.visibleNodeLimit || 500));
 
-  const seedNodes = mergeGraphData(graph, payload.nodes, payload.links);
+  const mergeResult = mergeGraphData(graph, payload.nodes, payload.links);
   graph.adjacency = buildAdjacency(graph);
   syncWorkers(graph, payload.workers || []);
   syncFrontierProxies(graph);
   updateVisibleSubset(graph);
   ensureSimulation(graph);
-  updateSelections(graph, seedNodes);
+  updateSelections(graph, mergeResult.seeds);
   startWorkerTicker(graph);
 
   const linkForce = graph.simulation.force("link");
   linkForce.links(graph.links);
 
   graph.simulation.nodes(graph.nodes);
-  graph.simulation.alpha(0.35).restart();
+  if (mergeResult.topologyChanged) {
+    graph.simulation.alpha(0.2).restart();
+  }
 
   graph.svg.call(graph.zoom.transform, graph.currentTransform || d3.zoomIdentity);
   applyZoomDetail(graph, graph.currentTransform?.k || 1);

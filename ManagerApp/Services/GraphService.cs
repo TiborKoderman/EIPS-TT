@@ -161,15 +161,15 @@ public class GraphService : IGraphService
         IReadOnlyDictionary<string, int> nodeIdByUrl)
     {
         const string workerSql = """
-            SELECT COALESCE(external_worker_id, id::int) AS worker_id,
-                   COALESCE(name, '') AS worker_name,
-                   COALESCE(status, 'idle') AS status,
-                   current_url
+                        SELECT COALESCE(w.external_worker_id, w.id::int) AS worker_id,
+                 COALESCE(w.name, '') AS worker_name,
+                 COALESCE(w.status, 'idle') AS status,
+                 w.current_url
                         FROM manager.worker w
                         JOIN manager.daemon d ON d.id = w.daemon_id
-            WHERE lower(COALESCE(status, '')) = 'active'
+             WHERE lower(COALESCE(w.status, '')) = 'active'
                             AND lower(COALESCE(d.status, '')) IN ('running', 'active')
-                        ORDER BY COALESCE(external_worker_id, id::int);
+                        ORDER BY COALESCE(w.external_worker_id, w.id::int);
             """;
 
         var workers = new List<GraphWorkerDto>();
