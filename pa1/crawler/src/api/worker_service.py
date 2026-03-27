@@ -553,6 +553,11 @@ class DaemonWorkerService(WorkerControlService):
                 score_weight_pages=cfg.score_weight_pages,
                 score_weight_errors=cfg.score_weight_errors,
                 topic_keywords=list(cfg.topic_keywords),
+                relevance_allowed_domain_suffixes=list(cfg.relevance_allowed_domain_suffixes),
+                relevance_same_host_boost=cfg.relevance_same_host_boost,
+                relevance_allowed_suffix_boost=cfg.relevance_allowed_suffix_boost,
+                relevance_keyword_boost=cfg.relevance_keyword_boost,
+                relevance_depth_penalty=cfg.relevance_depth_penalty,
                 max_frontier_in_memory=cfg.max_frontier_in_memory,
                 avoid_duplicate_paths_across_daemons=cfg.avoid_duplicate_paths_across_daemons,
             )
@@ -627,6 +632,52 @@ class DaemonWorkerService(WorkerControlService):
         if not topic_keywords:
             topic_keywords = list(self._global_config.topic_keywords)
 
+        relevance_suffixes: list[str] = []
+        raw_relevance_suffixes = payload.get("relevanceAllowedDomainSuffixes")
+        if isinstance(raw_relevance_suffixes, list):
+            relevance_suffixes = [
+                str(value).strip().lower().lstrip(".")
+                for value in raw_relevance_suffixes
+                if str(value).strip()
+            ]
+        elif "relevanceAllowedDomainSuffixesText" in payload:
+            relevance_suffixes = [
+                token.strip().lower().lstrip(".")
+                for line in str(payload.get("relevanceAllowedDomainSuffixesText", "")).splitlines()
+                for token in line.replace(";", ",").split(",")
+                if token.strip()
+            ]
+        if not relevance_suffixes:
+            relevance_suffixes = list(self._global_config.relevance_allowed_domain_suffixes)
+
+        try:
+            relevance_same_host_boost = float(
+                payload.get("relevanceSameHostBoost", self._global_config.relevance_same_host_boost)
+            )
+        except (TypeError, ValueError):
+            relevance_same_host_boost = self._global_config.relevance_same_host_boost
+
+        try:
+            relevance_allowed_suffix_boost = float(
+                payload.get("relevanceAllowedSuffixBoost", self._global_config.relevance_allowed_suffix_boost)
+            )
+        except (TypeError, ValueError):
+            relevance_allowed_suffix_boost = self._global_config.relevance_allowed_suffix_boost
+
+        try:
+            relevance_keyword_boost = float(
+                payload.get("relevanceKeywordBoost", self._global_config.relevance_keyword_boost)
+            )
+        except (TypeError, ValueError):
+            relevance_keyword_boost = self._global_config.relevance_keyword_boost
+
+        try:
+            relevance_depth_penalty = float(
+                payload.get("relevanceDepthPenalty", self._global_config.relevance_depth_penalty)
+            )
+        except (TypeError, ValueError):
+            relevance_depth_penalty = self._global_config.relevance_depth_penalty
+
         with self._lock:
             self._global_config = GlobalWorkerConfig(
                 max_concurrent_workers=_coerce_int(
@@ -654,6 +705,11 @@ class DaemonWorkerService(WorkerControlService):
                 score_weight_pages=score_weight_pages,
                 score_weight_errors=score_weight_errors,
                 topic_keywords=topic_keywords,
+                relevance_allowed_domain_suffixes=list(dict.fromkeys(relevance_suffixes)),
+                relevance_same_host_boost=max(0.0, relevance_same_host_boost),
+                relevance_allowed_suffix_boost=max(0.0, relevance_allowed_suffix_boost),
+                relevance_keyword_boost=max(0.0, relevance_keyword_boost),
+                relevance_depth_penalty=max(0.0, relevance_depth_penalty),
                 max_frontier_in_memory=_coerce_int(
                     payload.get("maxFrontierInMemory"),
                     self._global_config.max_frontier_in_memory,
@@ -681,6 +737,11 @@ class DaemonWorkerService(WorkerControlService):
                 score_weight_pages=cfg.score_weight_pages,
                 score_weight_errors=cfg.score_weight_errors,
                 topic_keywords=list(cfg.topic_keywords),
+                relevance_allowed_domain_suffixes=list(cfg.relevance_allowed_domain_suffixes),
+                relevance_same_host_boost=cfg.relevance_same_host_boost,
+                relevance_allowed_suffix_boost=cfg.relevance_allowed_suffix_boost,
+                relevance_keyword_boost=cfg.relevance_keyword_boost,
+                relevance_depth_penalty=cfg.relevance_depth_penalty,
                 max_frontier_in_memory=cfg.max_frontier_in_memory,
                 avoid_duplicate_paths_across_daemons=cfg.avoid_duplicate_paths_across_daemons,
             )
@@ -1326,22 +1387,37 @@ class DaemonWorkerService(WorkerControlService):
             return None
 
     def _build_relevance_policy(self) -> RelevancePolicy:
-        suffixes = list(self._crawler_config.relevance_allowed_domain_suffixes)
+        with self._lock:
+            cfg = self._global_config
+            suffixes = list(cfg.relevance_allowed_domain_suffixes)
+            keywords = tuple(cfg.topic_keywords)
+            same_host_boost = cfg.relevance_same_host_boost
+            allowed_suffix_boost = cfg.relevance_allowed_suffix_boost
+            keyword_boost = cfg.relevance_keyword_boost
+            depth_penalty = cfg.relevance_depth_penalty
+            seed_entries = list(cfg.seed_entries)
+
         if not suffixes:
-            for seed in self._global_config.seed_entries:
+            suffixes = list(self._crawler_config.relevance_allowed_domain_suffixes)
+
+        if not suffixes:
+            for seed in seed_entries:
                 if not seed.enabled or not seed.url.strip():
                     continue
                 host = self._url_canonicalizer.extract_host(seed.url)
                 if host:
                     suffixes.append(host)
 
+        if not keywords:
+            keywords = tuple(self._crawler_config.topic_keywords)
+
         return RelevancePolicy(
             allowed_domain_suffixes=tuple(dict.fromkeys(suffixes)),
-            keywords=tuple(self._global_config.topic_keywords),
-            same_host_boost=self._crawler_config.relevance_same_host_boost,
-            allowed_suffix_boost=self._crawler_config.relevance_allowed_suffix_boost,
-            keyword_boost=self._crawler_config.relevance_keyword_boost,
-            depth_penalty=self._crawler_config.relevance_depth_penalty,
+            keywords=keywords,
+            same_host_boost=same_host_boost,
+            allowed_suffix_boost=allowed_suffix_boost,
+            keyword_boost=keyword_boost,
+            depth_penalty=depth_penalty,
         )
 
     @staticmethod

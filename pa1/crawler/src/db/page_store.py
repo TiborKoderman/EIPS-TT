@@ -462,9 +462,10 @@ class PostgresPageStore:
                 if classification.duplicate_of_page_id is None:
                     raise RuntimeError("Duplicate classification missing duplicate_of_page_id.")
                 if existing_page is not None and existing_page[1] == "FRONTIER":
-                    page_id = existing_page[0]
+                    # Keep historical URL record, but prevent this row from being queued again.
+                    page_id = classification.duplicate_of_page_id
                     self.update_page(
-                        page_id=page_id,
+                        page_id=existing_page[0],
                         site_id=site_id,
                         page_type_code="DUPLICATE",
                         http_status_code=http_status_code,
@@ -474,13 +475,8 @@ class PostgresPageStore:
                     )
                     status = "promoted_duplicate"
                 else:
-                    page_id = self.insert_duplicate_page(
-                        site_id=site_id,
-                        url=classification.url,
-                        http_status_code=http_status_code,
-                        duplicate_of_page_id=classification.duplicate_of_page_id,
-                        content_hash=classification.content_hash,
-                    )
+                    # Route duplicate URLs to the canonical page id; do not create duplicate rows.
+                    page_id = classification.duplicate_of_page_id
                     status = classification.status
             else:
                 if existing_page is not None and existing_page[1] == "FRONTIER":

@@ -340,6 +340,18 @@ public class WorkerService : IWorkerService
             .Distinct(StringComparer.OrdinalIgnoreCase)
             .ToList();
 
+        config.RelevanceAllowedDomainSuffixes = config.RelevanceAllowedDomainSuffixesText
+            .Split(new[] { '\r', '\n', ',', ';' }, StringSplitOptions.RemoveEmptyEntries)
+            .Select(value => value.Trim().TrimStart('.').ToLowerInvariant())
+            .Where(value => !string.IsNullOrWhiteSpace(value))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToList();
+
+        config.RelevanceSameHostBoost = Math.Max(0, config.RelevanceSameHostBoost);
+        config.RelevanceAllowedSuffixBoost = Math.Max(0, config.RelevanceAllowedSuffixBoost);
+        config.RelevanceKeywordBoost = Math.Max(0, config.RelevanceKeywordBoost);
+        config.RelevanceDepthPenalty = Math.Max(0, config.RelevanceDepthPenalty);
+
         _ = await PutAsync("api/config/global", config);
     }
 

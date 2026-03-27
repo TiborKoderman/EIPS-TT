@@ -116,6 +116,11 @@ class GlobalWorkerConfig:
             "disease",
         ]
     )
+    relevance_allowed_domain_suffixes: list[str] = field(default_factory=list)
+    relevance_same_host_boost: float = 10.0
+    relevance_allowed_suffix_boost: float = 20.0
+    relevance_keyword_boost: float = 5.0
+    relevance_depth_penalty: float = 0.2
     max_frontier_in_memory: int = 50000
     avoid_duplicate_paths_across_daemons: bool = True
 
@@ -137,6 +142,12 @@ class GlobalWorkerConfig:
             "scoreWeightErrors": self.score_weight_errors,
             "topicKeywords": list(self.topic_keywords),
             "topicKeywordsText": "\n".join(self.topic_keywords),
+            "relevanceAllowedDomainSuffixes": list(self.relevance_allowed_domain_suffixes),
+            "relevanceAllowedDomainSuffixesText": "\n".join(self.relevance_allowed_domain_suffixes),
+            "relevanceSameHostBoost": self.relevance_same_host_boost,
+            "relevanceAllowedSuffixBoost": self.relevance_allowed_suffix_boost,
+            "relevanceKeywordBoost": self.relevance_keyword_boost,
+            "relevanceDepthPenalty": self.relevance_depth_penalty,
             "maxFrontierInMemory": self.max_frontier_in_memory,
             "avoidDuplicatePathsAcrossDaemons": self.avoid_duplicate_paths_across_daemons,
         }

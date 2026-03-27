@@ -132,6 +132,30 @@
                 <textarea rows="5" @bind="config.TopicKeywordsText"></textarea>
             </label>
 
+            <div class="workers-config-grid mt-md">
+                <label>
+                    <span class="text-small text-muted">Relevance Same Host Boost</span>
+                    <input type="number" min="0" step="0.1" @bind="config.RelevanceSameHostBoost" />
+                </label>
+                <label>
+                    <span class="text-small text-muted">Relevance Allowed Suffix Boost</span>
+                    <input type="number" min="0" step="0.1" @bind="config.RelevanceAllowedSuffixBoost" />
+                </label>
+                <label>
+                    <span class="text-small text-muted">Relevance Keyword Boost</span>
+                    <input type="number" min="0" step="0.1" @bind="config.RelevanceKeywordBoost" />
+                </label>
+                <label>
+                    <span class="text-small text-muted">Relevance Depth Penalty</span>
+                    <input type="number" min="0" step="0.01" @bind="config.RelevanceDepthPenalty" />
+                </label>
+            </div>
+
+            <label class="mt-md">
+                <span class="text-small text-muted">Allowed Domain Suffixes For Relevance (one per line)</span>
+                <textarea rows="4" @bind="config.RelevanceAllowedDomainSuffixesText"></textarea>
+            </label>
+
             <label class="mt-md flex items-center gap-sm">
                 <input type="checkbox" @bind="config.RespectRobotsTxt" style="width:auto;" />
                 <span>Respect robots.txt</span>
@@ -181,6 +205,11 @@
                 config.TopicKeywordsText = string.Join("\n", config.TopicKeywords);
             }
 
+            if (string.IsNullOrWhiteSpace(config.RelevanceAllowedDomainSuffixesText) && config.RelevanceAllowedDomainSuffixes.Count > 0)
+            {
+                config.RelevanceAllowedDomainSuffixesText = string.Join("\n", config.RelevanceAllowedDomainSuffixes);
+            }
+
             if (config.SeedEntries.Count == 0 && !string.IsNullOrWhiteSpace(config.SeedUrlsText))
             {
                 config.SeedEntries = config.SeedUrlsText
@@ -226,6 +255,13 @@
             .Distinct(StringComparer.OrdinalIgnoreCase)
             .ToList();
 
+        config.RelevanceAllowedDomainSuffixes = config.RelevanceAllowedDomainSuffixesText
+            .Split(new[] { '\r', '\n', ',', ';' }, StringSplitOptions.RemoveEmptyEntries)
+            .Select(value => value.Trim().TrimStart('.').ToLowerInvariant())
+            .Where(value => !string.IsNullOrWhiteSpace(value))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToList();
+
         if (!new[] { "local", "server", "both" }.Contains(config.QueueMode))
         {
             config.QueueMode = "both";
@@ -240,6 +276,11 @@
         {
             config.MaxFrontierInMemory = 100;
         }
+
+        config.RelevanceSameHostBoost = Math.Max(0, config.RelevanceSameHostBoost);
+        config.RelevanceAllowedSuffixBoost = Math.Max(0, config.RelevanceAllowedSuffixBoost);
+        config.RelevanceKeywordBoost = Math.Max(0, config.RelevanceKeywordBoost);
+        config.RelevanceDepthPenalty = Math.Max(0, config.RelevanceDepthPenalty);
 
         await WorkerService.SaveGlobalConfigAsync(config);
         statusMessage = "Saved";
@@ -313,6 +354,16 @@
             "hospital",
             "doctor",
         });
+        config.RelevanceAllowedDomainSuffixesText = string.Join("\n", new[]
+        {
+            "gov.si",
+            "nijz.si",
+            "kclj.si",
+        });
+        config.RelevanceSameHostBoost = 10;
+        config.RelevanceAllowedSuffixBoost = 20;
+        config.RelevanceKeywordBoost = 5;
+        config.RelevanceDepthPenalty = 0.2;
 
         config.SeedEntries = new List<SeedEntryViewModel>
         {

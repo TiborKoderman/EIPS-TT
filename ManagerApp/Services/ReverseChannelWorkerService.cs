@@ -1083,6 +1083,18 @@ public sealed class ReverseChannelWorkerService : IWorkerService
             .Where(value => !string.IsNullOrWhiteSpace(value))
             .Distinct(StringComparer.OrdinalIgnoreCase)
             .ToList();
+
+        config.RelevanceAllowedDomainSuffixes = config.RelevanceAllowedDomainSuffixesText
+            .Split(new[] { '\r', '\n', ',', ';' }, StringSplitOptions.RemoveEmptyEntries)
+            .Select(value => value.Trim().TrimStart('.').ToLowerInvariant())
+            .Where(value => !string.IsNullOrWhiteSpace(value))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToList();
+
+        config.RelevanceSameHostBoost = Math.Max(0, config.RelevanceSameHostBoost);
+        config.RelevanceAllowedSuffixBoost = Math.Max(0, config.RelevanceAllowedSuffixBoost);
+        config.RelevanceKeywordBoost = Math.Max(0, config.RelevanceKeywordBoost);
+        config.RelevanceDepthPenalty = Math.Max(0, config.RelevanceDepthPenalty);
     }
 
     private static string NormalizeStatus(string? status)
@@ -1137,6 +1149,12 @@ public sealed class ReverseChannelWorkerService : IWorkerService
             ScoreWeightErrors = config.ScoreWeightErrors,
             TopicKeywords = new List<string>(config.TopicKeywords),
             TopicKeywordsText = config.TopicKeywordsText,
+            RelevanceAllowedDomainSuffixes = new List<string>(config.RelevanceAllowedDomainSuffixes),
+            RelevanceAllowedDomainSuffixesText = config.RelevanceAllowedDomainSuffixesText,
+            RelevanceSameHostBoost = config.RelevanceSameHostBoost,
+            RelevanceAllowedSuffixBoost = config.RelevanceAllowedSuffixBoost,
+            RelevanceKeywordBoost = config.RelevanceKeywordBoost,
+            RelevanceDepthPenalty = config.RelevanceDepthPenalty,
             MaxFrontierInMemory = config.MaxFrontierInMemory,
             AvoidDuplicatePathsAcrossDaemons = config.AvoidDuplicatePathsAcrossDaemons,
         };

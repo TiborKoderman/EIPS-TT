@@ -32,11 +32,13 @@ public sealed class CommandDispatchHostedService : BackgroundService
         }
 
         var pollIntervalMs = Math.Max(250, _configuration.GetValue("CrawlerApi:CommandDispatchPollMs", 1000));
+        var inFlightTimeoutSeconds = Math.Clamp(_configuration.GetValue("CrawlerApi:CommandDispatchInFlightTimeoutSeconds", 45), 5, 600);
 
         while (!stoppingToken.IsCancellationRequested)
         {
             try
             {
+                await RecoverStaleInFlightCommandsAsync(inFlightTimeoutSeconds, stoppingToken);
                 await DispatchQueuedCommandsAsync(stoppingToken);
             }
             catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
@@ -59,6 +61,73 @@ public sealed class CommandDispatchHostedService : BackgroundService
             {
                 break;
             }
+        }
+    }
+
+    private async Task RecoverStaleInFlightCommandsAsync(int inFlightTimeoutSeconds, CancellationToken cancellationToken)
+    {
+        var connectionString = _configuration.GetConnectionString("CrawldbConnection");
+        if (string.IsNullOrWhiteSpace(connectionString))
+        {
+            return;
+        }
+
+        await using var connection = new NpgsqlConnection(connectionString);
+        await connection.OpenAsync(cancellationToken);
+
+        const string selectSql = """
+            SELECT c.id,
+                   c.command_type,
+                   c.status,
+                   COALESCE(d.metadata->>'daemonId', 'local-default') AS daemon_identifier
+            FROM manager.command c
+            JOIN manager.daemon d ON d.id = c.daemon_id
+            WHERE c.status IN ('dispatched', 'acknowledged')
+              AND c.completed_at IS NULL
+              AND c.dispatched_at IS NOT NULL
+              AND c.dispatched_at < now() - make_interval(secs => @timeout_seconds)
+            ORDER BY c.dispatched_at ASC
+            LIMIT 100;
+            """;
+
+        var stale = new List<(long Id, string CommandType, string Status, string DaemonIdentifier)>();
+        await using (var selectCmd = new NpgsqlCommand(selectSql, connection))
+        {
+            selectCmd.Parameters.AddWithValue("timeout_seconds", inFlightTimeoutSeconds);
+            await using var reader = await selectCmd.ExecuteReaderAsync(cancellationToken);
+            while (await reader.ReadAsync(cancellationToken))
+            {
+                stale.Add((
+                    reader.GetInt64(0),
+                    reader.GetString(1),
+                    reader.GetString(2),
+                    reader.GetString(3)));
+            }
+        }
+
+        if (stale.Count == 0)
+        {
+            return;
+        }
+
+        foreach (var item in stale)
+        {
+            var reason = $"Requeued stale in-flight command ({item.Status}) after {inFlightTimeoutSeconds}s timeout.";
+            await UpdateCommandStatusAsync(
+                connection,
+                item.Id,
+                status: "queued",
+                errorMessage: reason,
+                setDispatchedAt: false,
+                cancellationToken);
+
+            await InsertDispatchLogAsync(
+                connection,
+                item.DaemonIdentifier,
+                level: "Warning",
+                message: $"[command-dispatch] commandId={item.Id} type={item.CommandType} status=queued reason=in-flight-timeout",
+                payloadJson: "{}",
+                cancellationToken);
         }
     }
 
@@ -205,7 +274,11 @@ public sealed class CommandDispatchHostedService : BackgroundService
             UPDATE manager.command
             SET status = @status,
                 error_message = @error_message,
-                dispatched_at = CASE WHEN @set_dispatched_at THEN now() ELSE dispatched_at END
+                dispatched_at = CASE
+                    WHEN @set_dispatched_at THEN now()
+                    WHEN @status = 'queued' THEN NULL
+                    ELSE dispatched_at
+                END
             WHERE id = @id;
             """;
 

@@ -139,10 +139,12 @@ public sealed class CrawlerRelayService
 
         await context.SaveChangesAsync(cancellationToken);
 
+        var canonicalTargetPageId = targetPage.DuplicateOfPageId ?? targetPage.Id;
+
         if (request.SourcePageId.HasValue && request.SourcePageId.Value > 0)
         {
             await context.Database.ExecuteSqlInterpolatedAsync(
-                $"INSERT INTO crawldb.link(from_page, to_page) VALUES ({request.SourcePageId.Value}, {targetPage.Id}) ON CONFLICT DO NOTHING",
+            $"INSERT INTO crawldb.link(from_page, to_page) VALUES ({request.SourcePageId.Value}, {canonicalTargetPageId}) ON CONFLICT DO NOTHING",
                 cancellationToken);
         }
 
@@ -169,7 +171,9 @@ public sealed class CrawlerRelayService
 
         await UpsertDiscoveredLinksAsync(
             context,
-            targetPage,
+            targetPage.DuplicateOfPageId.HasValue
+                ? await context.Pages.FirstAsync(page => page.Id == targetPage.DuplicateOfPageId.Value, cancellationToken)
+                : targetPage,
             request.DiscoveredUrls,
             cancellationToken);
 

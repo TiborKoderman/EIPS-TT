@@ -130,6 +130,12 @@ public class WorkerGlobalConfigViewModel
     public double ScoreWeightErrors { get; set; } = 1.0;
     public List<string> TopicKeywords { get; set; } = new();
     public string TopicKeywordsText { get; set; } = "";
+    public List<string> RelevanceAllowedDomainSuffixes { get; set; } = new();
+    public string RelevanceAllowedDomainSuffixesText { get; set; } = "";
+    public double RelevanceSameHostBoost { get; set; } = 10.0;
+    public double RelevanceAllowedSuffixBoost { get; set; } = 20.0;
+    public double RelevanceKeywordBoost { get; set; } = 5.0;
+    public double RelevanceDepthPenalty { get; set; } = 0.2;
     public int MaxFrontierInMemory { get; set; } = 50000;
     public bool AvoidDuplicatePathsAcrossDaemons { get; set; } = true;
 }

@@ -272,7 +272,10 @@ public sealed class DaemonChannelService
         }
         finally
         {
-            _connections.TryRemove(daemonId, out _);
+            if (_connections.TryGetValue(daemonId, out var current) && ReferenceEquals(current, connection))
+            {
+                _connections.TryRemove(daemonId, out _);
+            }
             connection.SendLock.Dispose();
             _logger.LogInformation("Daemon websocket disconnected: {DaemonId}", daemonId);
 
