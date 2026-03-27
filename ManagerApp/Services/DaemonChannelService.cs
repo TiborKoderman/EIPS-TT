@@ -2,6 +2,7 @@ using System.Collections.Concurrent;
 using System.Net.WebSockets;
 using System.Text;
 using System.Text.Json;
+using Microsoft.Extensions.Primitives;
 using ManagerApp.Models;
 using Npgsql;
 
@@ -221,6 +222,13 @@ public sealed class DaemonChannelService
 
     public async Task HandleSocketAsync(HttpContext context)
     {
+        if (!IsAuthorized(context))
+        {
+            context.Response.StatusCode = StatusCodes.Status401Unauthorized;
+            await context.Response.WriteAsync("Invalid daemon channel token.");
+            return;
+        }
+
         if (!context.WebSockets.IsWebSocketRequest)
         {
             context.Response.StatusCode = StatusCodes.Status400BadRequest;
@@ -544,5 +552,43 @@ public sealed class DaemonChannelService
     {
         var bytes = Encoding.UTF8.GetBytes(JsonSerializer.Serialize(payload));
         await socket.SendAsync(bytes, WebSocketMessageType.Text, true, CancellationToken.None);
+    }
+
+    private bool IsAuthorized(HttpContext context)
+    {
+        var requiredToken = (_configuration["CrawlerApi:DaemonChannelToken"] ?? string.Empty).Trim();
+        if (string.IsNullOrWhiteSpace(requiredToken))
+        {
+            return true;
+        }
+
+        var queryToken = context.Request.Query["token"].ToString();
+        if (!string.IsNullOrWhiteSpace(queryToken)
+            && string.Equals(queryToken, requiredToken, StringComparison.Ordinal))
+        {
+            return true;
+        }
+
+        if (context.Request.Headers.TryGetValue("Authorization", out StringValues authValues))
+        {
+            foreach (var header in authValues)
+            {
+                if (string.IsNullOrWhiteSpace(header))
+                {
+                    continue;
+                }
+
+                if (header.StartsWith("Bearer ", StringComparison.OrdinalIgnoreCase))
+                {
+                    var token = header["Bearer ".Length..].Trim();
+                    if (string.Equals(token, requiredToken, StringComparison.Ordinal))
+                    {
+                        return true;
+                    }
+                }
+            }
+        }
+
+        return false;
     }
 }

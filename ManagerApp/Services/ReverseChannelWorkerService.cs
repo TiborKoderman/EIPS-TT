@@ -810,7 +810,7 @@ public sealed class ReverseChannelWorkerService : IWorkerService
 
             var managerDir = Directory.GetCurrentDirectory();
             var repoRoot = Path.GetFullPath(Path.Combine(managerDir, ".."));
-            var daemonArgs = _configuration["CrawlerApi:LocalDaemonArgs"] ?? "pa1/crawler/src/daemon/main.py";
+            var daemonArgs = _configuration["CrawlerApi:LocalDaemonArgs"] ?? "pa1/crawler/src/main.py --mode websocket";
             var managerHttpBaseUrl = ResolveManagerHttpBaseUrl();
             var wsUrl = ResolveManagerSocketUrl(managerHttpBaseUrl, daemonId);
 
@@ -829,6 +829,11 @@ public sealed class ReverseChannelWorkerService : IWorkerService
                     };
                     startInfo.Environment["CRAWLER_DAEMON_ID"] = daemonId;
                     startInfo.Environment["MANAGER_DAEMON_WS_URL"] = wsUrl;
+                    var daemonChannelToken = (_configuration["CrawlerApi:DaemonChannelToken"] ?? string.Empty).Trim();
+                    if (!string.IsNullOrWhiteSpace(daemonChannelToken))
+                    {
+                        startInfo.Environment["MANAGER_DAEMON_WS_TOKEN"] = daemonChannelToken;
+                    }
                     startInfo.Environment["MANAGER_INGEST_API_URL"] = managerHttpBaseUrl.TrimEnd('/') + "/api/crawler/ingest";
                     startInfo.Environment["MANAGER_EVENT_API_URL"] = managerHttpBaseUrl.TrimEnd('/') + "/api/crawler/events";
                     startInfo.Environment["MANAGER_PARENT_PID"] = Environment.ProcessId.ToString();

@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using System.Net;
 
 namespace ManagerApp.Services;
 
@@ -83,13 +84,13 @@ public sealed class LocalDaemonHostedService : IHostedService
     private async Task StartProcessDaemonAsync(CancellationToken cancellationToken)
     {
         var daemonArgs = _configuration["CrawlerApi:LocalDaemonArgs"]
-            ?? "pa1/crawler/src/daemon/main.py";
+            ?? "pa1/crawler/src/main.py --mode websocket";
         var daemonId = ResolveLocalDaemonId();
 
         var managerDir = Directory.GetCurrentDirectory();
         var repoRoot = Path.GetFullPath(Path.Combine(managerDir, ".."));
         var managerHttpBaseUrl = ResolveManagerHttpBaseUrl();
-        var wsUrl = ResolveManagerSocketUrl(managerHttpBaseUrl);
+        var wsUrl = ResolveManagerSocketUrl(managerHttpBaseUrl, daemonId);
 
         foreach (var pythonExe in ResolvePythonCandidates(repoRoot))
         {
@@ -98,6 +99,7 @@ public sealed class LocalDaemonHostedService : IHostedService
                 var ready = await _daemonChannel.WaitForConnectionAsync(daemonId, TimeSpan.FromSeconds(15), cancellationToken);
                 if (ready)
                 {
+                    await EnsureDaemonInitializedWithWorkerAsync(daemonId);
                     return;
                 }
 
@@ -142,6 +144,11 @@ public sealed class LocalDaemonHostedService : IHostedService
             };
             startInfo.Environment["CRAWLER_DAEMON_ID"] = daemonId;
             startInfo.Environment["MANAGER_DAEMON_WS_URL"] = wsUrl;
+            var daemonChannelToken = (_configuration["CrawlerApi:DaemonChannelToken"] ?? string.Empty).Trim();
+            if (!string.IsNullOrWhiteSpace(daemonChannelToken))
+            {
+                startInfo.Environment["MANAGER_DAEMON_WS_TOKEN"] = daemonChannelToken;
+            }
             startInfo.Environment["MANAGER_INGEST_API_URL"] = managerHttpBaseUrl.TrimEnd('/') + "/api/crawler/ingest";
             startInfo.Environment["MANAGER_EVENT_API_URL"] = managerHttpBaseUrl.TrimEnd('/') + "/api/crawler/events";
             startInfo.Environment["MANAGER_PARENT_PID"] = Environment.ProcessId.ToString();
@@ -273,7 +280,7 @@ public sealed class LocalDaemonHostedService : IHostedService
         return "http://127.0.0.1:5000";
     }
 
-    private string ResolveManagerSocketUrl(string managerHttpBaseUrl)
+    private string ResolveManagerSocketUrl(string managerHttpBaseUrl, string daemonId)
     {
         var configuredSocket = _configuration["CrawlerApi:ManagerSocketUrl"];
         if (!string.IsNullOrWhiteSpace(configuredSocket))
@@ -285,12 +292,14 @@ public sealed class LocalDaemonHostedService : IHostedService
 
         if (normalizedBaseUrl.StartsWith("https://", StringComparison.OrdinalIgnoreCase))
         {
-            return "wss://" + normalizedBaseUrl[8..].TrimEnd('/') + "/api/daemon-channel?daemonId=local-default";
+            var encodedDaemonId = WebUtility.UrlEncode(daemonId);
+            return "wss://" + normalizedBaseUrl[8..].TrimEnd('/') + $"/api/daemon-channel?daemonId={encodedDaemonId}";
         }
 
         if (normalizedBaseUrl.StartsWith("http://", StringComparison.OrdinalIgnoreCase))
         {
-            return "ws://" + normalizedBaseUrl[7..].TrimEnd('/') + "/api/daemon-channel?daemonId=local-default";
+            var encodedDaemonId = WebUtility.UrlEncode(daemonId);
+            return "ws://" + normalizedBaseUrl[7..].TrimEnd('/') + $"/api/daemon-channel?daemonId={encodedDaemonId}";
         }
 
         return "ws://127.0.0.1:5000/api/daemon-channel?daemonId=local-default";
@@ -351,6 +360,16 @@ public sealed class LocalDaemonHostedService : IHostedService
         if (_dockerStartProcess.ExitCode == 0)
         {
             _logger.LogInformation("Started docker daemon using command: {Command}", command);
+            var daemonId = ResolveLocalDaemonId();
+            var ready = await _daemonChannel.WaitForConnectionAsync(daemonId, TimeSpan.FromSeconds(20), cancellationToken);
+            if (ready)
+            {
+                await EnsureDaemonInitializedWithWorkerAsync(daemonId);
+            }
+            else
+            {
+                _logger.LogWarning("Docker daemon started but did not connect to manager websocket as {DaemonId}.", daemonId);
+            }
         }
         else
         {
@@ -400,5 +419,33 @@ public sealed class LocalDaemonHostedService : IHostedService
         {
             _logger.LogWarning(ex, "Failed to stop {Label} process cleanly.", label);
         }
+    }
+
+    private async Task EnsureDaemonInitializedWithWorkerAsync(string daemonId)
+    {
+        var shouldEnsure = _configuration.GetValue("CrawlerApi:EnsureLocalDaemonWorkerOnStartup", true);
+        if (!shouldEnsure)
+        {
+            return;
+        }
+
+        var daemonStart = await _daemonChannel.SendRequestAsync<object>(daemonId, "start-daemon", payload: null, timeout: TimeSpan.FromSeconds(12));
+        if (!daemonStart.Ok)
+        {
+            _logger.LogWarning("Failed to start daemon '{DaemonId}' during initialization: {Error}", daemonId, daemonStart.Error);
+            return;
+        }
+
+        var workerStart = await _daemonChannel.SendRequestAsync<object>(daemonId, "start-worker", new { workerId = 1 }, timeout: TimeSpan.FromSeconds(12));
+        if (!workerStart.Ok)
+        {
+            _logger.LogWarning(
+                "Daemon '{DaemonId}' initialized but worker 1 start failed during bootstrap: {Error}",
+                daemonId,
+                workerStart.Error);
+            return;
+        }
+
+        _logger.LogInformation("Local daemon '{DaemonId}' initialized with worker 1 active.", daemonId);
     }
 }

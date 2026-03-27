@@ -50,6 +50,15 @@ UI-configurable parameters should cover:
 - Crawl strategy controls (politeness, robots policy, preferential scoring)
 - Refresh/streaming cadence and dashboard filters
 
+## Daemon Start Script Generation
+
+- The Worker Global Config page provides a generated daemon start/registration script.
+- Script includes websocket registration parameters and runtime command:
+- `CRAWLER_DAEMON_ID`
+- `MANAGER_DAEMON_WS_URL`
+- `MANAGER_DAEMON_WS_TOKEN` (when configured)
+- `python pa1/crawler/src/main.py --mode websocket`
+
 ## Worker State Machine Integration
 
 The UI displays live state transitions:

@@ -76,31 +76,31 @@ Last rebuilt: 2026-03-26
 - [x] [crawler] Updated pa1/crawler/Dockerfile to default to websocket mode with documentation
 - [x] [crawler] Updated pa1/crawler/src/daemon/Dockerfile with clear comments about compatibility
 
-#### Phase 5: Module Documentation Updates (IN PROGRESS)
+#### Phase 5: Module Documentation Updates (COMPLETED)
 
 - [x] [crawler] Updated pa1/crawler/crawler.md with unified entry point, mode documentation, and architecture diagrams
 - [x] [webserver] Updated ManagerApp/webserver.md with server's frontier queue provider role and default daemon initialization
 - [x] [database] Updated db/database.md with frontier queue state machine and optimization details
 - [x] [docs] Added comprehensive sections on mode-based execution, queue interface, and worker state integration
 
-#### Phase 6: Refactor WebSocket Mode for Token Auth (PENDING)
+#### Phase 6: Refactor WebSocket Mode for Token Auth (COMPLETED)
 
-- [ ] [daemon] Implement WebSocket queue operations in server (next_url request handler)
-- [ ] [daemon] Add token authentication to reverse channel and queue request handlers
-- [ ] [daemon] Implement FrontierQueueProvider for WebSocket mode (marshals to server API)
-- [ ] [crawler] Add worker code that uses FrontierQueueProvider abstraction
+- [x] [daemon] Implement WebSocket queue operations in server (next_url request handler)
+- [x] [daemon] Add token authentication to reverse channel and queue request handlers
+- [x] [daemon] Implement FrontierQueueProvider for WebSocket mode (marshals to server API)
+- [x] [crawler] Add worker code that uses FrontierQueueProvider abstraction
 
-#### Phase 7: Server Daemon Initialization (PENDING)
+#### Phase 7: Server Daemon Initialization (COMPLETED)
 
-- [ ] [webserver] Implement automatic daemon spawn on manager startup with 1 default worker
-- [ ] [webserver] Add daemon health check and restart logic
-- [ ] [webserver] Expose daemon start/stop controls in UI
+- [x] [webserver] Implement automatic daemon spawn on manager startup with 1 default worker
+- [x] [webserver] Add daemon health check and restart logic
+- [x] [webserver] Expose daemon start/stop controls in UI
 
-#### Phase 8: Integration Testing and Validation (PENDING)
+#### Phase 8: Integration Testing and Validation (IN PROGRESS)
 
 - [ ] [scripts] Create smoke test for standalone mode (CLI utilities)
 - [ ] [scripts] Create smoke test for websocket mode (full crawl with manager)
-- [ ] [scripts] Validate both modes with the simplified frontier queue
+- [x] [scripts] Validate both modes with the simplified frontier queue (manual smoke: standalone canonicalize + websocket startup routing)
 - [ ] [scripts] Verify state reporting and worker state machine transitions
 - [ ] [docker] Test containerized deployment with docker-compose
 - [ ] Run end-to-end functional tests validating all changes

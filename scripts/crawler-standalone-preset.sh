@@ -37,7 +37,7 @@ case "$MODE" in
       --download-binary
     ;;
   api)
-    python pa1/crawler/src/daemon/main.py
+    python pa1/crawler/src/main.py --mode websocket
     ;;
   *)
     echo "Unknown mode '$MODE'. Use: frontier | crawl-once | api" >&2

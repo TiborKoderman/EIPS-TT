@@ -7,6 +7,7 @@ import os
 import threading
 import time
 from typing import Any, Callable
+from urllib.parse import parse_qsl, urlencode, urlparse, urlunparse
 
 try:
     import websocket  # type: ignore
@@ -176,4 +177,14 @@ class ReverseChannelClient:
 
 def build_reverse_channel_url_from_env() -> str | None:
     raw = os.getenv("MANAGER_DAEMON_WS_URL", "").strip()
-    return raw or None
+    if not raw:
+        return None
+
+    token = os.getenv("MANAGER_DAEMON_WS_TOKEN", "").strip()
+    if not token:
+        return raw
+
+    parsed = urlparse(raw)
+    query = dict(parse_qsl(parsed.query, keep_blank_values=True))
+    query["token"] = token
+    return urlunparse(parsed._replace(query=urlencode(query)))

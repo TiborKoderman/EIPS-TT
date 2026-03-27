@@ -2,6 +2,8 @@
 @using ManagerApp.Models
 @using ManagerApp.Services
 @inject IWorkerService WorkerService
+@inject IConfiguration Configuration
+@inject NavigationManager Navigation
 
 <div class="page-header">
     <div class="page-header-main">
@@ -187,6 +189,22 @@
                 <li>Strategy mode tunes crawler behavior for coverage, freshness, focused crawling, or balanced operation.</li>
             </ul>
         </div>
+
+        <div class="card mt-md">
+            <h2 class="card-title">Daemon Start/Registration Script</h2>
+            <p class="text-small text-muted mb-sm">
+                Use this script on a worker host to start crawler websocket mode and register with this manager.
+            </p>
+            <label>
+                <span class="text-small text-muted">Generated Script</span>
+                <textarea rows="8" readonly>@daemonStartScript</textarea>
+            </label>
+            <div class="mt-sm flex gap-sm">
+                <button class="btn" type="button" @onclick="RefreshDaemonStartScript">
+                    <span class="mdi mdi-refresh"></span> Refresh Script
+                </button>
+            </div>
+        </div>
     }
 </div>
 
@@ -194,6 +212,7 @@
     private WorkerGlobalConfigViewModel? config;
     private bool isLoading = true;
     private string? statusMessage;
+    private string daemonStartScript = string.Empty;
 
     protected override async Task OnInitializedAsync()
     {
@@ -224,6 +243,8 @@
                     .ToList();
             }
         }
+
+        RefreshDaemonStartScript();
         isLoading = false;
     }
 
@@ -375,5 +396,58 @@
 
         config.SeedUrlsText = string.Join("\n", config.SeedEntries.Where(entry => entry.Enabled).Select(entry => entry.Url));
         statusMessage = "Standalone preset applied. Save to persist.";
+    }
+
+    private void RefreshDaemonStartScript()
+    {
+        var daemonId = (Configuration["CrawlerApi:LocalDaemonId"] ?? "local-default").Trim();
+        if (string.IsNullOrWhiteSpace(daemonId))
+        {
+            daemonId = "local-default";
+        }
+
+        var token = (Configuration["CrawlerApi:DaemonChannelToken"] ?? string.Empty).Trim();
+        var managerSocketUrl = ResolveManagerSocketUrl(daemonId);
+
+        var tokenLine = string.IsNullOrWhiteSpace(token)
+            ? "# export MANAGER_DAEMON_WS_TOKEN=\"<set-if-configured-on-manager>\""
+            : $"export MANAGER_DAEMON_WS_TOKEN=\"{token}\"";
+
+        daemonStartScript = string.Join("\n", new[]
+        {
+            "#!/usr/bin/env bash",
+            "set -euo pipefail",
+            $"export CRAWLER_DAEMON_ID=\"{daemonId}\"",
+            $"export MANAGER_DAEMON_WS_URL=\"{managerSocketUrl}\"",
+            tokenLine,
+            "python pa1/crawler/src/main.py --mode websocket",
+        });
+    }
+
+    private string ResolveManagerSocketUrl(string daemonId)
+    {
+        var configuredSocket = (Configuration["CrawlerApi:ManagerSocketUrl"] ?? string.Empty).Trim();
+        if (!string.IsNullOrWhiteSpace(configuredSocket))
+        {
+            return configuredSocket;
+        }
+
+        var configuredBase = (Configuration["CrawlerApi:ManagerBaseUrl"] ?? string.Empty).Trim();
+        if (string.IsNullOrWhiteSpace(configuredBase))
+        {
+            configuredBase = Navigation.BaseUri.TrimEnd('/');
+        }
+
+        if (configuredBase.StartsWith("https://", StringComparison.OrdinalIgnoreCase))
+        {
+            return $"wss://{configuredBase[8..].TrimEnd('/')}/api/daemon-channel?daemonId={Uri.EscapeDataString(daemonId)}";
+        }
+
+        if (configuredBase.StartsWith("http://", StringComparison.OrdinalIgnoreCase))
+        {
+            return $"ws://{configuredBase[7..].TrimEnd('/')}/api/daemon-channel?daemonId={Uri.EscapeDataString(daemonId)}";
+        }
+
+        return $"ws://127.0.0.1:5160/api/daemon-channel?daemonId={Uri.EscapeDataString(daemonId)}";
     }
 }

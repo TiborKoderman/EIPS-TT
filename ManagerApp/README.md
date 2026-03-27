@@ -94,6 +94,10 @@ dotnet run --launch-profile copilot-dev
 - Main config: `appsettings.json`
 - Dev overrides: `appsettings.Development.json`
 - Connection string key: `ConnectionStrings:CrawldbConnection`
+- Daemon websocket auth key: `CrawlerApi:DaemonChannelToken`
+
+When `CrawlerApi:DaemonChannelToken` is set, daemon websocket registration must include the same token.
+Local daemon launch paths propagate it automatically via `MANAGER_DAEMON_WS_TOKEN`.
 
 Override via environment variable if needed:
 
