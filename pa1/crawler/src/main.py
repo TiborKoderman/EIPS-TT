@@ -1,10 +1,21 @@
-"""Entry point for crawler utilities."""
+"""Unified crawler entry point supporting standalone and websocket modes.
+
+Usage:
+    # Standalone mode (direct DB access):
+    python main.py --mode standalone [CLI actions]
+    export CRAWLER_MODE=standalone
+    python main.py [CLI actions]
+
+    # WebSocket mode (server-managed queue, default):
+    python main.py --mode websocket
+    python main.py  # defaults to websocket if CRAWLER_MODE not set
+"""
 
 from __future__ import annotations
 
 import argparse
+import os
 import sys
-import time
 from pathlib import Path
 
 # Ensure imports work when running this file directly from repository root.
@@ -12,306 +23,44 @@ CRAWLER_SRC = Path(__file__).resolve().parent
 if str(CRAWLER_SRC) not in sys.path:
     sys.path.insert(0, str(CRAWLER_SRC))
 
-from core.config import load_crawler_config
-from core.downloader import Downloader
-from core.frontier import FrontierRules, UrlFrontier
-from core.link_extractor import LinkExtractor
-from core.politeness import PerIpRateLimiter
-from core.preferential import PreferentialScorer
-from core.robots import RobotsPolicyManager
 
-
-def build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(description="PA1 crawler utilities")
-    parser.add_argument(
-        "--canonicalize",
-        dest="url_to_canonicalize",
-        help="Print canonical form of this URL and exit.",
-    )
-    parser.add_argument(
-        "--ingest-demo",
-        action="store_true",
-        help="Insert/demo one HTML page in crawldb.page using dedup workflow.",
-    )
-    parser.add_argument(
-        "--url",
-        default="https://example.com/index.html?utm_source=test#fragment",
-        help="URL for --ingest-demo.",
-    )
-    parser.add_argument(
-        "--html",
-        default="<html><body>hello</body></html>",
-        help="HTML payload for --ingest-demo.",
-    )
-    parser.add_argument(
-        "--site-id",
-        type=int,
-        default=None,
-        help="Optional crawldb.site.id for --ingest-demo.",
-    )
-    parser.add_argument(
-        "--check-url",
-        type=str,
-        help="Absolute URL to validate against robots and politeness rules.",
-    )
-    parser.add_argument(
-        "--fetch-url",
-        type=str,
-        help="Absolute URL to fetch with downloader.",
-    )
-    parser.add_argument(
-        "--render-js",
-        action="store_true",
-        help="When used with --fetch-url, render HTML with Selenium.",
-    )
-    parser.add_argument(
-        "--download-pdf",
-        action="store_true",
-        help="When used with --fetch-url, store PDF binary content in memory.",
-    )
-    parser.add_argument(
-        "--download-binary",
-        action="store_true",
-        help="When used with --fetch-url, download binary files into page_data payload.",
-    )
-    parser.add_argument(
-        "--store-large-binary",
-        action="store_true",
-        help="Allow storing large binary payloads in page_data.",
-    )
-    parser.add_argument(
-        "--extract-links-demo",
-        action="store_true",
-        help="Extract <a href>, onclick location links and image sources from --html and --url.",
-    )
-    parser.add_argument(
-        "--frontier-demo",
-        action="store_true",
-        help="Run an in-memory preferential frontier demo from seed URLs.",
-    )
-    parser.add_argument(
-        "--crawl-once-demo",
-        action="store_true",
-        help="Run full pipeline once: download, persist (HTML/BINARY), and extract links.",
-    )
-    parser.add_argument(
-        "--seed-url",
-        action="append",
-        default=[],
-        help="Seed URL used by --frontier-demo (repeat for multiple seeds).",
-    )
-    parser.add_argument(
-        "--run-api",
-        action="store_true",
-        help="Start crawler daemon API server.",
-    )
-    parser.add_argument(
-        "--api-host",
-        default="127.0.0.1",
-        help="Host for --run-api (default: 127.0.0.1).",
-    )
-    parser.add_argument(
-        "--api-port",
-        type=int,
-        default=8090,
-        help="Port for --run-api (default: 8090).",
-    )
-    parser.add_argument(
-        "--api-debug",
-        action="store_true",
-        help="Enable Flask debug mode when used with --run-api.",
-    )
-    return parser
-
-
-def main() -> int:
-    args = build_parser().parse_args()
-
-    if (
-        not args.run_api
-        and
-        not args.url_to_canonicalize
-        and not args.ingest_demo
-        and not args.extract_links_demo
-        and not args.frontier_demo
-        and not args.crawl_once_demo
-        and not args.check_url
-        and not args.fetch_url
-    ):
-        print("No action selected. Use --run-api, --canonicalize, --ingest-demo, --extract-links-demo, --frontier-demo, --crawl-once-demo, --check-url, or --fetch-url.")
-        return 0
-
-    if args.run_api:
-        from daemon.server import main as run_daemon_api
-
-        # Keep CLI flags backward compatible by propagating to env vars consumed by api_server.
-        import os
-
-        os.environ["CRAWLER_API_HOST"] = args.api_host
-        os.environ["CRAWLER_API_PORT"] = str(args.api_port)
-        os.environ["CRAWLER_API_DEBUG"] = "true" if args.api_debug else "false"
-        run_daemon_api()
-        return 0
-
-    if args.url_to_canonicalize:
-        from utils.url_canonicalizer import DefaultUrlCanonicalizer
-
-        canonicalizer = DefaultUrlCanonicalizer()
-        print(canonicalizer.canonicalize(args.url_to_canonicalize))
-        return 0
-
-    if args.ingest_demo:
-        from db.page_store import PostgresPageStore
-        from db.pg_connect import get_connection, load_db_config
-
-        cfg = load_db_config()
-        with get_connection(cfg) as conn:
-            store = PostgresPageStore(conn)
-            result = store.ingest_html_from_frontier(
-                raw_url=args.url,
-                html_content=args.html,
-                site_id=args.site_id,
-            )
-        print(
-            f"status={result.status} page_id={result.page_id} "
-            f"url={result.url} duplicate_of={result.duplicate_of_page_id}"
-        )
-        return 0
-
-    if args.extract_links_demo:
-        extractor = LinkExtractor()
-        extracted = extractor.extract(args.html, args.url)
-        print(f"all links: {len(extracted.links)}")
-        for link in extracted.links:
-            print(f"  - {link}")
-        print(f"js-only links: {len(extracted.js_links)}")
-        for link in extracted.js_links:
-            print(f"  - {link}")
-        print(f"img links: {len(extracted.images)}")
-        for link in extracted.images:
-            print(f"  - {link}")
-        return 0
-
-    if args.frontier_demo:
-        config = load_crawler_config()
-        scorer = PreferentialScorer(topic_keywords=list(config.topic_keywords))
-        rules = FrontierRules()
-        frontier = UrlFrontier(
-            scorer=scorer,
-            rules=rules,
-            max_in_memory=config.frontier_in_memory_limit,
-        )
-
-        seeds = args.seed_url or [args.url]
-        added = 0
-        for seed in seeds:
-            if frontier.add(seed, source_url=None, depth=0):
-                added += 1
-
-        print(f"Frontier seeded: {added}/{len(seeds)}")
-        print(f"Frontier stats: {frontier.stats()}")
-        print("Top URLs:")
-        for _ in range(10):
-            entry = frontier.pop_next()
-            if entry is None:
-                break
-            print(f"  - priority={entry.priority} depth={entry.depth} url={entry.url}")
-        return 0
-
-    if args.crawl_once_demo:
-        from core.crawl_processor import CrawlerPageProcessor
-        from db.page_store import PostgresPageStore
-        from db.pg_connect import get_connection, load_db_config
-
-        runtime_config = load_crawler_config()
-        cfg = load_db_config()
-        downloader = Downloader(
-            user_agent=runtime_config.user_agent,
-            timeout_seconds=runtime_config.download_timeout_seconds,
-            render_timeout_seconds=runtime_config.render_timeout_seconds,
-        )
-        with get_connection(cfg) as conn:
-            page_store = PostgresPageStore(conn)
-            processor = CrawlerPageProcessor(downloader=downloader, page_store=page_store)
-            processed = processor.crawl_and_store(
-                url=args.url,
-                site_id=args.site_id,
-                render_html=args.render_js,
-                download_pdf_content=args.download_pdf,
-                download_binary_content=args.download_binary,
-                store_large_binary_content=args.store_large_binary,
-                large_binary_threshold_bytes=runtime_config.large_binary_threshold_bytes,
-            )
-        print(
-            f"crawl-once status={processed.ingest.status} page_id={processed.ingest.page_id} "
-            f"type={processed.download.page_type_code} links={len(processed.extracted_assets.links)} "
-            f"js_links={len(processed.extracted_assets.js_links)} images={len(processed.extracted_assets.images)}"
-        )
-        return 0
-
-    config = load_crawler_config()
-    policy_manager = RobotsPolicyManager(
-        user_agent=config.user_agent,
-        timeout_seconds=config.robots_timeout_seconds,
-    )
-    rate_limiter = PerIpRateLimiter(min_interval_seconds=config.min_request_interval_seconds)
-
-    if args.check_url:
-        policy = policy_manager.get_policy(args.check_url)
-        allowed = policy.allows(config.user_agent, args.check_url)
-        effective_delay = max(config.min_request_interval_seconds, policy.crawl_delay_seconds or 0.0)
-
-        print(f"User-Agent: {config.user_agent}")
-        print(f"Robots URL: {policy.robots_url}")
-        print(f"Robots fetched: {policy.fetched}")
-        print(f"Allowed: {allowed}")
-        print(f"Robots crawl-delay: {policy.crawl_delay_seconds}")
-        print(f"Effective delay used: {effective_delay}")
-        print(f"Sitemaps: {policy.sitemaps}")
-
-        print("Applying rate limiter twice to demonstrate pacing...")
-        start = time.monotonic()
-        rate_limiter.wait_for_turn(args.check_url, policy.crawl_delay_seconds)
-        t1 = time.monotonic() - start
-        rate_limiter.wait_for_turn(args.check_url, policy.crawl_delay_seconds)
-        t2 = time.monotonic() - start
-        print(f"First permit at +{t1:.2f}s, second permit at +{t2:.2f}s")
-
-    if args.fetch_url:
-        policy = policy_manager.get_policy(args.fetch_url)
-        allowed = policy.allows(config.user_agent, args.fetch_url)
-        if not allowed:
-            print("Fetch blocked by robots.txt.")
-            return 2
-
-        rate_limiter.wait_for_turn(args.fetch_url, policy.crawl_delay_seconds)
-        downloader = Downloader(
-            user_agent=config.user_agent,
-            timeout_seconds=config.download_timeout_seconds,
-            render_timeout_seconds=config.render_timeout_seconds,
-        )
-        result = downloader.fetch(
-            args.fetch_url,
-            render_html=args.render_js,
-            download_pdf_content=args.download_pdf or config.download_pdf_content,
-            download_binary_content=args.download_binary or config.download_binary_content,
-            store_large_binary_content=args.store_large_binary or config.store_large_binary_content,
-            large_binary_threshold_bytes=config.large_binary_threshold_bytes,
-        )
-
-        print("Fetch completed:")
-        print(f"Requested URL: {result.requested_url}")
-        print(f"Final URL: {result.final_url}")
-        print(f"Status code: {result.status_code}")
-        print(f"Content-Type: {result.content_type}")
-        print(f"Page type: {result.page_type_code}")
-        print(f"Data type: {result.data_type_code}")
-        print(f"Content length: {result.content_length}")
-        print(f"Used renderer: {result.used_renderer}")
-        print(f"HTML chars: {len(result.html_content) if result.html_content else 0}")
-        print(f"Binary bytes: {len(result.binary_content) if result.binary_content else 0}")
-    return 0
+def run_unified() -> int:
+    """Main entry point routing to standalone or websocket mode."""
+    
+    # Read mode from CLI argument or environment variable
+    # Environment variable takes precedence for subprocess invocations
+    mode_env = os.environ.get("CRAWLER_MODE", "").strip().lower()
+    
+    # Check for --mode flag in sys.argv
+    mode_cli = None
+    if "--mode" in sys.argv:
+        mode_idx = sys.argv.index("--mode")
+        if mode_idx + 1 < len(sys.argv):
+            mode_cli = sys.argv[mode_idx + 1].lower()
+            # Remove --mode and its argument from sys.argv so downstream parsers don't see it
+            sys.argv.pop(mode_idx)
+            sys.argv.pop(mode_idx)
+    
+    # Determine effective mode
+    mode = mode_cli or mode_env or "websocket"  # Default to websocket (daemon mode)
+    
+    # Validate and dispatch
+    if mode == "standalone":
+        # Standalone CLI mode: direct DB access for utilities and one-off commands
+        from core.standalone_runner import run_cli
+        return run_cli()
+    
+    elif mode == "websocket":
+        # WebSocket mode: daemon runtime with server-managed queue
+        from daemon.server import main as run_daemon_runtime
+        return run_daemon_runtime()
+    
+    else:
+        print(f"ERROR: Unknown CRAWLER_MODE '{mode}'")
+        print(f"       Supported modes: 'standalone', 'websocket'")
+        print(f"       Set via: --mode={{standalone,websocket}} or CRAWLER_MODE={{standalone,websocket}}")
+        return 1
 
 
 if __name__ == "__main__":
-    raise SystemExit(main())
+    raise SystemExit(run_unified())

@@ -99,13 +99,72 @@ This keeps `frontier_queue` aligned with "pending/in-flight queue" semantics ins
 - Expired leases are requeued automatically.
 - Worker stop/pause/reload can release active lease and optionally requeue.
 
-## 6. UI behavior connected to this model
+## 5.5 Worker State Machine
+
+Each worker maintains a discrete state machine that represents its lifecycle:
+
+- **IDLE**: Worker initialized and ready, awaiting item from queue or previous processing to complete
+- **ACTIVE**: Worker is actively processing a URL (downloading, parsing)
+- **PAUSED**: Worker temporarily paused by operator or system condition; can resume to ACTIVE or transition to STOPPED
+- **STOPPED**: Worker terminated; can only restart by transitioning back to IDLE
+
+### State Transitions
+
+All state transitions are validated by the state machine and reported to the server for logging and UI updates.
+
+```mermaid
+stateDiagram-v2
+    [*] --> IDLE
+    
+    IDLE --> ACTIVE: claim URL<br/>from queue
+    IDLE --> PAUSED: pause-worker<br/>command
+    IDLE --> STOPPED: stop-worker<br/>command
+    
+    ACTIVE --> IDLE: URL processing<br/>complete
+    ACTIVE --> PAUSED: pause-worker<br/>command
+    ACTIVE --> STOPPED: stop-worker<br/>command
+    
+    PAUSED --> IDLE: resume or<br/>lease expired
+    PAUSED --> ACTIVE: resume<br/>with new URL
+    PAUSED --> STOPPED: stop-worker<br/>command
+    
+    STOPPED --> IDLE: restart<br/>worker
+    
+    IDLE --> [*]
+```
+
+### Transition Details
+
+| From | To | Trigger | Reason |
+|------|-----|---------|--------|
+| IDLE | ACTIVE | Worker claims next frontier item | Auto-transition when URL available |
+| IDLE | PAUSED | `pause-worker` command | Operator pause request |
+| IDLE | STOPPED | `stop-worker` command | Operator stop request |
+| ACTIVE | IDLE | URL processing complete | Heartbeat/report after crawl done |
+| ACTIVE | PAUSED | `pause-worker` command | Operator pause mid-processing |
+| ACTIVE | STOPPED | `stop-worker` command | Operator stop mid-processing |
+| PAUSED | IDLE | Lease expiration or operator resume | Auto-transition or resume command |
+| PAUSED | ACTIVE | Resume with new URL | Operator resumes processing |
+| PAUSED | STOPPED | `stop-worker` command | Operator stop from pause |
+| STOPPED | IDLE | `start-worker` command | Operator restart |
+
+### State Reporting
+
+Every state transition is:
+1. **Recorded** in `WorkerStateMachine._transitions` (audit trail)
+2. **Timestamped** in ISO 8601 format
+3. **Reported** to callbacks registered via `register_state_change_callback()`
+4. **Transmitted** to server via reverse channel (WebSocket or HTTP)
+
+This ensures full observability into worker lifecycle changes.
+
+## 7. UI behavior connected to this model
 
 - Worker start/stop actions now map cleanly to execution state.
 - Collected pages list now live-refreshes periodically.
 - Event views now show parsed/structured messages instead of raw JSON blobs.
 
-## 7. Practical validation checklist
+## 8. Practical validation checklist
 
 1. Start daemon.
 2. Spawn 2+ workers in `thread` mode.

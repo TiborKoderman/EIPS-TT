@@ -37,10 +37,7 @@ case "$MODE" in
       --download-binary
     ;;
   api)
-    python pa1/crawler/src/main.py \
-      --run-api \
-      --api-host 127.0.0.1 \
-      --api-port 8090
+    python pa1/crawler/src/daemon/main.py
     ;;
   *)
     echo "Unknown mode '$MODE'. Use: frontier | crawl-once | api" >&2
