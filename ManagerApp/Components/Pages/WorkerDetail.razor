@@ -1,6 +1,7 @@
 @page "/workers/{WorkerId:int}"
 @page "/workers/{WorkerId:int}/{Section}"
 @implements IAsyncDisposable
+@using System.Text.Json
 @using ManagerApp.Models
 @using ManagerApp.Services
 @inject IWorkerService WorkerService
@@ -30,6 +31,13 @@
     }
     else
     {
+        @if (!string.IsNullOrWhiteSpace(actionStatus))
+        {
+            <div class="card mb-lg">
+                <p class="text-small text-muted">@actionStatus</p>
+            </div>
+        }
+
         <div class="grid grid-cols-4 mb-lg">
             <StatCard Label="Worker" Value="@workerDetail.Worker.Name" Footnote="@workerDetail.Worker.Status" />
             <StatCard Label="Pages" Value="@workerDetail.Worker.PagesProcessed.ToString()" Footnote="Processed" />
@@ -67,13 +75,13 @@
                     <div>@(workerDetail.Worker.StartedAt?.ToString("yyyy-MM-dd HH:mm:ss UTC") ?? "N/A")</div>
 
                     <div class="mt-md flex gap-sm">
-                        <button class="btn btn-primary" @onclick="StartWorker">
+                        <button class="btn btn-primary" @onclick="StartWorker" disabled="@workerActionInProgress">
                             <span class="mdi mdi-play"></span> Start
                         </button>
-                        <button class="btn" @onclick="PauseWorker">
+                        <button class="btn" @onclick="PauseWorker" disabled="@workerActionInProgress">
                             <span class="mdi mdi-pause"></span> Pause
                         </button>
-                        <button class="btn" @onclick="StopWorker">
+                        <button class="btn" @onclick="StopWorker" disabled="@workerActionInProgress">
                             <span class="mdi mdi-stop"></span> Stop
                         </button>
                     </div>
@@ -102,7 +110,10 @@
         @if (IsTabActive("logs"))
         {
             <div class="card">
-                <h2 class="card-title">Recent Logs</h2>
+                <div class="card-header-inline mb-sm">
+                    <h2 class="card-title mb-0">Recent Logs</h2>
+                    <span class="text-small text-muted">@(logsUsingFallback ? "source: live event fallback" : "source: persisted worker_log")</span>
+                </div>
                 <div class="workers-observability-toolbar mb-sm">
                     <select @bind="LogSeverityFilter">
                         <option value="all">All severities</option>
@@ -187,8 +198,11 @@
     private List<WorkerLogEntryViewModel> persistedLogs = new();
     private List<WorkerThroughputPointViewModel> throughputSeries = new();
     private bool isLoading = true;
+    private bool workerActionInProgress;
+    private bool logsUsingFallback;
     private PeriodicTimer? _refreshTimer;
     private CancellationTokenSource? _refreshCts;
+    private string? actionStatus;
     private string LogSeverityFilter { get; set; } = "all";
     private string LogSearch { get; set; } = "";
     private static readonly (string Key, string Label, string Icon)[] Tabs =
@@ -230,6 +244,14 @@
     {
         workerDetail = await WorkerService.GetWorkerDetailAsync(WorkerId);
         persistedLogs = await WorkerService.GetPersistedWorkerLogsAsync(WorkerId, limit: 120, severity: LogSeverityFilter, search: LogSearch);
+        logsUsingFallback = false;
+        if (persistedLogs.Count == 0)
+        {
+            var events = await WorkerService.GetRecentCrawlerEventsAsync(800);
+            persistedLogs = BuildLogsFromCrawlerEvents(events, WorkerId, 120, LogSeverityFilter, LogSearch);
+            logsUsingFallback = persistedLogs.Count > 0;
+        }
+
         throughputSeries = await WorkerService.GetThroughputSeriesAsync(WorkerId, windowMinutes: 60, bucketSeconds: 30);
     }
 
@@ -242,20 +264,110 @@
 
     private async Task StartWorker()
     {
-        await WorkerService.StartWorkerAsync(WorkerId);
-        await RefreshDataAsync();
+        await ExecuteWorkerAction("start", () => WorkerService.StartWorkerAsync(WorkerId));
     }
 
     private async Task PauseWorker()
     {
-        await WorkerService.PauseWorkerAsync(WorkerId);
-        await RefreshDataAsync();
+        await ExecuteWorkerAction("pause", () => WorkerService.PauseWorkerAsync(WorkerId));
     }
 
     private async Task StopWorker()
     {
-        await WorkerService.StopWorkerAsync(WorkerId);
-        await RefreshDataAsync();
+        await ExecuteWorkerAction("stop", () => WorkerService.StopWorkerAsync(WorkerId));
+    }
+
+    private async Task ExecuteWorkerAction(string actionName, Func<Task<bool>> action)
+    {
+        if (workerActionInProgress)
+        {
+            return;
+        }
+
+        workerActionInProgress = true;
+        actionStatus = $"Worker {WorkerId}: {actionName}...";
+        StateHasChanged();
+
+        try
+        {
+            var ok = await action();
+            actionStatus = ok
+                ? $"Worker {WorkerId} {actionName} requested successfully."
+                : $"Worker {WorkerId} {actionName} failed. {WorkerService.LastError}";
+            await RefreshDataAsync();
+        }
+        finally
+        {
+            workerActionInProgress = false;
+        }
+    }
+
+    private static List<WorkerLogEntryViewModel> BuildLogsFromCrawlerEvents(
+        IReadOnlyList<CrawlerEventViewModel> events,
+        int workerId,
+        int limit,
+        string? severity,
+        string? search)
+    {
+        var normalizedSeverity = string.IsNullOrWhiteSpace(severity) || string.Equals(severity, "all", StringComparison.OrdinalIgnoreCase)
+            ? null
+            : severity.Trim();
+        var normalizedSearch = string.IsNullOrWhiteSpace(search) ? null : search.Trim();
+
+        return events
+            .Where(evt => evt.WorkerId == workerId)
+            .Select(evt =>
+            {
+                var level = string.Equals(evt.Type, "error", StringComparison.OrdinalIgnoreCase) ? "Error" : "Info";
+                var message = $"[{evt.Type}]";
+
+                if (!string.IsNullOrWhiteSpace(evt.PayloadJson))
+                {
+                    try
+                    {
+                        using var json = JsonDocument.Parse(evt.PayloadJson);
+                        var root = json.RootElement;
+                        if (root.ValueKind == JsonValueKind.Object)
+                        {
+                            if (root.TryGetProperty("level", out var levelNode) && levelNode.ValueKind == JsonValueKind.String)
+                            {
+                                level = levelNode.GetString() ?? level;
+                            }
+
+                            if (root.TryGetProperty("message", out var messageNode) && messageNode.ValueKind == JsonValueKind.String)
+                            {
+                                message = messageNode.GetString() ?? message;
+                            }
+                            else
+                            {
+                                message = root.GetRawText();
+                            }
+                        }
+                        else
+                        {
+                            message = root.GetRawText();
+                        }
+                    }
+                    catch
+                    {
+                        message = evt.PayloadJson;
+                    }
+                }
+
+                return new WorkerLogEntryViewModel
+                {
+                    TimestampUtc = evt.TimestampUtc,
+                    Level = level,
+                    Message = message,
+                    DaemonId = evt.DaemonId,
+                    WorkerId = evt.WorkerId,
+                };
+            })
+            .Where(log => normalizedSeverity is null || string.Equals(log.Level, normalizedSeverity, StringComparison.OrdinalIgnoreCase))
+            .Where(log => normalizedSearch is null || log.Message.Contains(normalizedSearch, StringComparison.OrdinalIgnoreCase))
+            .OrderByDescending(log => log.TimestampUtc)
+            .Take(Math.Clamp(limit, 1, 400))
+            .ToList();
     }
 
     private static string GetStatusBadgeClass(string status)

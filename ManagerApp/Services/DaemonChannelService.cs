@@ -193,7 +193,8 @@ public sealed class DaemonChannelService
                 connection.SendLock.Release();
             }
 
-            using var timeoutCts = new CancellationTokenSource(timeout ?? TimeSpan.FromSeconds(8));
+            var defaultTimeoutSeconds = Math.Clamp(_configuration.GetValue("CrawlerApi:DaemonRequestTimeoutSeconds", 20), 3, 120);
+            using var timeoutCts = new CancellationTokenSource(timeout ?? TimeSpan.FromSeconds(defaultTimeoutSeconds));
             var response = await completion.Task.WaitAsync(timeoutCts.Token);
             if (!response.Ok)
             {

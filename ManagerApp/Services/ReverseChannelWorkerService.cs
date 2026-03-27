@@ -676,17 +676,62 @@ public sealed class ReverseChannelWorkerService : IWorkerService
             _ => null,
         };
 
+        if (string.Equals(commandType, "start-worker", StringComparison.OrdinalIgnoreCase)
+            || string.Equals(commandType, "stop-worker", StringComparison.OrdinalIgnoreCase)
+            || string.Equals(commandType, "pause-worker", StringComparison.OrdinalIgnoreCase)
+            || string.Equals(commandType, "reload-daemon", StringComparison.OrdinalIgnoreCase)
+            || string.Equals(commandType, "stop-daemon", StringComparison.OrdinalIgnoreCase))
+        {
+            if (!await EnsureDaemonConnectedAsync())
+            {
+                return false;
+            }
+        }
+
         if (!string.IsNullOrWhiteSpace(action))
         {
-            var response = await RequestAsync<object>(action, payload, ensureConnected: false);
-            if (response is not null)
+            var daemonId = GetDaemonId();
+            var direct = await _daemonChannel.SendRequestAsync<JsonElement>(daemonId, action, payload);
+            if (direct.Ok)
             {
                 LastError = null;
                 return true;
             }
+
+            if (IsTransientRequestFailure(direct.Error))
+            {
+                await Task.Delay(300);
+                if (await EnsureDaemonConnectedAsync())
+                {
+                    var retry = await _daemonChannel.SendRequestAsync<JsonElement>(daemonId, action, payload);
+                    if (retry.Ok)
+                    {
+                        LastError = null;
+                        return true;
+                    }
+
+                    LastError = retry.Error;
+                    return false;
+                }
+            }
+
+            LastError = direct.Error;
+            return false;
         }
 
         return await EnqueueCommandAsync(commandType, workerId);
+    }
+
+    private static bool IsTransientRequestFailure(string? error)
+    {
+        if (string.IsNullOrWhiteSpace(error))
+        {
+            return false;
+        }
+
+        return error.Contains("Timed out", StringComparison.OrdinalIgnoreCase)
+            || error.Contains("not connected", StringComparison.OrdinalIgnoreCase)
+            || error.Contains("disconnected", StringComparison.OrdinalIgnoreCase);
     }
 
     private async Task PersistSeedUrlsAsync(int externalWorkerId, IReadOnlyList<string> seedUrls)

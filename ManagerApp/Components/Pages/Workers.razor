@@ -834,33 +834,58 @@
         }
 
         var selectedDaemon = Daemons.FirstOrDefault(group => group.Id == SpawnGroupId);
-        var activeInSelectedDaemon = selectedDaemon != null
-            && workerItems.Any(worker =>
+        var activeWorkerInSelectedDaemon = selectedDaemon is null
+            ? null
+            : workerItems.FirstOrDefault(worker =>
                 selectedDaemon.WorkerIds.Contains(worker.Id)
                 && string.Equals(worker.Status, "Active", StringComparison.OrdinalIgnoreCase));
 
-        if (!activeInSelectedDaemon)
+        if (activeWorkerInSelectedDaemon is not null)
         {
-            var spawned = await WorkerService.SpawnWorkerAsync(
+            var seeded = 0;
+            foreach (var seed in seeds)
+            {
+                if (await WorkerService.AddSeedAsync(seed, activeWorkerInSelectedDaemon.Id))
+                {
+                    seeded++;
+                }
+            }
+
+            await RefreshAsync();
+            actionStatus = seeded > 0
+                ? $"Quick Start complete: added {seeded} seed URL(s) to active worker {activeWorkerInSelectedDaemon.Id}."
+                : $"Quick Start could not add seeds to active worker {activeWorkerInSelectedDaemon.Id}. {WorkerService.LastError}";
+            return;
+        }
+
+        WorkerViewModel? spawnedWorker = null;
+        if (activeWorkerInSelectedDaemon is null)
+        {
+            spawnedWorker = await WorkerService.SpawnWorkerAsync(
                 name: $"Crawler-{DateTime.Now:HHmmss}",
                 daemonGroupId: SpawnGroupId,
                 mode: "thread",
                 seedUrls: seeds);
 
-            if (spawned == null)
+            if (spawnedWorker == null)
             {
                 actionStatus = $"Quick Start failed to spawn worker. {WorkerService.LastError}";
                 return;
             }
-        }
 
-        if (selectedDaemon != null)
-        {
-            await StartAllInDaemon(selectedDaemon);
+            var started = await WorkerService.StartWorkerAsync(spawnedWorker.Id);
+            if (!started)
+            {
+                actionStatus = $"Quick Start spawned worker {spawnedWorker.Id} but failed to start it. {WorkerService.LastError}";
+                await RefreshAsync();
+                return;
+            }
         }
 
         await RefreshAsync();
-        actionStatus = "Quick Start complete: daemon running, seeds queued, workers active.";
+        actionStatus = spawnedWorker is not null
+            ? $"Quick Start complete: worker {spawnedWorker.Id} started with configured seeds."
+            : "Quick Start complete: daemon running and workers active.";
     }
 
     private async Task StartDaemonFromDiagnostics()

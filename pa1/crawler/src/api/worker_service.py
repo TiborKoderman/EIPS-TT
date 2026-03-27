@@ -83,7 +83,7 @@ class DaemonWorkerService(WorkerControlService):
     """Daemon worker manager with API-driven orchestration and telemetry."""
 
     def __init__(self) -> None:
-        self._lock = threading.Lock()
+        self._lock = threading.RLock()
         self._daemon_running = False
         self._daemon_started_at: str | None = None
         self._daemon_mode = "single-instance"
@@ -1106,21 +1106,23 @@ class DaemonWorkerService(WorkerControlService):
 
         worker = self._workers[worker_id]
         stop_event = threading.Event()
-        if seed_url:
-            queued_seed = self._enqueue_frontier_url(
-                seed_url,
-                source_url=None,
-                depth=0,
-                explicit_priority=100,
-            )
-            if not queued_seed:
-                self._append_log(
-                    worker_id,
-                    "Warning",
-                    "Initial seed was not queued; verify queue mode and server relay availability.",
-                )
 
         def run() -> None:
+            if seed_url:
+                with self._lock:
+                    queued_seed = self._enqueue_frontier_url(
+                        seed_url,
+                        source_url=None,
+                        depth=0,
+                        explicit_priority=100,
+                    )
+                    if not queued_seed:
+                        self._append_log(
+                            worker_id,
+                            "Warning",
+                            "Initial seed was not queued; verify queue mode and server relay availability.",
+                        )
+
             while not stop_event.is_set():
                 time.sleep(1.2)
 

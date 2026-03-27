@@ -139,7 +139,14 @@ class ReverseChannelClient:
 
         raw_request_payload = payload.get("payload")
         request_payload = raw_request_payload if isinstance(raw_request_payload, dict) else {}
-        ok, data, error = self._request_handler(action, request_payload)
+        try:
+            ok, data, error = self._request_handler(action, request_payload)
+        except Exception as exc:  # pragma: no cover
+            ok = False
+            data = None
+            error = f"Unhandled reverse request error for '{action}': {exc}"
+            self._logger(error)
+
         self._send(
             ws,
             {
