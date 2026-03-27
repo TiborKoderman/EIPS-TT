@@ -15,6 +15,7 @@ public sealed class ReverseChannelWorkerService : IWorkerService
     private readonly DaemonChannelService _daemonChannel;
     private readonly CrawlerRelayService _crawlerRelay;
     private static readonly SemaphoreSlim _daemonStartGate = new(1, 1);
+    private static DateTime _lastLocalDaemonLaunchAttemptUtc = DateTime.MinValue;
     private static readonly JsonSerializerOptions JsonOptions = new()
     {
         PropertyNameCaseInsensitive = true,
@@ -747,6 +748,21 @@ public sealed class ReverseChannelWorkerService : IWorkerService
                 return true;
             }
 
+            // Prevent repeated button clicks/refreshes from spawning many local daemon processes.
+            if (DateTime.UtcNow - _lastLocalDaemonLaunchAttemptUtc < TimeSpan.FromSeconds(10))
+            {
+                if (await _daemonChannel.WaitForConnectionAsync(daemonId, TimeSpan.FromSeconds(2), CancellationToken.None))
+                {
+                    LastError = null;
+                    return true;
+                }
+
+                LastError = $"Daemon '{daemonId}' is still starting. Please retry in a few seconds.";
+                return false;
+            }
+
+            _lastLocalDaemonLaunchAttemptUtc = DateTime.UtcNow;
+
             var managerDir = Directory.GetCurrentDirectory();
             var repoRoot = Path.GetFullPath(Path.Combine(managerDir, ".."));
             var daemonArgs = _configuration["CrawlerApi:LocalDaemonArgs"] ?? "pa1/crawler/src/daemon/main.py";
@@ -780,6 +796,14 @@ public sealed class ReverseChannelWorkerService : IWorkerService
                         LastError = null;
                         return true;
                     }
+
+                    LastError = $"Daemon '{daemonId}' launched but did not connect to manager websocket in time.";
+                    _logger.LogWarning(
+                        "Daemon launch did not connect in time. daemonId={DaemonId} wsUrl={WsUrl} executable={PythonExe}",
+                        daemonId,
+                        wsUrl,
+                        pythonExe);
+                    return false;
                 }
                 catch (Exception ex)
                 {
@@ -983,7 +1007,26 @@ public sealed class ReverseChannelWorkerService : IWorkerService
             return configuredHttp.TrimEnd('/');
         }
 
+        var configuredSocket = _configuration["CrawlerApi:ManagerSocketUrl"];
+        if (!string.IsNullOrWhiteSpace(configuredSocket))
+        {
+            if (configuredSocket.StartsWith("ws://", StringComparison.OrdinalIgnoreCase))
+            {
+                return "http://" + configuredSocket[5..].TrimEnd('/').Replace("/api/daemon-channel", string.Empty);
+            }
+
+            if (configuredSocket.StartsWith("wss://", StringComparison.OrdinalIgnoreCase))
+            {
+                return "https://" + configuredSocket[6..].TrimEnd('/').Replace("/api/daemon-channel", string.Empty);
+            }
+        }
+
         var urls = Environment.GetEnvironmentVariable("ASPNETCORE_URLS");
+        if (string.IsNullOrWhiteSpace(urls))
+        {
+            // `dotnet run --urls ...` may be available only through configuration.
+            urls = _configuration["urls"];
+        }
         if (!string.IsNullOrWhiteSpace(urls))
         {
             var candidates = urls.Split(';', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
@@ -1000,7 +1043,7 @@ public sealed class ReverseChannelWorkerService : IWorkerService
             }
         }
 
-        return "http://127.0.0.1:5160";
+        return "http://127.0.0.1:5000";
     }
 
     private string ResolveManagerSocketUrl(string managerHttpBaseUrl, string daemonId)

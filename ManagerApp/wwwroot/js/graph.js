@@ -24,8 +24,45 @@ function stableHash(text) {
   return (hash >>> 0) / 4294967295;
 }
 
-function classifyNode(url) {
-  const normalized = (url || "").toLowerCase();
+function extractTopic(url, domain) {
+  const normalized = `${url || ""} ${domain || ""}`.toLowerCase();
+  const topicSignals = {
+    medicine: ["med", "health", "clinic", "hospital", "doctor", "disease", "who", "ema", "nijz"],
+    government: ["gov", "uprava", "policy", "public", "parliament", "ministr"],
+    media: ["news", "blog", "press", "article", "media"],
+    education: ["edu", "school", "university", "faculty", "campus"],
+    science: ["research", "science", "lab", "institute", "academy"],
+    travel: ["tour", "travel", "visit", "hotel", "museum", "heritage"],
+  };
+
+  for (const [topic, signals] of Object.entries(topicSignals)) {
+    if (signals.some((token) => normalized.includes(token))) {
+      return topic;
+    }
+  }
+
+  const host = (domain || "").toLowerCase().replace(/^www\./, "");
+  const parts = host
+    .split(".")
+    .map((part) => part.trim())
+    .filter((part) => part.length >= 3 && !["com", "org", "net", "eu", "si", "gov"].includes(part));
+  if (parts.length > 0) {
+    return parts[0];
+  }
+
+  const pathSegment = (url || "")
+    .toLowerCase()
+    .replace(/^https?:\/\//, "")
+    .split("/")
+    .slice(1)
+    .map((part) => part.trim())
+    .find((part) => part.length >= 4);
+
+  return pathSegment || "generic";
+}
+
+function classifyNode(url, domain) {
+  const normalized = `${url || ""} ${domain || ""}`.toLowerCase();
   const medicineSignals = ["med", "health", "clinic", "hospital", "doctor", "disease", "who", "ema", "nijz"];
   const govSignals = ["gov", "uprava", "policy", "public"];
   const mediaSignals = ["news", "blog", "press", "article"];
@@ -35,38 +72,50 @@ function classifyNode(url) {
   const mediaScore = mediaSignals.reduce((acc, token) => acc + (normalized.includes(token) ? 1 : 0), 0);
 
   if (medicineScore >= 2) {
-    return { category: "medicine", score: clamp(0.55 + medicineScore * 0.1, 0.55, 1) };
+    return { topic: extractTopic(url, domain), score: clamp(0.55 + medicineScore * 0.1, 0.55, 1) };
   }
 
   if (govScore >= 1) {
-    return { category: "government", score: clamp(0.45 + govScore * 0.12, 0.45, 0.9) };
+    return { topic: extractTopic(url, domain), score: clamp(0.45 + govScore * 0.12, 0.45, 0.9) };
   }
 
   if (mediaScore >= 1) {
-    return { category: "media", score: clamp(0.35 + mediaScore * 0.1, 0.35, 0.8) };
+    return { topic: extractTopic(url, domain), score: clamp(0.35 + mediaScore * 0.1, 0.35, 0.8) };
   }
 
-  return { category: "generic", score: 0.3 };
+  return { topic: extractTopic(url, domain), score: 0.3 };
 }
 
-function hueForCategory(category) {
-  switch (category) {
-    case "medicine":
-      return 145;
-    case "government":
-      return 210;
-    case "media":
-      return 35;
-    default:
-      return 265;
-  }
+function hueForTopic(topic) {
+  return Math.round(stableHash(topic || "generic") * 360);
 }
 
 function makeNodeColor(node) {
-  const hue = hueForCategory(node._category || "generic");
+  if (node._isQueue) {
+    return "hsl(210 7% 70%)";
+  }
+
+  const hue = hueForTopic(node._topic || "generic");
   const saturation = clamp(Math.round(24 + (node._score || 0) * 64), 24, 88);
   const lightness = clamp(Math.round(62 - (node._score || 0) * 20), 36, 62);
   return `hsl(${hue} ${saturation}% ${lightness}%)`;
+}
+
+function classifyIfQueued(node) {
+  if (!node || !node._isQueue) {
+    return;
+  }
+
+  const classification = classifyNode(node.url, node.domain);
+  node._topic = classification.topic;
+  node._score = classification.score;
+  node._isQueue = false;
+  node._classified = true;
+}
+
+function linkGradientId(graph, key) {
+  const normalized = String(key || "link").replace(/[^a-zA-Z0-9_-]/g, "_");
+  return `grad-${graph.hostId}-${normalized}`;
 }
 
 function edgeKey(sourceId, targetId) {
@@ -93,7 +142,7 @@ function renderLegend(host, queueMode) {
   legend.className = "graph-status-legend";
   legend.innerHTML = [
     `<span><i class="dot dot-seed"></i> seed</span>`,
-    `<span><i class="dot dot-candidate"></i> candidate</span>`,
+    `<span><i class="dot dot-candidate"></i> queue</span>`,
     `<span><i class="dot dot-worker"></i> worker</span>`,
     `<span><i class="dot dot-scanned"></i> scanned/classified</span>`,
     `<span class="muted">queue mode: ${sanitize(queueMode || "server")}</span>`
@@ -148,6 +197,8 @@ function initializeGraph(hostId, host, queueMode) {
     .attr("height", height)
     .attr("class", "graph-svg");
 
+  const defs = svg.append("defs");
+
   const canvas = svg.append("g");
   const clusterLayer = canvas.append("g").attr("class", "graph-clusters");
   const linkLayer = canvas.append("g").attr("class", "graph-links-base");
@@ -177,6 +228,7 @@ function initializeGraph(hostId, host, queueMode) {
     width,
     height,
     svg,
+    defs,
     canvas,
     clusterLayer,
     linkLayer,
@@ -199,6 +251,7 @@ function initializeGraph(hostId, host, queueMode) {
     seedSelection: null,
     workerSelection: null,
     clusterSelection: null,
+    gradientSelection: null,
   };
 
   state.set(hostId, graph);
@@ -224,6 +277,14 @@ function ensureSimulation(graph) {
         .attr("y1", (d) => d.source.y)
         .attr("x2", (d) => d.target.x)
         .attr("y2", (d) => d.target.y);
+    }
+
+    if (graph.gradientSelection) {
+      graph.gradientSelection
+        .attr("x1", (d) => d.source.x || 0)
+        .attr("y1", (d) => d.source.y || 0)
+        .attr("x2", (d) => d.target.x || 0)
+        .attr("y2", (d) => d.target.y || 0);
     }
 
     if (graph.nodeSelection) {
@@ -319,15 +380,19 @@ function mergeGraphData(graph, incomingNodes, incomingLinks) {
     const id = raw.id;
     seenIds.add(id);
     const existing = graph.nodeById.get(id);
-    const classified = classifyNode(raw.url);
+    const classification = classifyNode(raw.url, raw.domain);
+    const inferredQueue = String(raw.pageType || "").toUpperCase() === "FRONTIER";
 
     if (existing) {
       existing.url = raw.url;
       existing.domain = raw.domain;
       existing.pageType = raw.pageType;
       existing.size = raw.size;
-      existing._category = classified.category;
-      existing._score = classified.score;
+      existing._topic = classification.topic;
+      existing._score = existing._isQueue ? existing._score : classification.score;
+      if (!existing._classified) {
+        existing._isQueue = inferredQueue;
+      }
       continue;
     }
 
@@ -337,10 +402,12 @@ function mergeGraphData(graph, incomingNodes, incomingLinks) {
       y: spawnCenter.y + (Math.random() - 0.5) * 36,
       vx: 0,
       vy: 0,
-      _category: classified.category,
-      _score: classified.score,
-      _visited: true,
+      _topic: classification.topic,
+      _score: classification.score,
+      _visited: false,
       _seed: false,
+      _isQueue: inferredQueue,
+      _classified: !inferredQueue,
     };
 
     graph.nodes.push(spawned);
@@ -401,10 +468,15 @@ function mergeGraphData(graph, incomingNodes, incomingLinks) {
 
 function ensureWorkers(graph, seedNodes) {
   const desired = clamp(Math.floor(seedNodes.length / 2) || 2, 2, 5);
+  const queueNodes = graph.nodes.filter((node) => node._isQueue);
+  const pickStart = (index) => {
+    const source = queueNodes.length > 0 ? queueNodes : graph.nodes;
+    return source[index % Math.max(source.length, 1)] || null;
+  };
 
   if (graph.workers.length === 0) {
     graph.workers = Array.from({ length: desired }).map((_, index) => {
-      const seed = seedNodes[index % Math.max(seedNodes.length, 1)] || graph.nodes[index % Math.max(graph.nodes.length, 1)];
+      const seed = pickStart(index);
       return {
         id: index + 1,
         currentNodeId: seed ? seed.id : null,
@@ -416,7 +488,7 @@ function ensureWorkers(graph, seedNodes) {
   if (graph.workers.length < desired) {
     const start = graph.workers.length;
     for (let i = start; i < desired; i += 1) {
-      const seed = seedNodes[i % Math.max(seedNodes.length, 1)] || graph.nodes[i % Math.max(graph.nodes.length, 1)];
+      const seed = pickStart(i);
       graph.workers.push({
         id: i + 1,
         currentNodeId: seed ? seed.id : null,
@@ -454,28 +526,36 @@ function stepWorkers(graph) {
   for (const worker of graph.workers) {
     const currentId = worker.currentNodeId;
     if (!currentId || !adjacency.has(currentId)) {
-      const fallback = graph.nodes[Math.floor(Math.random() * graph.nodes.length)];
+      const queuePool = graph.nodes.filter((node) => node._isQueue);
+      const sourcePool = queuePool.length > 0 ? queuePool : graph.nodes;
+      const fallback = sourcePool[Math.floor(Math.random() * sourcePool.length)];
       worker.currentNodeId = fallback ? fallback.id : null;
       continue;
     }
+
+    classifyIfQueued(graph.nodeById.get(currentId));
 
     const neighbors = adjacency.get(currentId);
     if (!neighbors.length) {
       continue;
     }
 
-    const sorted = [...neighbors].sort((a, b) => {
+    const queueFirst = neighbors.filter((id) => graph.nodeById.get(id)?._isQueue);
+    const sourcePool = queueFirst.length > 0 ? queueFirst : neighbors;
+    const sorted = [...sourcePool].sort((a, b) => {
       const scoreA = graph.nodeById.get(a)?._score ?? 0;
       const scoreB = graph.nodeById.get(b)?._score ?? 0;
       return scoreB - scoreA;
     });
 
-    const pick = sorted[Math.floor(stableHash(`worker-${worker.id}-${Date.now()}`) * Math.min(3, sorted.length))];
+    const pick = sorted[Math.floor(stableHash(`worker-${worker.id}-${Date.now()}`) * Math.min(4, sorted.length))];
     worker.currentNodeId = pick;
+    classifyIfQueued(graph.nodeById.get(pick));
   }
 
   if (graph.nodeSelection) {
     graph.nodeSelection
+      .attr("fill", (d) => makeNodeColor(d))
       .attr("stroke", (d) => {
         if (graph.workers.some((worker) => worker.currentNodeId === d.id)) {
           return "#123a63";
@@ -488,6 +568,10 @@ function stepWorkers(graph) {
         }
         return d._seed ? 2.2 : 1.2;
       });
+  }
+
+  if (graph.linkSelection) {
+    applyLinkStyles(graph);
   }
 
   updateWorkerVisuals(graph);
@@ -595,37 +679,42 @@ function applyZoomDetail(graph, scale) {
     return;
   }
 
-  const showClusters = scale < 0.55;
-
-  if (showClusters) {
-    updateClusterIslands(graph);
-    graph.clusterLayer.style("display", null);
-    graph.linkLayer.style("display", "none");
-    graph.nodeLayer.style("display", "none");
-    graph.seedLayer.style("display", "none");
-    graph.workerLayer.style("display", "none");
-    return;
-  }
-
   graph.clusterLayer.style("display", "none");
   graph.linkLayer.style("display", null);
   graph.nodeLayer.style("display", null);
   graph.seedLayer.style("display", null);
   graph.workerLayer.style("display", null);
 
-  const detailRatio = clamp((scale - 0.55) / 1.4, 0.08, 1);
-  graph.linkSelection
-    .attr("display", (d) => {
-      if (scale >= 2.1) {
-        return null;
-      }
-      return stableHash(d._key) <= detailRatio ? null : "none";
-    })
-    .attr("stroke-opacity", clamp(0.12 + detailRatio * 0.35, 0.12, 0.55));
+  graph.linkSelection.attr("display", null);
 
   graph.nodeSelection
     .attr("opacity", 1)
     .attr("r", (d) => seedRadius(d));
+}
+
+function applyLinkStyles(graph) {
+  if (!graph.linkSelection) {
+    return;
+  }
+
+  if (graph.gradientSelection) {
+    graph.gradientSelection.each(function(d) {
+      const gradient = d3.select(this);
+      gradient.select("stop[offset='0%']").attr("stop-color", makeNodeColor(d.source));
+      gradient.select("stop[offset='100%']").attr("stop-color", makeNodeColor(d.target));
+    });
+  }
+
+  graph.linkSelection
+    .attr("stroke", (d) => {
+      const targetQueue = d.target?._isQueue;
+      if (targetQueue) {
+        return "hsl(210 7% 66%)";
+      }
+      return `url(#${d._gradientId})`;
+    })
+    .attr("stroke-width", (d) => (d.target?._isQueue ? 0.65 : 1.15))
+    .attr("stroke-opacity", (d) => (d.target?._isQueue ? 0.75 : 0.52));
 }
 
 function updateSelections(graph, seedNodes) {
@@ -636,15 +725,39 @@ function updateSelections(graph, seedNodes) {
       source: graph.nodeById.get(sourceId),
       target: graph.nodeById.get(targetId),
       _key: edgeKey(sourceId, targetId),
+      _gradientId: linkGradientId(graph, edgeKey(sourceId, targetId)),
     };
   }).filter((item) => item.source && item.target);
+
+  graph.gradientSelection = graph.defs
+    .selectAll("linearGradient")
+    .data(linkData, (d) => d._key)
+    .join((enter) => {
+      const gradient = enter
+        .append("linearGradient")
+        .attr("gradientUnits", "userSpaceOnUse");
+      gradient.append("stop").attr("offset", "0%");
+      gradient.append("stop").attr("offset", "100%");
+      return gradient;
+    })
+    .attr("id", (d) => d._gradientId)
+    .attr("x1", (d) => d.source.x || 0)
+    .attr("y1", (d) => d.source.y || 0)
+    .attr("x2", (d) => d.target.x || 0)
+    .attr("y2", (d) => d.target.y || 0);
+
+  graph.gradientSelection.each(function(d) {
+    const gradient = d3.select(this);
+    gradient.select("stop[offset='0%']").attr("stop-color", makeNodeColor(d.source));
+    gradient.select("stop[offset='100%']").attr("stop-color", makeNodeColor(d.target));
+  });
 
   graph.linkSelection = graph.linkLayer
     .selectAll("line")
     .data(linkData, (d) => d._key)
-    .join("line")
-    .attr("stroke", "#95a5b2")
-    .attr("stroke-width", 1);
+    .join("line");
+
+  applyLinkStyles(graph);
 
   graph.nodeSelection = graph.nodeLayer
     .selectAll("circle")

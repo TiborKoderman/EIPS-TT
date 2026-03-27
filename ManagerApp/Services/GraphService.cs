@@ -1,6 +1,7 @@
 using Microsoft.EntityFrameworkCore;
 using ManagerApp.Data;
 using ManagerApp.Models;
+using Npgsql;
 
 namespace ManagerApp.Services;
 
@@ -23,58 +24,128 @@ public class GraphService : IGraphService
     /// </summary>
     public async Task<GraphDataDto> GetGraphDataAsync(int? limit = null)
     {
+        var effectiveLimit = limit.GetValueOrDefault(500);
+        if (effectiveLimit <= 0)
+        {
+            effectiveLimit = 500;
+        }
+
         // Get incoming link counts for node sizing
         var incomingCounts = await GetIncomingLinkCountsAsync();
 
-        // Get pages with stable URLs (or limited set for performance).
-        var query = _context.Pages
-            .Where(p => p.Url != null)
-            .OrderByDescending(p => p.Id)
-            .Include(p => p.Site)
-            .Select(p => new GraphNodeDto
+        var linkRows = new List<(int Source, int Target)>();
+        var nodeIdsInOrder = new List<int>();
+        var nodeIdSet = new HashSet<int>();
+
+        await using (var connection = new NpgsqlConnection(_context.Database.GetConnectionString()))
+        {
+            await connection.OpenAsync();
+
+            const string recentLinksSql = """
+                SELECT l.from_page, l.to_page
+                FROM crawldb.link l
+                JOIN crawldb.page p_from ON p_from.id = l.from_page AND p_from.url IS NOT NULL
+                JOIN crawldb.page p_to ON p_to.id = l.to_page AND p_to.url IS NOT NULL
+                ORDER BY GREATEST(l.from_page, l.to_page) DESC
+                LIMIT @link_limit;
+                """;
+
+            await using (var linkCmd = new NpgsqlCommand(recentLinksSql, connection))
             {
-                Id = p.Id,
-                Url = p.Url ?? "",
-                Domain = p.Site != null ? p.Site.Domain ?? "unknown" : "unknown",
-                PageType = p.PageTypeCode ?? "HTML",
-                Size = 1 // Will be updated with incoming count below
-            });
-
-        if (limit.HasValue)
-        {
-            query = query.Take(limit.Value);
-        }
-
-        var nodes = await query.ToListAsync();
-
-        // Update node sizes based on incoming links (more incoming links = bigger node)
-        foreach (var node in nodes)
-        {
-            node.Size = incomingCounts.GetValueOrDefault(node.Id, 1);
-        }
-
-        // Get node IDs for filtering links
-        var nodeIds = nodes.Select(n => n.Id).ToHashSet();
-
-        // Get links between these nodes
-        // Use the many-to-many relationship via FromPages/ToPages
-        var links = await _context.Pages
-            .Where(p => nodeIds.Contains(p.Id))
-            .SelectMany(p => p.ToPages
-                .Where(tp => nodeIds.Contains(tp.Id))
-                .Select(tp => new GraphLinkDto
+                linkCmd.Parameters.AddWithValue("link_limit", Math.Max(effectiveLimit * 8, 2000));
+                await using var linkReader = await linkCmd.ExecuteReaderAsync();
+                while (await linkReader.ReadAsync())
                 {
-                    Source = p.Id,
-                    Target = tp.Id
-                }))
-            .Distinct()
-            .ToListAsync();
+                    var source = linkReader.GetInt32(0);
+                    var target = linkReader.GetInt32(1);
+                    linkRows.Add((source, target));
 
-        return new GraphDataDto
-        {
-            Nodes = nodes,
-            Links = links
-        };
+                    if (nodeIdSet.Count < effectiveLimit && nodeIdSet.Add(source))
+                    {
+                        nodeIdsInOrder.Add(source);
+                    }
+
+                    if (nodeIdSet.Count < effectiveLimit && nodeIdSet.Add(target))
+                    {
+                        nodeIdsInOrder.Add(target);
+                    }
+
+                    if (nodeIdSet.Count >= effectiveLimit)
+                    {
+                        break;
+                    }
+                }
+            }
+
+            if (nodeIdSet.Count == 0)
+            {
+                const string fallbackNodesSql = """
+                    SELECT p.id
+                    FROM crawldb.page p
+                    WHERE p.url IS NOT NULL
+                    ORDER BY p.id DESC
+                    LIMIT @limit;
+                    """;
+
+                await using var fallbackCmd = new NpgsqlCommand(fallbackNodesSql, connection);
+                fallbackCmd.Parameters.AddWithValue("limit", effectiveLimit);
+                await using var fallbackReader = await fallbackCmd.ExecuteReaderAsync();
+                while (await fallbackReader.ReadAsync())
+                {
+                    var id = fallbackReader.GetInt32(0);
+                    if (nodeIdSet.Add(id))
+                    {
+                        nodeIdsInOrder.Add(id);
+                    }
+                }
+            }
+
+            var idListSql = string.Join(",", nodeIdsInOrder.OrderBy(id => id));
+            var nodesSql = $"""
+                SELECT p.id,
+                       COALESCE(p.url, '') AS url,
+                       COALESCE(s.domain, 'unknown') AS domain,
+                       COALESCE(p.page_type_code, 'HTML') AS page_type
+                FROM crawldb.page p
+                LEFT JOIN crawldb.site s ON s.id = p.site_id
+                WHERE p.id IN ({idListSql})
+                ORDER BY p.id DESC;
+                """;
+
+            var nodes = new List<GraphNodeDto>();
+            await using (var nodeCmd = new NpgsqlCommand(nodesSql, connection))
+            await using (var nodeReader = await nodeCmd.ExecuteReaderAsync())
+            {
+                while (await nodeReader.ReadAsync())
+                {
+                    nodes.Add(new GraphNodeDto
+                    {
+                        Id = nodeReader.GetInt32(0),
+                        Url = nodeReader.GetString(1),
+                        Domain = nodeReader.GetString(2),
+                        PageType = nodeReader.GetString(3),
+                        Size = incomingCounts.GetValueOrDefault(nodeReader.GetInt32(0), 1),
+                    });
+                }
+            }
+
+            var nodeIds = nodes.Select(n => n.Id).ToHashSet();
+            var links = linkRows
+                .Where(link => nodeIds.Contains(link.Source) && nodeIds.Contains(link.Target))
+                .Distinct()
+                .Select(link => new GraphLinkDto
+                {
+                    Source = link.Source,
+                    Target = link.Target,
+                })
+                .ToList();
+
+            return new GraphDataDto
+            {
+                Nodes = nodes,
+                Links = links,
+            };
+        }
     }
 
     /// <summary>
@@ -95,12 +166,21 @@ public class GraphService : IGraphService
     /// </summary>
     public async Task<Dictionary<int, int>> GetIncomingLinkCountsAsync()
     {
-        // Count how many pages link TO each page (incoming links)
-        var counts = await _context.Pages
-            .SelectMany(p => p.ToPages.Select(tp => tp.Id))
-            .GroupBy(pageId => pageId)
-            .Select(g => new { PageId = g.Key, Count = g.Count() })
-            .ToDictionaryAsync(x => x.PageId, x => x.Count);
+        const string sql = """
+            SELECT l.to_page, COUNT(*)::int
+            FROM crawldb.link l
+            GROUP BY l.to_page;
+            """;
+
+        var counts = new Dictionary<int, int>();
+        await using var connection = new NpgsqlConnection(_context.Database.GetConnectionString());
+        await connection.OpenAsync();
+        await using var cmd = new NpgsqlCommand(sql, connection);
+        await using var reader = await cmd.ExecuteReaderAsync();
+        while (await reader.ReadAsync())
+        {
+            counts[reader.GetInt32(0)] = reader.GetInt32(1);
+        }
 
         return counts;
     }
