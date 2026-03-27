@@ -15,6 +15,7 @@ from urllib import error, request
 import json
 from dataclasses import dataclass
 from typing import Any
+from urllib.parse import urlparse, urlsplit
 
 from api.contracts import (
     GlobalWorkerConfig,
@@ -167,9 +168,10 @@ class DaemonWorkerService(WorkerControlService):
             True,
         )
         self._frontier_remove_terminal_rows = _coerce_bool(
-            os.getenv("CRAWLER_FRONTIER_REMOVE_TERMINAL_ROWS", "true"),
-            True,
+            os.getenv("CRAWLER_FRONTIER_REMOVE_TERMINAL_ROWS", "false"),
+            False,
         )
+        self._site_next_available_monotonic: dict[str, float] = {}
         self._frontier_swap_conn = None
         self._frontier_swap_store: PostgresFrontierSwapStore | None = None
         self._link_extractor = LinkExtractor()
@@ -259,6 +261,7 @@ class DaemonWorkerService(WorkerControlService):
                 if worker.status == "Stopped":
                     worker.status = "Idle"
                     worker.status_reason = "daemon-started"
+                self._enqueue_worker_seeds_locked(worker.id)
                 self._append_log(worker.id, "Info", "Daemon started.")
                 self._emit_manager_event(
                     "status-change",
@@ -1108,20 +1111,14 @@ class DaemonWorkerService(WorkerControlService):
         stop_event = threading.Event()
 
         def run() -> None:
-            if seed_url:
-                with self._lock:
-                    queued_seed = self._enqueue_frontier_url(
-                        seed_url,
-                        source_url=None,
-                        depth=0,
-                        explicit_priority=100,
+            with self._lock:
+                queued_count = self._enqueue_worker_seeds_locked(worker_id)
+                if queued_count == 0:
+                    self._append_log(
+                        worker_id,
+                        "Warning",
+                        "No seed URLs were queued for this worker; verify queue mode and seed config.",
                     )
-                    if not queued_seed:
-                        self._append_log(
-                            worker_id,
-                            "Warning",
-                            "Initial seed was not queued; verify queue mode and server relay availability.",
-                        )
 
             while not stop_event.is_set():
                 time.sleep(1.2)
@@ -1132,11 +1129,21 @@ class DaemonWorkerService(WorkerControlService):
                         continue
                     lease = self._claim_next_frontier_url(worker_id)
                     if lease is None:
-                        current.current_url = None
-                        current.status_reason = "waiting-for-frontier"
+                        self._set_worker_runtime_state_locked(
+                            current,
+                            status="Active",
+                            reason="waiting-for-frontier",
+                            current_url=None,
+                        )
                         continue
-                    current.current_url = lease.url
-                    current.status_reason = "fetching"
+                    self._set_worker_runtime_state_locked(
+                        current,
+                        status="Active",
+                        reason="fetching",
+                        current_url=lease.url,
+                    )
+                    if self._frontier_db_sync_enabled:
+                        self._mark_frontier_state(url=lease.url, state="processing")
 
                 processing = self._download_and_extract_links(lease.url)
 
@@ -1147,7 +1154,12 @@ class DaemonWorkerService(WorkerControlService):
 
                     current.current_url = processing["finalUrl"] or lease.url
                     if processing["ok"]:
-                        current.status_reason = "processing"
+                        self._set_worker_runtime_state_locked(
+                            current,
+                            status="Active",
+                            reason="processing",
+                            current_url=current.current_url,
+                        )
                         current.pages_processed += 1
                         self._append_log(
                             worker_id,
@@ -1156,7 +1168,12 @@ class DaemonWorkerService(WorkerControlService):
                         )
                     else:
                         failure_stage = str(processing.get("stage") or "fetch")
-                        current.status_reason = f"{failure_stage}-failed"
+                        self._set_worker_runtime_state_locked(
+                            current,
+                            status="Active",
+                            reason=f"{failure_stage}-failed",
+                            current_url=current.current_url,
+                        )
                         current.error_count += 1
                         self._append_log(
                             worker_id,
@@ -1272,28 +1289,64 @@ class DaemonWorkerService(WorkerControlService):
             return
         try:
             with self._frontier_swap_conn.cursor() as cur:
-                cur.execute(
-                    """
-                    INSERT INTO crawldb.frontier_queue (
-                        url,
-                        priority,
-                        source_url,
-                        depth,
-                        state,
-                        discovered_at,
-                        dequeued_at
+                try:
+                    cur.execute(
+                        """
+                        INSERT INTO crawldb.frontier_queue (
+                            url,
+                            priority,
+                            source_url,
+                            depth,
+                            state,
+                            discovered_at,
+                            dequeued_at,
+                            finished_at
+                        )
+                        VALUES (
+                            %s,
+                            %s,
+                            %s,
+                            %s,
+                            %s,
+                            NOW(),
+                            CASE WHEN %s IN ('locked', 'processing') THEN NOW() ELSE NULL END,
+                            CASE WHEN %s IN ('completed', 'failed', 'done') THEN NOW() ELSE NULL END
+                        )
+                        ON CONFLICT (url)
+                        DO UPDATE
+                            SET priority = GREATEST(crawldb.frontier_queue.priority, EXCLUDED.priority),
+                                source_url = COALESCE(EXCLUDED.source_url, crawldb.frontier_queue.source_url),
+                                depth = LEAST(crawldb.frontier_queue.depth, EXCLUDED.depth),
+                                state = EXCLUDED.state,
+                                dequeued_at = CASE WHEN EXCLUDED.state IN ('locked', 'processing') THEN NOW() ELSE crawldb.frontier_queue.dequeued_at END,
+                                finished_at = CASE WHEN EXCLUDED.state IN ('completed', 'failed', 'done') THEN NOW() ELSE NULL END;
+                        """,
+                        (url, priority, source_url, depth, state, state, state),
                     )
-                    VALUES (%s, %s, %s, %s, %s, NOW(), CASE WHEN %s = 'queued' THEN NULL ELSE NOW() END)
-                    ON CONFLICT (url)
-                    DO UPDATE
-                        SET priority = GREATEST(crawldb.frontier_queue.priority, EXCLUDED.priority),
-                            source_url = COALESCE(EXCLUDED.source_url, crawldb.frontier_queue.source_url),
-                            depth = LEAST(crawldb.frontier_queue.depth, EXCLUDED.depth),
-                            state = EXCLUDED.state,
-                            dequeued_at = CASE WHEN EXCLUDED.state = 'queued' THEN NULL ELSE NOW() END;
-                    """,
-                    (url, priority, source_url, depth, state, state),
-                )
+                except Exception:
+                    self._frontier_swap_conn.rollback()
+                    cur.execute(
+                        """
+                        INSERT INTO crawldb.frontier_queue (
+                            url,
+                            priority,
+                            source_url,
+                            depth,
+                            state,
+                            discovered_at,
+                            dequeued_at
+                        )
+                        VALUES (%s, %s, %s, %s, %s, NOW(), CASE WHEN %s IN ('locked', 'processing') THEN NOW() ELSE NULL END)
+                        ON CONFLICT (url)
+                        DO UPDATE
+                            SET priority = GREATEST(crawldb.frontier_queue.priority, EXCLUDED.priority),
+                                source_url = COALESCE(EXCLUDED.source_url, crawldb.frontier_queue.source_url),
+                                depth = LEAST(crawldb.frontier_queue.depth, EXCLUDED.depth),
+                                state = EXCLUDED.state,
+                                dequeued_at = CASE WHEN EXCLUDED.state IN ('locked', 'processing') THEN NOW() ELSE crawldb.frontier_queue.dequeued_at END;
+                        """,
+                        (url, priority, source_url, depth, state, state),
+                    )
             self._frontier_swap_conn.commit()
         except Exception:
             try:
@@ -1316,15 +1369,28 @@ class DaemonWorkerService(WorkerControlService):
                         (url,),
                     )
                 else:
-                    cur.execute(
-                        """
-                        UPDATE crawldb.frontier_queue
-                        SET state = %s,
-                            dequeued_at = CASE WHEN %s = 'queued' THEN NULL ELSE NOW() END
-                        WHERE url = %s;
-                        """,
-                        (state, state, url),
-                    )
+                    try:
+                        cur.execute(
+                            """
+                            UPDATE crawldb.frontier_queue
+                            SET state = %s,
+                                dequeued_at = CASE WHEN %s IN ('locked', 'processing') THEN NOW() WHEN %s = 'queued' THEN NULL ELSE dequeued_at END,
+                                finished_at = CASE WHEN %s IN ('completed', 'failed', 'done') THEN NOW() ELSE NULL END
+                            WHERE url = %s;
+                            """,
+                            (state, state, state, state, url),
+                        )
+                    except Exception:
+                        self._frontier_swap_conn.rollback()
+                        cur.execute(
+                            """
+                            UPDATE crawldb.frontier_queue
+                            SET state = %s,
+                                dequeued_at = CASE WHEN %s IN ('locked', 'processing') THEN NOW() WHEN %s = 'queued' THEN NULL ELSE dequeued_at END
+                            WHERE url = %s;
+                            """,
+                            (state, state, state, url),
+                        )
             self._frontier_swap_conn.commit()
         except Exception:
             try:
@@ -1406,9 +1472,13 @@ class DaemonWorkerService(WorkerControlService):
             for seed in seed_entries:
                 if not seed.enabled or not seed.url.strip():
                     continue
-                host = self._url_canonicalizer.extract_host(seed.url)
-                if host:
-                    suffixes.append(host)
+                try:
+                    parsed = urlsplit(seed.url)
+                    host = (parsed.hostname or "").strip().lower()
+                    if host:
+                        suffixes.append(host)
+                except Exception:
+                    continue
 
         if not keywords:
             keywords = tuple(self._crawler_config.topic_keywords)
@@ -1667,7 +1737,9 @@ class DaemonWorkerService(WorkerControlService):
 
         self._hydrate_frontier_from_swap_store_if_needed()
 
-        while self._frontier_queue:
+        attempts = len(self._frontier_queue)
+        while self._frontier_queue and attempts > 0:
+            attempts -= 1
             best = self._choose_best_candidate(self._frontier_queue, self._frontier_metadata)
             if best is None:
                 return None
@@ -1677,6 +1749,10 @@ class DaemonWorkerService(WorkerControlService):
 
             if self._is_tombstoned(candidate):
                 self._frontier_metadata.pop(candidate, None)
+                continue
+
+            if not self._is_site_ready_for_claim(candidate):
+                self._frontier_queue.append(candidate)
                 continue
 
             lease = self._frontier_leases.get(candidate)
@@ -1712,7 +1788,9 @@ class DaemonWorkerService(WorkerControlService):
         if queue is None:
             return None
 
-        while queue:
+        attempts = len(queue)
+        while queue and attempts > 0:
+            attempts -= 1
             best = self._choose_best_candidate(queue, self._worker_local_metadata[worker_id])
             if best is None:
                 return None
@@ -1723,6 +1801,10 @@ class DaemonWorkerService(WorkerControlService):
             if self._is_tombstoned(candidate):
                 self._worker_local_known_urls[worker_id].discard(candidate)
                 self._worker_local_metadata[worker_id].pop(candidate, None)
+                continue
+
+            if not self._is_site_ready_for_claim(candidate):
+                queue.append(candidate)
                 continue
 
             lease = self._frontier_leases.get(candidate)
@@ -1784,8 +1866,9 @@ class DaemonWorkerService(WorkerControlService):
         )
         self._frontier_leases[url] = lease
         self._active_claim_by_worker[worker_id] = lease
+        self._reserve_site_slot(url)
         if self._frontier_db_sync_enabled:
-            self._mark_frontier_state(url=url, state="processing")
+            self._mark_frontier_state(url=url, state="locked")
         self._emit_manager_event(
             "frontier-lease",
             worker_id=worker_id,
@@ -1824,7 +1907,7 @@ class DaemonWorkerService(WorkerControlService):
 
         self._completed_tombstones[url] = time.monotonic() + self._tombstone_ttl_seconds
         if self._frontier_db_sync_enabled:
-            db_state = "done" if status == "completed" else "failed"
+            db_state = "completed" if status == "completed" else "failed"
             self._mark_frontier_state(url=url, state=db_state)
         self._emit_manager_event(
             "frontier-complete",
@@ -1885,6 +1968,8 @@ class DaemonWorkerService(WorkerControlService):
         elif self._frontier_db_sync_enabled:
             self._mark_frontier_state(url=active.url, state="failed")
 
+        self._prune_site_access_registry()
+
         self._emit_manager_event(
             "frontier-release",
             worker_id=worker_id,
@@ -1933,6 +2018,104 @@ class DaemonWorkerService(WorkerControlService):
         expired_tombstones = [url for url, expiry in self._completed_tombstones.items() if expiry <= now]
         for url in expired_tombstones:
             self._completed_tombstones.pop(url, None)
+
+        self._prune_site_access_registry()
+
+    @staticmethod
+    def _site_key_for_url(url: str) -> str:
+        try:
+            parsed = urlparse(url)
+            return (parsed.hostname or url).lower()
+        except Exception:
+            return url.lower()
+
+    def _is_site_ready_for_claim(self, url: str) -> bool:
+        site_key = self._site_key_for_url(url)
+        ready_at = self._site_next_available_monotonic.get(site_key)
+        if ready_at is None:
+            return True
+        return time.monotonic() >= ready_at
+
+    def _reserve_site_slot(self, url: str) -> None:
+        site_key = self._site_key_for_url(url)
+        configured_delay = max(0.0, float(self._global_config.crawl_delay_milliseconds) / 1000.0)
+        if configured_delay <= 0:
+            self._site_next_available_monotonic.pop(site_key, None)
+            return
+        self._site_next_available_monotonic[site_key] = time.monotonic() + configured_delay
+
+    def _prune_site_access_registry(self) -> None:
+        active_site_keys = {
+            self._site_key_for_url(url)
+            for url in self._known_frontier_urls
+        }
+        active_site_keys.update(self._site_key_for_url(url) for url in self._frontier_leases)
+        for queue in self._worker_local_queues.values():
+            active_site_keys.update(self._site_key_for_url(url) for url in queue)
+
+        stale_keys = [key for key in self._site_next_available_monotonic if key not in active_site_keys]
+        for key in stale_keys:
+            self._site_next_available_monotonic.pop(key, None)
+
+    def _enqueue_worker_seeds_locked(self, worker_id: int) -> int:
+        worker = self._workers.get(worker_id)
+        if worker is None:
+            return 0
+
+        seeds: list[str] = []
+        runtime_seed_lines = worker.runtime_config.get("Seed URLs", "")
+        if runtime_seed_lines:
+            seeds.extend(
+                line.strip()
+                for line in runtime_seed_lines.splitlines()
+                if line.strip()
+            )
+
+        if worker.current_url:
+            seeds.insert(0, worker.current_url.strip())
+
+        if not seeds:
+            seeds.extend(
+                entry.url.strip()
+                for entry in self._global_config.seed_entries
+                if entry.enabled and entry.url.strip()
+            )
+
+        unique_seeds = list(dict.fromkeys(seed for seed in seeds if seed))
+        queued = 0
+        for idx, seed in enumerate(unique_seeds):
+            prioritized = max(10, 100 - idx)
+            if self._enqueue_frontier_url(seed, source_url=None, depth=0, explicit_priority=prioritized):
+                queued += 1
+
+        return queued
+
+    def _set_worker_runtime_state_locked(
+        self,
+        worker: WorkerRecord,
+        *,
+        status: str,
+        reason: str,
+        current_url: str | None,
+    ) -> None:
+        prev_status = worker.status
+        prev_reason = worker.status_reason
+        prev_url = worker.current_url
+
+        worker.status = status
+        worker.status_reason = reason
+        worker.current_url = current_url
+
+        if prev_status != status or prev_reason != reason or prev_url != current_url:
+            self._emit_manager_event(
+                "status-change",
+                worker_id=worker.id,
+                payload={
+                    "status": status,
+                    "reason": reason,
+                    "currentUrl": current_url,
+                },
+            )
 
     def _is_tombstoned(self, url: str) -> bool:
         expiry = self._completed_tombstones.get(url)

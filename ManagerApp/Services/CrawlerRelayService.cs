@@ -278,6 +278,7 @@ public sealed class CrawlerRelayService
             await using var connection = new NpgsqlConnection(_connectionString);
             await connection.OpenAsync();
 
+            await PersistWorkerStateIfApplicableAsync(connection, envelope);
             await PersistLogEntryIfApplicableAsync(connection, envelope);
             await PersistMetricEntriesIfApplicableAsync(connection, envelope);
             await RunRetentionCleanupIfNeededAsync(connection);
@@ -286,6 +287,179 @@ public sealed class CrawlerRelayService
         {
             _logger.LogDebug(ex, "Failed to persist crawler observability event.");
         }
+    }
+
+    private static async Task PersistWorkerStateIfApplicableAsync(NpgsqlConnection connection, CrawlerEventEnvelope envelope)
+    {
+        if (!envelope.WorkerId.HasValue)
+        {
+            return;
+        }
+
+        var daemonDbId = await ResolveDaemonDbIdAsync(connection, envelope.DaemonId);
+        if (!daemonDbId.HasValue)
+        {
+            return;
+        }
+
+        var workerId = envelope.WorkerId.Value;
+        var workerName = $"Worker-{workerId}";
+        string? status = null;
+        string? currentUrl = null;
+        int? pagesProcessed = null;
+        int? errorCount = null;
+        string metadataJson = envelope.PayloadJson;
+
+        var isStatusEvent = string.Equals(envelope.Type, "status-change", StringComparison.OrdinalIgnoreCase);
+        var isSpawnEvent = string.Equals(envelope.Type, "worker-spawned", StringComparison.OrdinalIgnoreCase);
+
+        try
+        {
+            using var payloadDoc = JsonDocument.Parse(envelope.PayloadJson);
+            if (payloadDoc.RootElement.ValueKind == JsonValueKind.Object)
+            {
+                if (payloadDoc.RootElement.TryGetProperty("name", out var nameNode)
+                    && nameNode.ValueKind == JsonValueKind.String)
+                {
+                    workerName = nameNode.GetString() ?? workerName;
+                }
+
+                if (isStatusEvent
+                    && payloadDoc.RootElement.TryGetProperty("status", out var statusNode)
+                    && statusNode.ValueKind == JsonValueKind.String)
+                {
+                    status = NormalizeWorkerStatus(statusNode.GetString());
+                }
+
+                if (payloadDoc.RootElement.TryGetProperty("currentUrl", out var currentUrlNode)
+                    && currentUrlNode.ValueKind == JsonValueKind.String)
+                {
+                    currentUrl = currentUrlNode.GetString();
+                }
+
+                if (payloadDoc.RootElement.TryGetProperty("pagesProcessed", out var pagesNode)
+                    && pagesNode.ValueKind == JsonValueKind.Number
+                    && pagesNode.TryGetInt32(out var pagesValue))
+                {
+                    pagesProcessed = pagesValue;
+                }
+
+                if (payloadDoc.RootElement.TryGetProperty("pages_processed_total", out var pagesTotalNode)
+                    && pagesTotalNode.ValueKind == JsonValueKind.Number
+                    && pagesTotalNode.TryGetInt32(out var pagesTotalValue))
+                {
+                    pagesProcessed ??= pagesTotalValue;
+                }
+
+                if (payloadDoc.RootElement.TryGetProperty("errorCount", out var errorsNode)
+                    && errorsNode.ValueKind == JsonValueKind.Number
+                    && errorsNode.TryGetInt32(out var errorsValue))
+                {
+                    errorCount = errorsValue;
+                }
+
+                if (payloadDoc.RootElement.TryGetProperty("errors_total", out var errorsTotalNode)
+                    && errorsTotalNode.ValueKind == JsonValueKind.Number
+                    && errorsTotalNode.TryGetInt32(out var errorsTotalValue))
+                {
+                    errorCount ??= errorsTotalValue;
+                }
+            }
+        }
+        catch
+        {
+            // Keep defaults when payload is not JSON object.
+        }
+
+        if (isSpawnEvent)
+        {
+            status = "idle";
+        }
+
+        const string sql = """
+            INSERT INTO manager.worker(
+                daemon_id,
+                external_worker_id,
+                name,
+                status,
+                current_url,
+                pages_processed,
+                error_count,
+                last_heartbeat_at,
+                metadata,
+                updated_at
+            )
+            VALUES (
+                @daemon_id,
+                @external_worker_id,
+                @name,
+                COALESCE(@status, 'idle'),
+                @current_url,
+                COALESCE(@pages_processed, 0),
+                COALESCE(@error_count, 0),
+                NOW(),
+                @metadata::jsonb,
+                NOW()
+            )
+            ON CONFLICT (daemon_id, external_worker_id)
+            DO UPDATE
+               SET name = COALESCE(NULLIF(EXCLUDED.name, ''), manager.worker.name),
+                   status = COALESCE(NULLIF(@status, ''), manager.worker.status),
+                   current_url = COALESCE(EXCLUDED.current_url, manager.worker.current_url),
+                   pages_processed = COALESCE(@pages_processed, manager.worker.pages_processed),
+                   error_count = COALESCE(@error_count, manager.worker.error_count),
+                   last_heartbeat_at = NOW(),
+                   metadata = EXCLUDED.metadata,
+                   updated_at = NOW();
+            """;
+
+        await using var cmd = new NpgsqlCommand(sql, connection);
+        cmd.Parameters.AddWithValue("daemon_id", daemonDbId.Value);
+        cmd.Parameters.AddWithValue("external_worker_id", workerId);
+        cmd.Parameters.AddWithValue("name", workerName);
+        cmd.Parameters.AddWithValue("status", (object?)status ?? DBNull.Value);
+        cmd.Parameters.AddWithValue("current_url", (object?)currentUrl ?? DBNull.Value);
+        cmd.Parameters.AddWithValue("pages_processed", (object?)pagesProcessed ?? DBNull.Value);
+        cmd.Parameters.AddWithValue("error_count", (object?)errorCount ?? DBNull.Value);
+        cmd.Parameters.AddWithValue("metadata", metadataJson);
+        await cmd.ExecuteNonQueryAsync();
+    }
+
+    private static string? NormalizeWorkerStatus(string? raw)
+    {
+        var normalized = (raw ?? string.Empty).Trim().ToLowerInvariant();
+        return normalized switch
+        {
+            "active" => "active",
+            "idle" => "idle",
+            "paused" => "paused",
+            "stopped" => "stopped",
+            "error" => "error",
+            _ => null,
+        };
+    }
+
+    private static async Task<int?> ResolveDaemonDbIdAsync(NpgsqlConnection connection, string daemonIdentifier)
+    {
+        const string sql = """
+            SELECT id
+            FROM manager.daemon
+            WHERE COALESCE(metadata->>'daemonId', '') = @daemon_identifier
+               OR lower(name) = lower(@daemon_name)
+            ORDER BY CASE WHEN COALESCE(metadata->>'daemonId', '') = @daemon_identifier THEN 0 ELSE 1 END
+            LIMIT 1;
+            """;
+
+        await using var cmd = new NpgsqlCommand(sql, connection);
+        cmd.Parameters.AddWithValue("daemon_identifier", daemonIdentifier ?? string.Empty);
+        cmd.Parameters.AddWithValue("daemon_name", daemonIdentifier == "local-default" ? "Local Daemon" : daemonIdentifier ?? string.Empty);
+        var scalar = await cmd.ExecuteScalarAsync();
+        if (scalar is null || scalar == DBNull.Value)
+        {
+            return null;
+        }
+
+        return Convert.ToInt32(scalar);
     }
 
     private static async Task PersistLogEntryIfApplicableAsync(NpgsqlConnection connection, CrawlerEventEnvelope envelope)
