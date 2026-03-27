@@ -370,7 +370,10 @@ function buildRenderData(graph, level) {
       };
     }).filter((item) => item.source && item.target);
 
-    const nodeData = graph.visibleNodes.map((node) => ({ ...node, _kind: "item" }));
+    const nodeData = graph.visibleNodes;
+    for (const node of nodeData) {
+      node._kind = "item";
+    }
     return { nodeData, linkData };
   }
 
@@ -456,6 +459,48 @@ function buildRenderData(graph, level) {
   return { nodeData, linkData };
 }
 
+function updateAggregateNodePositions(graph) {
+  // When in aggregated view, recompute aggregate node positions from member nodes
+  if (!graph.nodeSelection || graph.currentViewLevel === "item") {
+    return;
+  }
+
+  const level = graph.currentViewLevel;
+  const membersByGroup = new Map();
+  
+  // Group visible nodes by their aggregation key
+  for (const node of graph.visibleNodes) {
+    const key = groupKeyForNode(node, level);
+    if (!membersByGroup.has(key)) {
+      membersByGroup.set(key, []);
+    }
+    membersByGroup.get(key).push(node);
+  }
+  
+  // Update each rendered node's position if it's an aggregate
+  graph.nodeSelection.each(function(aggNode) {
+    if (aggNode._kind !== "item" && membersByGroup.has(aggNode.id)) {
+      const members = membersByGroup.get(aggNode.id);
+      if (members.length > 0) {
+        // Compute centroid of current member positions
+        const centroidX = members.reduce((sum, m) => sum + Number(m.x || 0), 0) / members.length;
+        const centroidY = members.reduce((sum, m) => sum + Number(m.y || 0), 0) / members.length;
+        
+        // Apply momentum smoothing to avoid jitter
+        const prev = graph.groupNodePositions.get(aggNode.id);
+        if (prev) {
+          aggNode.x = prev.x * 0.65 + centroidX * 0.35;
+          aggNode.y = prev.y * 0.65 + centroidY * 0.35;
+        } else {
+          aggNode.x = centroidX;
+          aggNode.y = centroidY;
+        }
+        graph.groupNodePositions.set(aggNode.id, { x: aggNode.x, y: aggNode.y });
+      }
+    }
+  });
+}
+
 function ensureSimulation(graph) {
   if (graph.simulation) {
     return;
@@ -471,6 +516,9 @@ function ensureSimulation(graph) {
     .alphaDecay(0.06);
 
   graph.simulation.on("tick", () => {
+    // Update aggregate node positions before rendering
+    updateAggregateNodePositions(graph);
+    
     if (graph.linkSelection) {
       graph.linkSelection
         .attr("x1", (d) => d.source.x)
@@ -673,6 +721,61 @@ function mergeGraphData(graph, incomingNodes, incomingLinks) {
     seeds,
     topologyChanged: addedNodes > 0 || removedIds.length > 0 || addedLinks > 0 || removedLinks > 0,
   };
+}
+
+function resolveCollapsedNodePositions(graph) {
+  const nodes = graph.nodes || [];
+  if (nodes.length < 24) {
+    return false;
+  }
+
+  const buckets = new Map();
+  for (const node of nodes) {
+    if (!Number.isFinite(node.x) || !Number.isFinite(node.y)) {
+      continue;
+    }
+
+    const key = `${Math.round(node.x)}:${Math.round(node.y)}`;
+    if (!buckets.has(key)) {
+      buckets.set(key, []);
+    }
+    buckets.get(key).push(node);
+  }
+
+  const crowded = [...buckets.values()].filter((group) => group.length >= 4);
+  if (!crowded.length) {
+    return false;
+  }
+
+  let moved = 0;
+  for (const group of crowded) {
+    const anchorX = Number(group[0].x || graph.width / 2);
+    const anchorY = Number(group[0].y || graph.height / 2);
+    const radiusBase = clamp(8 + Math.sqrt(group.length) * 2.6, 8, 42);
+
+    group.forEach((node, index) => {
+      if (index === 0) {
+        return;
+      }
+
+      const angle = (index / group.length) * Math.PI * 2 + stableHash(`collapse-angle-${node.id}`) * 0.35;
+      const radius = radiusBase * (0.35 + (index / Math.max(2, group.length - 1)) * 0.75);
+      const x = anchorX + Math.cos(angle) * radius;
+      const y = anchorY + Math.sin(angle) * radius;
+
+      if (!Number.isFinite(x) || !Number.isFinite(y)) {
+        return;
+      }
+
+      node.x = x;
+      node.y = y;
+      node.vx = (Number(node.vx) || 0) + (Math.cos(angle) * 0.3);
+      node.vy = (Number(node.vy) || 0) + (Math.sin(angle) * 0.3);
+      moved += 1;
+    });
+  }
+
+  return moved > 0;
 }
 
 function buildAdjacency(graph) {
@@ -1299,6 +1402,7 @@ export function renderGraph(hostId, payloadJson) {
   graph.adjacency = buildAdjacency(graph);
   syncWorkers(graph, payload.workers || []);
   syncFrontierProxies(graph);
+  const layoutRecovered = resolveCollapsedNodePositions(graph);
   updateVisibleSubset(graph);
   ensureSimulation(graph);
   updateSelections(graph, mergeResult.seeds);
@@ -1308,8 +1412,8 @@ export function renderGraph(hostId, payloadJson) {
   linkForce.links(graph.links);
 
   graph.simulation.nodes(graph.nodes);
-  if (mergeResult.topologyChanged) {
-    graph.simulation.alpha(0.2).restart();
+  if (mergeResult.topologyChanged || layoutRecovered) {
+    graph.simulation.alpha(layoutRecovered ? 0.32 : 0.2).restart();
   }
 
   graph.svg.call(graph.zoom.transform, graph.currentTransform || d3.zoomIdentity);
