@@ -935,30 +935,43 @@ textarea:focus {
 
 .dashboard-main-grid {
     display: grid;
-    grid-template-columns: minmax(0, 0.85fr) minmax(0, 1.35fr);
-    grid-template-areas:
-        "status graph"
-        "workers graph";
+    grid-template-columns: repeat(2, minmax(0, 1fr));
     gap: var(--spacing-md);
-}
-
-.dashboard-graph-card .graph-canvas {
-    min-height: 420px;
+    align-items: start;
 }
 
 .dashboard-worker-status-card {
-    grid-area: status;
-    max-width: 360px;
-    width: min(100%, 360px);
-    justify-self: start;
+    max-width: none;
+    width: 100%;
 }
 
-.dashboard-main-grid > .card:nth-child(2) {
-    grid-area: workers;
+.policy-block {
+    border-top: 1px solid var(--color-border-light);
+    padding-top: var(--spacing-sm);
+    margin-top: var(--spacing-sm);
 }
 
-.dashboard-graph-card {
-    grid-area: graph;
+.policy-pre {
+    margin-top: var(--spacing-xs);
+    margin-bottom: var(--spacing-sm);
+    padding: var(--spacing-sm);
+    border-radius: var(--radius-sm);
+    border: 1px solid var(--color-border-light);
+    background: var(--color-bg-base);
+    max-height: 260px;
+    overflow: auto;
+    white-space: pre-wrap;
+    word-break: break-word;
+    font-size: var(--font-size-sm);
+}
+
+.policy-url-list {
+    margin: var(--spacing-xs) 0 var(--spacing-sm);
+    padding-left: 18px;
+}
+
+.policy-url-list li {
+    margin-bottom: 4px;
 }
 
 .live-pill {
@@ -1357,10 +1370,6 @@ textarea:focus {
 
     .dashboard-main-grid {
         grid-template-columns: 1fr;
-        grid-template-areas:
-            "status"
-            "workers"
-            "graph";
     }
 
     .dashboard-worker-status-card {

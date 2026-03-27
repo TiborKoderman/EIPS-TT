@@ -451,6 +451,14 @@ public class PageService : IPageService
         public DateTime? AccessedTime { get; init; }
     }
 
+    private sealed class SiteSnapshot
+    {
+        public int SiteId { get; init; }
+        public string Domain { get; init; } = "";
+        public string? RobotsContent { get; init; }
+        public string? SitemapContent { get; init; }
+    }
+
     private sealed class RelevancePolicySnapshot
     {
         public List<string> Keywords { get; init; } = new();
@@ -679,9 +687,48 @@ public class PageService : IPageService
 
     private async Task<List<CollectedSiteSummaryDto>> BuildCollectedSiteSummariesAsync(string? searchTerm)
     {
+        var sites = await _context.Sites
+            .AsNoTracking()
+            .Where(site => site.Domain != null && site.Domain != string.Empty)
+            .Select(site => new SiteSnapshot
+            {
+                SiteId = site.Id,
+                Domain = site.Domain ?? string.Empty,
+                RobotsContent = site.RobotsContent,
+                SitemapContent = site.SitemapContent,
+            })
+            .ToListAsync();
+
+        if (sites.Count == 0)
+        {
+            return new List<CollectedSiteSummaryDto>();
+        }
+
+        if (!string.IsNullOrWhiteSpace(searchTerm))
+        {
+            var term = searchTerm.Trim();
+            sites = sites
+                .Where(site => site.Domain.Contains(term, StringComparison.OrdinalIgnoreCase))
+                .ToList();
+        }
+
+        if (sites.Count == 0)
+        {
+            return new List<CollectedSiteSummaryDto>();
+        }
+
+        var filteredSiteIds = sites
+            .Select(site => site.SiteId)
+            .Distinct()
+            .ToArray();
+
         var rows = await _context.Pages
             .AsNoTracking()
-            .Where(page => page.SiteId != null && page.Url != null && page.PageTypeCode != "FRONTIER")
+            .Where(page =>
+                page.SiteId != null
+                && filteredSiteIds.Contains(page.SiteId.Value)
+                && page.Url != null
+                && page.PageTypeCode != "FRONTIER")
             .Join(
                 _context.Sites.AsNoTracking(),
                 page => page.SiteId,
@@ -696,39 +743,26 @@ public class PageService : IPageService
             .Where(row => row.Domain != "")
             .ToListAsync();
 
-        if (rows.Count == 0)
-        {
-            return new List<CollectedSiteSummaryDto>();
-        }
-
-        if (!string.IsNullOrWhiteSpace(searchTerm))
-        {
-            var term = searchTerm.Trim();
-            rows = rows
-                .Where(row => row.Domain.Contains(term, StringComparison.OrdinalIgnoreCase))
-                .ToList();
-        }
-
-        if (rows.Count == 0)
-        {
-            return new List<CollectedSiteSummaryDto>();
-        }
-
         var policy = await LoadRelevancePolicyAsync();
-        var hints = await LoadFrontierHintsAsync(rows.Select(row => row.Url));
+        var hints = rows.Count == 0
+            ? new Dictionary<string, FrontierHint>(StringComparer.Ordinal)
+            : await LoadFrontierHintsAsync(rows.Select(row => row.Url));
         var outboundCounts = await LoadSiteLinkCountsAsync(backlinksOnly: false);
         var backlinkCounts = await LoadSiteLinkCountsAsync(backlinksOnly: true);
 
         var grouped = rows
             .GroupBy(row => new { row.SiteId, row.Domain })
-            .ToList();
+            .ToDictionary(group => group.Key.SiteId, group => group.ToList());
 
-        var result = new List<CollectedSiteSummaryDto>(grouped.Count);
-        foreach (var group in grouped)
+        var result = new List<CollectedSiteSummaryDto>(sites.Count);
+        foreach (var site in sites)
         {
-            var scores = new List<double>(group.Count());
+            grouped.TryGetValue(site.SiteId, out var siteRows);
+            siteRows ??= new List<SitePageRow>();
+
+            var scores = new List<double>(siteRows.Count);
             DateTime? lastAccessed = null;
-            foreach (var row in group)
+            foreach (var row in siteRows)
             {
                 var hint = hints.GetValueOrDefault(row.Url);
                 var score = ScorePageUrl(
@@ -751,21 +785,23 @@ public class PageService : IPageService
             var average = scores.Count > 0 ? scores.Average() : 0;
             var median = scores.Count > 0 ? scores[scores.Count / 2] : 0;
             var top = scores.Count > 0 ? scores[^1] : 0;
-            var pageCount = group.Count();
+            var pageCount = siteRows.Count;
             var relevanceScore = (average * 0.65) + (top * 0.35) + Math.Min(3.0, Math.Log10(pageCount + 1));
 
             result.Add(new CollectedSiteSummaryDto
             {
-                SiteId = group.Key.SiteId,
-                Domain = group.Key.Domain,
+                SiteId = site.SiteId,
+                Domain = site.Domain,
                 PagesCollected = pageCount,
-                OutboundLinks = outboundCounts.GetValueOrDefault(group.Key.SiteId),
-                Backlinks = backlinkCounts.GetValueOrDefault(group.Key.SiteId),
+                OutboundLinks = outboundCounts.GetValueOrDefault(site.SiteId),
+                Backlinks = backlinkCounts.GetValueOrDefault(site.SiteId),
                 RelevanceScore = relevanceScore,
                 AveragePageScore = average,
                 MedianPageScore = median,
                 TopPageScore = top,
                 LastPageAccessed = lastAccessed,
+                RobotsContent = site.RobotsContent,
+                SitemapContent = site.SitemapContent,
             });
         }
 

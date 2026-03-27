@@ -1543,6 +1543,18 @@ class DaemonWorkerService(WorkerControlService):
         if self._is_tombstoned(candidate):
             return False
 
+        robots_allowed, robots_policy = self._robots_policy_allows_enqueue(candidate)
+        if not robots_allowed:
+            self._emit_manager_event(
+                "frontier-prune",
+                payload={
+                    "url": candidate,
+                    "reason": "robots-disallow",
+                    "robotsUrl": robots_policy.robots_url if robots_policy else None,
+                },
+            )
+            return False
+
         policy = self._build_relevance_policy()
         priority_value = explicit_priority
         if priority_value is None:
@@ -1663,6 +1675,20 @@ class DaemonWorkerService(WorkerControlService):
         local_known = self._worker_local_known_urls[worker_id]
         prevent_collisions = self._collision_prevention_enabled_for_worker(worker_id)
         if self._is_tombstoned(candidate):
+            return False
+
+        robots_allowed, robots_policy = self._robots_policy_allows_enqueue(candidate)
+        if not robots_allowed:
+            self._emit_manager_event(
+                "frontier-prune",
+                worker_id=worker_id,
+                payload={
+                    "url": candidate,
+                    "reason": "robots-disallow",
+                    "workerId": worker_id,
+                    "robotsUrl": robots_policy.robots_url if robots_policy else None,
+                },
+            )
             return False
 
         policy = self._build_relevance_policy()
@@ -2307,6 +2333,11 @@ class DaemonWorkerService(WorkerControlService):
         configured_delay = max(0.0, float(self._global_config.crawl_delay_milliseconds) / 1000.0)
         robots_delay = 0.0 if policy is None or policy.crawl_delay_seconds is None else max(0.0, float(policy.crawl_delay_seconds))
         return max(configured_delay, robots_delay)
+
+    def _robots_policy_allows_enqueue(self, url: str) -> tuple[bool, RobotsPolicy | None]:
+        policy = self._resolve_robots_policy(url)
+        allowed = self._robots_allowed_for_url(policy, url)
+        return allowed, policy
 
     @staticmethod
     def _to_download_payload(

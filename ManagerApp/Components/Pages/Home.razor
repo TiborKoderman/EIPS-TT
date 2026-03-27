@@ -4,7 +4,6 @@
 @using ManagerApp.Models
 @inject IStatisticsService StatisticsService
 @inject IWorkerService WorkerService
-@inject IGraphService GraphService
 @inject IPageService PageService
 @inject NavigationManager Navigation
 @implements IAsyncDisposable
@@ -250,35 +249,6 @@
                 }
             </div>
 
-            <div class="card dashboard-graph-card">
-                <div class="card-header-inline mb-md">
-                    <h2 class="card-title mb-0">Node Graph Preview</h2>
-                    <div class="flex items-center gap-sm">
-                        <a href="/graph" class="btn btn-primary btn-sm">
-                            <span class="mdi mdi-open-in-new"></span>
-                            Full View
-                        </a>
-                    </div>
-                </div>
-
-                @if (isGraphLoading)
-                {
-                    <p class="text-muted">Loading graph preview...</p>
-                }
-                else if (!string.IsNullOrWhiteSpace(graphError))
-                {
-                    <p class="text-muted">@graphError</p>
-                }
-                else if (graphPreview.Nodes.Count == 0)
-                {
-                    <p class="text-muted">No graph nodes available yet.</p>
-                }
-                else
-                {
-                    <ForceGraph Data="graphPreview" Height="360" ShowToolbar="false" />
-                }
-            </div>
-
             <div class="card">
                 <div class="card-header-inline mb-md">
                     <h2 class="card-title mb-0">Cluster Throughput Trend</h2>
@@ -314,11 +284,8 @@
     private List<QueueTopItemViewModel> topQueueItems = new();
     private List<WorkerThroughputPointViewModel> dashboardThroughputSeries = new();
     private List<WorkerLogEntryViewModel> recentLogs = new();
-    private GraphDataDto graphPreview = new();
-    private string? graphError;
     private string? selectedWorkerStatus;
     private bool isLoading = true;
-    private bool isGraphLoading = true;
     private PeriodicTimer? refreshTimer;
     private CancellationTokenSource? refreshCts;
     private readonly SemaphoreSlim workerRefreshLock = new(1, 1);
@@ -341,7 +308,6 @@
             stats = await StatisticsService.GetStatisticsAsync();
             lastDashboardUpdateUtc = DateTime.UtcNow;
             await RefreshWorkersAsync();
-            await LoadGraphPreviewAsync();
             StartWorkerRefreshLoop();
         }
         catch (Exception ex)
@@ -352,26 +318,6 @@
         finally
         {
             isLoading = false;
-        }
-    }
-
-    private async Task LoadGraphPreviewAsync()
-    {
-        isGraphLoading = true;
-        graphError = null;
-
-        try
-        {
-            graphPreview = await GraphService.GetGraphDataAsync(120);
-            lastDashboardUpdateUtc = DateTime.UtcNow;
-        }
-        catch (Exception ex)
-        {
-            graphError = $"Unable to load graph preview: {ex.Message}";
-        }
-        finally
-        {
-            isGraphLoading = false;
         }
     }
 
@@ -1158,7 +1104,7 @@
     private string GetSinceUpdateDetailsText()
     {
         var seconds = Math.Max(0, (int)(DateTime.UtcNow - lastDashboardUpdateUtc).TotalSeconds);
-        return $"{seconds}s since last dashboard update (stats, workers, and graph preview refresh).";
+        return $"{seconds}s since last dashboard update (stats and worker telemetry refresh).";
     }
 
     public ValueTask DisposeAsync()

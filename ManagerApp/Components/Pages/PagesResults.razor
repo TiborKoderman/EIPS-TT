@@ -174,6 +174,59 @@
                             <span>-</span>
                         }
                     </div>
+                    @if (SelectedPage.Site is not null)
+                    {
+                        <div class="policy-block">
+                            <div><strong>Robots policy (this page):</strong> @DescribeSelectedPageRobotsPolicy()</div>
+                            @if (string.IsNullOrWhiteSpace(SelectedPage.Site.RobotsContent))
+                            {
+                                <div class="text-small text-muted">No robots.txt content captured for this site yet.</div>
+                            }
+                            else
+                            {
+                                var robotsPreview = BuildPreviewText(SelectedPage.Site.RobotsContent, maxLines: 14, maxChars: 2200);
+                                <pre class="policy-pre">@(ShowPageRobotsFull ? SelectedPage.Site.RobotsContent : robotsPreview.Text)</pre>
+                                @if (robotsPreview.Truncated)
+                                {
+                                    <button type="button" class="btn btn-sm" @onclick="TogglePageRobotsFull">
+                                        @(ShowPageRobotsFull ? "Show less" : "Show full")
+                                    </button>
+                                }
+                            }
+                        </div>
+
+                        <div class="policy-block">
+                            <div><strong>Sitemap handling:</strong> @DescribeSitemapStatus(SelectedPage.Site.SitemapContent)</div>
+                            @if (ExtractSitemapUrls(SelectedPage.Site.SitemapContent).Count > 0)
+                            {
+                                <div class="text-small text-muted">Detected sitemap URLs:</div>
+                                <ul class="policy-url-list">
+                                    @foreach (var sitemapUrl in ExtractSitemapUrls(SelectedPage.Site.SitemapContent).Take(8))
+                                    {
+                                        <li>
+                                            <a href="@sitemapUrl" target="_blank" rel="noopener noreferrer">@sitemapUrl</a>
+                                        </li>
+                                    }
+                                </ul>
+                            }
+
+                            @if (string.IsNullOrWhiteSpace(SelectedPage.Site.SitemapContent))
+                            {
+                                <div class="text-small text-muted">No sitemap content captured for this site yet.</div>
+                            }
+                            else
+                            {
+                                var sitemapPreview = BuildPreviewText(SelectedPage.Site.SitemapContent, maxLines: 14, maxChars: 2200);
+                                <pre class="policy-pre">@(ShowPageSitemapFull ? SelectedPage.Site.SitemapContent : sitemapPreview.Text)</pre>
+                                @if (sitemapPreview.Truncated)
+                                {
+                                    <button type="button" class="btn btn-sm" @onclick="TogglePageSitemapFull">
+                                        @(ShowPageSitemapFull ? "Show less" : "Show full")
+                                    </button>
+                                }
+                            }
+                        </div>
+                    }
                     @if (SelectedRow is not null)
                     {
                         <div><strong>Relevance score:</strong> @SelectedRow.RelevanceScore.ToString("0.00")</div>
@@ -300,6 +353,8 @@
     private bool ShowFilterDropdown;
     private string? _copiedUrl;
     private DateTime _copiedUrlAtUtc;
+    private bool ShowPageRobotsFull;
+    private bool ShowPageSitemapFull;
 
     private static readonly IReadOnlyList<(string Value, string Label)> FilterOptions =
     [
@@ -402,6 +457,208 @@
     {
         SelectedPage = await PageService.GetPageDetailsAsync(pageId);
         SelectedBacklinkStats = SelectedPage is null ? null : await PageService.GetPageBacklinkStatsAsync(pageId);
+        ShowPageRobotsFull = false;
+        ShowPageSitemapFull = false;
+    }
+
+    private void TogglePageRobotsFull()
+    {
+        ShowPageRobotsFull = !ShowPageRobotsFull;
+    }
+
+    private void TogglePageSitemapFull()
+    {
+        ShowPageSitemapFull = !ShowPageSitemapFull;
+    }
+
+    private string DescribeSelectedPageRobotsPolicy()
+    {
+        if (SelectedPage is null)
+        {
+            return "Unknown";
+        }
+
+        var evaluation = EvaluateRobotsForUrl(SelectedPage.Site?.RobotsContent, SelectedPage.Url);
+        return evaluation.Allowed switch
+        {
+            true => $"Allowed ({evaluation.Reason})",
+            false => $"Disallowed ({evaluation.Reason})",
+            _ => "Unknown (robots.txt missing or no matching rule)",
+        };
+    }
+
+    private static (bool? Allowed, string Reason) EvaluateRobotsForUrl(string? robotsContent, string? pageUrl)
+    {
+        if (string.IsNullOrWhiteSpace(robotsContent))
+        {
+            return (null, "no robots content");
+        }
+
+        var path = "/";
+        if (!string.IsNullOrWhiteSpace(pageUrl)
+            && Uri.TryCreate(pageUrl, UriKind.Absolute, out var parsed))
+        {
+            path = string.IsNullOrWhiteSpace(parsed.PathAndQuery) ? "/" : parsed.PathAndQuery;
+        }
+
+        var applyRules = false;
+        var sawAnyRule = false;
+        var bestAllowLength = -1;
+        var bestDisallowLength = -1;
+
+        foreach (var rawLine in robotsContent.Split(new[] { "\r\n", "\n" }, StringSplitOptions.None))
+        {
+            var line = StripRobotsComment(rawLine);
+            if (string.IsNullOrWhiteSpace(line))
+            {
+                continue;
+            }
+
+            var separator = line.IndexOf(':');
+            if (separator <= 0)
+            {
+                continue;
+            }
+
+            var key = line[..separator].Trim().ToLowerInvariant();
+            var value = line[(separator + 1)..].Trim();
+            if (key == "user-agent")
+            {
+                applyRules = value == "*";
+                continue;
+            }
+
+            if (!applyRules)
+            {
+                continue;
+            }
+
+            if (key != "allow" && key != "disallow")
+            {
+                continue;
+            }
+
+            sawAnyRule = true;
+            if (string.IsNullOrWhiteSpace(value) || !RobotsRuleMatchesPath(path, value))
+            {
+                continue;
+            }
+
+            var ruleLength = value.Trim().Length;
+            if (key == "allow")
+            {
+                bestAllowLength = Math.Max(bestAllowLength, ruleLength);
+            }
+            else
+            {
+                bestDisallowLength = Math.Max(bestDisallowLength, ruleLength);
+            }
+        }
+
+        if (bestAllowLength < 0 && bestDisallowLength < 0)
+        {
+            return sawAnyRule
+                ? (true, "no matching allow/disallow rule")
+                : (null, "no wildcard user-agent rule");
+        }
+
+        if (bestDisallowLength > bestAllowLength)
+        {
+            return (false, "matched Disallow rule");
+        }
+
+        return (true, "matched Allow/default rule");
+    }
+
+    private static string StripRobotsComment(string line)
+    {
+        var hashIndex = line.IndexOf('#');
+        return hashIndex >= 0 ? line[..hashIndex].Trim() : line.Trim();
+    }
+
+    private static bool RobotsRuleMatchesPath(string path, string rawRule)
+    {
+        var rule = rawRule.Trim();
+        if (string.IsNullOrWhiteSpace(rule))
+        {
+            return false;
+        }
+
+        var exactMatch = rule.EndsWith('$');
+        if (exactMatch)
+        {
+            rule = rule[..^1];
+        }
+
+        rule = rule.Replace("*", string.Empty, StringComparison.Ordinal);
+        if (string.IsNullOrWhiteSpace(rule))
+        {
+            return false;
+        }
+
+        return exactMatch
+            ? string.Equals(path, rule, StringComparison.Ordinal)
+            : path.StartsWith(rule, StringComparison.Ordinal);
+    }
+
+    private static (string Text, bool Truncated) BuildPreviewText(string? content, int maxLines, int maxChars)
+    {
+        if (string.IsNullOrWhiteSpace(content))
+        {
+            return (string.Empty, false);
+        }
+
+        var normalized = content.Replace("\r\n", "\n", StringComparison.Ordinal);
+        var lines = normalized.Split('\n');
+        var truncatedByLines = lines.Length > maxLines;
+        var previewLines = truncatedByLines ? lines.Take(maxLines) : lines;
+        var text = string.Join('\n', previewLines);
+        var truncatedByChars = text.Length > maxChars;
+        if (truncatedByChars)
+        {
+            text = text[..maxChars];
+        }
+
+        var wasTruncated = truncatedByLines || truncatedByChars;
+        if (wasTruncated)
+        {
+            text = text.TrimEnd() + "\n...";
+        }
+
+        return (text, wasTruncated);
+    }
+
+    private static string DescribeSitemapStatus(string? sitemapContent)
+    {
+        if (string.IsNullOrWhiteSpace(sitemapContent))
+        {
+            return "No sitemap captured yet";
+        }
+
+        var detectedUrls = ExtractSitemapUrls(sitemapContent);
+        return detectedUrls.Count > 0
+            ? $"{detectedUrls.Count} sitemap URL(s) captured"
+            : "Sitemap content captured";
+    }
+
+    private static List<string> ExtractSitemapUrls(string? sitemapContent)
+    {
+        if (string.IsNullOrWhiteSpace(sitemapContent))
+        {
+            return new List<string>();
+        }
+
+        var urls = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var token in sitemapContent.Split(new[] { '\r', '\n', '\t', ' ' }, StringSplitOptions.RemoveEmptyEntries))
+        {
+            if (Uri.TryCreate(token.Trim(), UriKind.Absolute, out var parsed)
+                && (parsed.Scheme == Uri.UriSchemeHttp || parsed.Scheme == Uri.UriSchemeHttps))
+            {
+                urls.Add(parsed.AbsoluteUri);
+            }
+        }
+
+        return urls.OrderBy(url => url, StringComparer.OrdinalIgnoreCase).ToList();
     }
 
     private static string BuildSiteExternalUrl(string? domain)

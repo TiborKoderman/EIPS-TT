@@ -141,6 +141,8 @@ public class CollectedSiteSummaryDto
     public double MedianPageScore { get; set; }
     public double TopPageScore { get; set; }
     public DateTime? LastPageAccessed { get; set; }
+    public string? RobotsContent { get; set; }
+    public string? SitemapContent { get; set; }
 }
 
 /// <summary>
