@@ -303,7 +303,7 @@ public sealed class CrawlerRelayService
         }
 
         var workerId = envelope.WorkerId.Value;
-        var workerName = $"Worker-{workerId}";
+        var workerName = NormalizeWorkerName(workerId, null);
         string? status = null;
         string? currentUrl = null;
         int? pagesProcessed = null;
@@ -321,7 +321,7 @@ public sealed class CrawlerRelayService
                 if (payloadDoc.RootElement.TryGetProperty("name", out var nameNode)
                     && nameNode.ValueKind == JsonValueKind.String)
                 {
-                    workerName = nameNode.GetString() ?? workerName;
+                    workerName = NormalizeWorkerName(workerId, nameNode.GetString());
                 }
 
                 if (isStatusEvent
@@ -439,6 +439,19 @@ public sealed class CrawlerRelayService
         };
     }
 
+    private static string NormalizeWorkerName(int workerId, string? raw)
+    {
+        var canonical = $"Worker-{workerId}";
+        if (string.IsNullOrWhiteSpace(raw))
+        {
+            return canonical;
+        }
+
+        return raw.Trim().Equals(canonical, StringComparison.OrdinalIgnoreCase)
+            ? canonical
+            : canonical;
+    }
+
     private static async Task<int?> ResolveDaemonDbIdAsync(NpgsqlConnection connection, string daemonIdentifier)
     {
         const string sql = """
@@ -531,6 +544,13 @@ public sealed class CrawlerRelayService
                         && nameNode.ValueKind == JsonValueKind.String)
                     {
                         message = $"[{eventType}] name={nameNode.GetString()}";
+                    }
+
+                    if (payloadDoc.RootElement.TryGetProperty("queueOrder", out var orderNode)
+                        && orderNode.ValueKind == JsonValueKind.Number
+                        && orderNode.TryGetInt64(out var queueOrder))
+                    {
+                        message = $"{message} order={queueOrder}";
                     }
                 }
             }

@@ -89,10 +89,11 @@ class DaemonWorkerService(WorkerControlService):
         self._daemon_started_at: str | None = None
         self._daemon_mode = "single-instance"
         self._daemon_id = os.getenv("CRAWLER_DAEMON_ID", "local-default").strip() or "local-default"
+        self._queue_event_order = 0
         self._workers: dict[int, WorkerRecord] = {
             1: WorkerRecord(
                 id=1,
-                name="Worker-1",
+            name=self._worker_name(1),
                 status="Idle",
                 status_reason="daemon-initialized",
                 current_url=None,
@@ -419,7 +420,7 @@ class DaemonWorkerService(WorkerControlService):
                 raise RuntimeError("Crawler daemon is not running. Start daemon before spawning workers.")
             worker_id = self._next_worker_id
             self._next_worker_id += 1
-            worker_name = name or f"Worker-{worker_id}"
+            worker_name = self._worker_name(worker_id)
 
             worker = WorkerRecord(
                 id=worker_id,
@@ -1132,7 +1133,7 @@ class DaemonWorkerService(WorkerControlService):
                         self._set_worker_runtime_state_locked(
                             current,
                             status="Active",
-                            reason="waiting-for-frontier",
+                            reason="waiting-for-queue",
                             current_url=None,
                         )
                         continue
@@ -2377,11 +2378,26 @@ class DaemonWorkerService(WorkerControlService):
         if self._manager_event_url is None:
             return False
 
+        ordered_events = {
+            "queue-change",
+            "frontier-lease",
+            "frontier-release",
+            "frontier-complete",
+            "frontier-prune",
+            "frontier-lease-expired",
+        }
+
+        normalized_payload = payload
+        if isinstance(payload, dict) and event_type in ordered_events:
+            self._queue_event_order += 1
+            normalized_payload = dict(payload)
+            normalized_payload["queueOrder"] = self._queue_event_order
+
         event = {
             "type": event_type,
             "daemonId": self._daemon_id,
             "workerId": worker_id,
-            "payload": payload,
+            "payload": normalized_payload,
         }
 
         pending_events = list(self._pending_manager_events)
@@ -2412,6 +2428,10 @@ class DaemonWorkerService(WorkerControlService):
                 emit_manager_event=False,
             )
         return True
+
+    @staticmethod
+    def _worker_name(worker_id: int) -> str:
+        return f"Worker-{worker_id}"
 
     def _post_manager_json(self, url: str, payload: object) -> bool:
         data = json.dumps(payload).encode("utf-8")

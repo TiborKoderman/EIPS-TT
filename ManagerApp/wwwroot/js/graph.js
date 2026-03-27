@@ -176,9 +176,29 @@ function parsePayload(payloadJson) {
     }))
     .filter((l) => Number.isFinite(l.source) && Number.isFinite(l.target));
 
+  const rawWorkers = Array.isArray(payload.workers)
+    ? payload.workers
+    : (Array.isArray(payload.Workers) ? payload.Workers : []);
+
+  const workers = rawWorkers
+    .map((worker) => ({
+      id: Number(worker.id ?? worker.Id),
+      name: String(worker.name ?? worker.Name ?? ""),
+      status: String(worker.status ?? worker.Status ?? "idle").toLowerCase(),
+      currentUrl: worker.currentUrl ?? worker.CurrentUrl ?? null,
+      currentNodeId: Number(worker.currentNodeId ?? worker.CurrentNodeId ?? NaN),
+    }))
+    .filter((worker) => Number.isFinite(worker.id) && worker.status === "active")
+    .map((worker) => ({
+      ...worker,
+      currentNodeId: Number.isFinite(worker.currentNodeId) ? worker.currentNodeId : null,
+    }));
+
   return {
     nodes,
     links,
+    workers,
+    visibleNodeLimit: nodes.length,
     queueMode: payload.queueMode || payload.QueueMode || "server",
   };
 }
@@ -186,6 +206,14 @@ function parsePayload(payloadJson) {
 function initializeGraph(hostId, host, queueMode) {
   host.innerHTML = "";
   renderLegend(host, queueMode);
+  const shell = host.closest(".graph-shell");
+  let detailsPanel = shell ? shell.querySelector(".graph-details-panel") : null;
+  if (!detailsPanel && shell) {
+    detailsPanel = document.createElement("aside");
+    detailsPanel.className = "graph-details-panel hidden";
+    detailsPanel.innerHTML = "<div class='muted'>Click a node to inspect details.</div>";
+    shell.appendChild(detailsPanel);
+  }
 
   const width = host.clientWidth || 900;
   const height = host.clientHeight || 640;
@@ -217,6 +245,8 @@ function initializeGraph(hostId, host, queueMode) {
     if (!graph) return;
     graph.currentTransform = event.transform;
     canvas.attr("transform", event.transform);
+    updateVisibleSubset(graph);
+    updateSelections(graph, pickSeedNodes(graph.visibleNodes));
     applyZoomDetail(graph, event.transform.k);
   });
 
@@ -240,11 +270,20 @@ function initializeGraph(hostId, host, queueMode) {
     currentTransform: d3.zoomIdentity,
     nodes: [],
     links: [],
+    visibleNodes: [],
+    visibleLinks: [],
+    visibleNodeIds: new Set(),
+    visibleNodeLimit: 500,
     nodeById: new Map(),
     linkByKey: new Map(),
     seedIds: new Set(),
+    activeWorkers: [],
     workers: [],
+    adjacency: new Map(),
     workerTimer: null,
+    detailsPanel,
+    selectedNodeId: null,
+    hasInitialLayout: false,
     simulation: null,
     nodeSelection: null,
     linkSelection: null,
@@ -458,43 +497,12 @@ function mergeGraphData(graph, incomingNodes, incomingLinks) {
     node._seed = graph.seedIds.has(node.id);
   }
 
-  const isFirstDataLoad = graph.workers.length === 0;
-  if (isFirstDataLoad) {
+  if (!graph.hasInitialLayout) {
     applyInitialSeedLayout(graph, seeds, graph.nodes);
+    graph.hasInitialLayout = true;
   }
 
   return seeds;
-}
-
-function ensureWorkers(graph, seedNodes) {
-  const desired = clamp(Math.floor(seedNodes.length / 2) || 2, 2, 5);
-  const queueNodes = graph.nodes.filter((node) => node._isQueue);
-  const pickStart = (index) => {
-    const source = queueNodes.length > 0 ? queueNodes : graph.nodes;
-    return source[index % Math.max(source.length, 1)] || null;
-  };
-
-  if (graph.workers.length === 0) {
-    graph.workers = Array.from({ length: desired }).map((_, index) => {
-      const seed = pickStart(index);
-      return {
-        id: index + 1,
-        currentNodeId: seed ? seed.id : null,
-      };
-    });
-    return;
-  }
-
-  if (graph.workers.length < desired) {
-    const start = graph.workers.length;
-    for (let i = start; i < desired; i += 1) {
-      const seed = pickStart(i);
-      graph.workers.push({
-        id: i + 1,
-        currentNodeId: seed ? seed.id : null,
-      });
-    }
-  }
 }
 
 function buildAdjacency(graph) {
@@ -517,64 +525,105 @@ function buildAdjacency(graph) {
   return adjacency;
 }
 
-function stepWorkers(graph) {
-  if (!graph.nodes.length || !graph.workers.length) {
+function linkSourceId(link) {
+  return Number(link.source?.id ?? link.source);
+}
+
+function linkTargetId(link) {
+  return Number(link.target?.id ?? link.target);
+}
+
+function updateVisibleSubset(graph) {
+  const transform = graph.currentTransform || d3.zoomIdentity;
+  const k = Number(transform.k || 1);
+  const tx = Number(transform.x || 0);
+  const ty = Number(transform.y || 0);
+  const margin = 80;
+  const limit = Math.max(50, Number(graph.visibleNodeLimit || 500));
+
+  const inViewport = [];
+  for (const node of graph.nodes) {
+    const nx = Number(node.x ?? graph.width / 2);
+    const ny = Number(node.y ?? graph.height / 2);
+    const sx = nx * k + tx;
+    const sy = ny * k + ty;
+    if (sx >= -margin && sx <= graph.width + margin && sy >= -margin && sy <= graph.height + margin) {
+      inViewport.push(node);
+    }
+  }
+
+  const prioritized = (inViewport.length > 0 ? inViewport : graph.nodes)
+    .slice()
+    .sort((a, b) => Number(b.size || 0) - Number(a.size || 0));
+
+  const visibleNodes = prioritized.slice(0, limit);
+  const visibleNodeIds = new Set(visibleNodes.map((node) => node.id));
+  const visibleLinks = graph.links.filter((link) => {
+    const sourceId = linkSourceId(link);
+    const targetId = linkTargetId(link);
+    return visibleNodeIds.has(sourceId) && visibleNodeIds.has(targetId);
+  });
+
+  graph.visibleNodes = visibleNodes;
+  graph.visibleNodeIds = visibleNodeIds;
+  graph.visibleLinks = visibleLinks;
+}
+
+function syncWorkers(graph, incomingWorkers) {
+  graph.activeWorkers = incomingWorkers.slice();
+}
+
+function pickFrontierCandidates(graph, count) {
+  if (count <= 0) {
+    return [];
+  }
+
+  const queueNodes = graph.nodes.filter((node) => node._isQueue);
+  const pool = queueNodes.length > 0 ? queueNodes : graph.nodes;
+  return pool
+    .slice()
+    .sort((a, b) => {
+      const scoreA = Number(a._score || 0) + Number(a.size || 0) * 0.05;
+      const scoreB = Number(b._score || 0) + Number(b.size || 0) * 0.05;
+      return scoreB - scoreA;
+    })
+    .slice(0, count);
+}
+
+function syncFrontierProxies(graph) {
+  const count = graph.activeWorkers.length;
+  const previousById = new Map(graph.workers.map((proxy) => [proxy.id, proxy]));
+  const candidates = pickFrontierCandidates(graph, count);
+
+  graph.workers = Array.from({ length: count }).map((_, index) => {
+    const id = index + 1;
+    const existing = previousById.get(id);
+    const frontierNode = candidates[index] || null;
+    const owner = graph.activeWorkers.find((worker) => worker.currentNodeId && frontierNode && worker.currentNodeId === frontierNode.id) || null;
+    const targetX = frontierNode?.x ?? graph.width / 2;
+    const targetY = frontierNode?.y ?? graph.height / 2;
+
+    return {
+      id,
+      frontierNodeId: frontierNode?.id ?? null,
+      ownerWorkerId: owner?.id ?? null,
+      label: owner ? `W${owner.id}` : `Q${id}`,
+      x: existing?.x ?? targetX,
+      y: existing?.y ?? targetY,
+      targetX,
+      targetY,
+    };
+  });
+}
+
+function startWorkerTicker(graph) {
+  if (graph.workerTimer) {
     return;
   }
 
-  const adjacency = buildAdjacency(graph);
-  for (const worker of graph.workers) {
-    const currentId = worker.currentNodeId;
-    if (!currentId || !adjacency.has(currentId)) {
-      const queuePool = graph.nodes.filter((node) => node._isQueue);
-      const sourcePool = queuePool.length > 0 ? queuePool : graph.nodes;
-      const fallback = sourcePool[Math.floor(Math.random() * sourcePool.length)];
-      worker.currentNodeId = fallback ? fallback.id : null;
-      continue;
-    }
-
-    classifyIfQueued(graph.nodeById.get(currentId));
-
-    const neighbors = adjacency.get(currentId);
-    if (!neighbors.length) {
-      continue;
-    }
-
-    const queueFirst = neighbors.filter((id) => graph.nodeById.get(id)?._isQueue);
-    const sourcePool = queueFirst.length > 0 ? queueFirst : neighbors;
-    const sorted = [...sourcePool].sort((a, b) => {
-      const scoreA = graph.nodeById.get(a)?._score ?? 0;
-      const scoreB = graph.nodeById.get(b)?._score ?? 0;
-      return scoreB - scoreA;
-    });
-
-    const pick = sorted[Math.floor(stableHash(`worker-${worker.id}-${Date.now()}`) * Math.min(4, sorted.length))];
-    worker.currentNodeId = pick;
-    classifyIfQueued(graph.nodeById.get(pick));
-  }
-
-  if (graph.nodeSelection) {
-    graph.nodeSelection
-      .attr("fill", (d) => makeNodeColor(d))
-      .attr("stroke", (d) => {
-        if (graph.workers.some((worker) => worker.currentNodeId === d.id)) {
-          return "#123a63";
-        }
-        return d._seed ? "#d58a00" : "#ffffff";
-      })
-      .attr("stroke-width", (d) => {
-        if (graph.workers.some((worker) => worker.currentNodeId === d.id)) {
-          return 2.8;
-        }
-        return d._seed ? 2.2 : 1.2;
-      });
-  }
-
-  if (graph.linkSelection) {
-    applyLinkStyles(graph);
-  }
-
-  updateWorkerVisuals(graph);
+  graph.workerTimer = d3.interval(() => {
+    updateWorkerVisuals(graph);
+  }, 90);
 }
 
 function updateWorkerVisuals(graph) {
@@ -583,11 +632,18 @@ function updateWorkerVisuals(graph) {
   }
 
   graph.workerSelection.attr("transform", (worker) => {
-    const node = graph.nodeById.get(worker.currentNodeId);
-    if (!node) {
-      return `translate(${graph.width / 2}, ${graph.height / 2})`;
-    }
-    return `translate(${(node.x || graph.width / 2) + 12}, ${(node.y || graph.height / 2) - 12})`;
+    const node = worker.frontierNodeId ? graph.nodeById.get(worker.frontierNodeId) : null;
+    const targetX = (node?.x || graph.width / 2) + 12;
+    const targetY = (node?.y || graph.height / 2) - 12;
+    worker.targetX = targetX;
+    worker.targetY = targetY;
+
+    const currentX = Number.isFinite(worker.x) ? worker.x : targetX;
+    const currentY = Number.isFinite(worker.y) ? worker.y : targetY;
+    worker.x = currentX + (targetX - currentX) * 0.16;
+    worker.y = currentY + (targetY - currentY) * 0.16;
+
+    return `translate(${worker.x}, ${worker.y})`;
   });
 }
 
@@ -717,10 +773,91 @@ function applyLinkStyles(graph) {
     .attr("stroke-opacity", (d) => (d.target?._isQueue ? 0.75 : 0.52));
 }
 
+function renderNodeDetails(graph, node) {
+  if (!graph.detailsPanel) {
+    return;
+  }
+
+  if (!node) {
+    graph.detailsPanel.classList.add("hidden");
+    graph.detailsPanel.innerHTML = "<div class='muted'>Click a node to inspect details.</div>";
+    return;
+  }
+
+  graph.detailsPanel.classList.remove("hidden");
+  const neighbors = graph.adjacency.get(node.id) || [];
+  graph.detailsPanel.innerHTML = [
+    `<h3>${sanitize(node.domain || "unknown")}</h3>`,
+    `<p><strong>URL:</strong> <a href="${sanitize(node.url)}" target="_blank" rel="noreferrer">${sanitize(node.url)}</a></p>`,
+    `<p><strong>Page type:</strong> ${sanitize(node.pageType || "HTML")}</p>`,
+    `<p><strong>Backlinks:</strong> ${sanitize(node.size || 0)}</p>`,
+    `<p><strong>Connected nodes:</strong> ${sanitize(neighbors.length)}</p>`,
+  ].join("");
+}
+
+function applySelectionFocus(graph) {
+  const selectedId = graph.selectedNodeId;
+  if (!selectedId || !graph.visibleNodeIds.has(selectedId)) {
+    if (graph.nodeSelection) {
+      graph.nodeSelection
+        .attr("opacity", 1)
+        .attr("stroke", (d) => d._seed ? "#d58a00" : "#ffffff")
+        .attr("stroke-width", (d) => d._seed ? 2.2 : 1.2);
+    }
+    if (graph.linkSelection) {
+      graph.linkSelection
+        .attr("opacity", 1)
+        .attr("stroke-opacity", (d) => (d.target?._isQueue ? 0.75 : 0.52));
+      applyLinkStyles(graph);
+    }
+    renderNodeDetails(graph, null);
+    return;
+  }
+
+  const neighbors = new Set(graph.adjacency.get(selectedId) || []);
+  neighbors.add(selectedId);
+
+  if (graph.nodeSelection) {
+    graph.nodeSelection
+      .attr("opacity", (d) => (neighbors.has(d.id) ? 1 : 0.2))
+      .attr("stroke", (d) => {
+        if (d.id === selectedId) {
+          return "#ff7f0e";
+        }
+        if (neighbors.has(d.id)) {
+          return "#1f3a5f";
+        }
+        return d._seed ? "#d58a00" : "#ffffff";
+      })
+      .attr("stroke-width", (d) => (d.id === selectedId ? 3.4 : neighbors.has(d.id) ? 2.2 : d._seed ? 2.2 : 1.2));
+  }
+
+  if (graph.linkSelection) {
+    graph.linkSelection
+      .attr("opacity", (d) => {
+        const sourceId = Number(d.source.id ?? d.source);
+        const targetId = Number(d.target.id ?? d.target);
+        return sourceId === selectedId || targetId === selectedId ? 1 : 0.08;
+      })
+      .attr("stroke-opacity", (d) => {
+        const sourceId = Number(d.source.id ?? d.source);
+        const targetId = Number(d.target.id ?? d.target);
+        if (sourceId === selectedId || targetId === selectedId) {
+          return 0.95;
+        }
+        return 0.08;
+      });
+  }
+
+  renderNodeDetails(graph, graph.nodeById.get(selectedId));
+}
+
 function updateSelections(graph, seedNodes) {
-  const linkData = graph.links.map((link) => {
-    const sourceId = Number(link.source.id ?? link.source);
-    const targetId = Number(link.target.id ?? link.target);
+  const visibleSeedIds = new Set(seedNodes.map((node) => node.id));
+
+  const linkData = graph.visibleLinks.map((link) => {
+    const sourceId = linkSourceId(link);
+    const targetId = linkTargetId(link);
     return {
       source: graph.nodeById.get(sourceId),
       target: graph.nodeById.get(targetId),
@@ -761,7 +898,7 @@ function updateSelections(graph, seedNodes) {
 
   graph.nodeSelection = graph.nodeLayer
     .selectAll("circle")
-    .data(graph.nodes, (d) => d.id)
+    .data(graph.visibleNodes, (d) => d.id)
     .join("circle")
     .attr("r", (d) => seedRadius(d))
     .attr("fill", (d) => makeNodeColor(d))
@@ -800,11 +937,15 @@ function updateSelections(graph, seedNodes) {
     .on("mousemove", (event) => {
       graph.tooltip.style("left", `${event.offsetX + 12}px`).style("top", `${event.offsetY + 12}px`);
     })
-    .on("mouseout", () => graph.tooltip.style("opacity", 0));
+    .on("mouseout", () => graph.tooltip.style("opacity", 0))
+    .on("click", (_, d) => {
+      graph.selectedNodeId = graph.selectedNodeId === d.id ? null : d.id;
+      applySelectionFocus(graph);
+    });
 
   graph.seedSelection = graph.seedLayer
     .selectAll("circle")
-    .data(seedNodes, (d) => d.id)
+    .data(graph.visibleNodes.filter((node) => visibleSeedIds.has(node.id)), (d) => d.id)
     .join("circle")
     .attr("r", (d) => seedRadius(d) + 4)
     .attr("fill", "none")
@@ -830,21 +971,14 @@ function updateSelections(graph, seedNodes) {
         .attr("font-size", 9)
         .attr("font-weight", "700")
         .attr("fill", "#ffffff")
-        .text((d) => `W${d.id}`);
+        .text((d) => d.label || `Q${d.id}`);
       return group;
     });
 
+  graph.workerSelection.select("text").text((d) => d.label || `Q${d.id}`);
+
+  applySelectionFocus(graph);
   updateWorkerVisuals(graph);
-}
-
-function startWorkerTicker(graph) {
-  if (graph.workerTimer) {
-    return;
-  }
-
-  graph.workerTimer = d3.interval(() => {
-    stepWorkers(graph);
-  }, 1400);
 }
 
 export function renderGraph(hostId, payloadJson) {
@@ -866,8 +1000,13 @@ export function renderGraph(hostId, payloadJson) {
     graph = initializeGraph(hostId, host, payload.queueMode);
   }
 
+  graph.visibleNodeLimit = Math.max(50, Number(payload.visibleNodeLimit || graph.visibleNodeLimit || 500));
+
   const seedNodes = mergeGraphData(graph, payload.nodes, payload.links);
-  ensureWorkers(graph, seedNodes);
+  graph.adjacency = buildAdjacency(graph);
+  syncWorkers(graph, payload.workers || []);
+  syncFrontierProxies(graph);
+  updateVisibleSubset(graph);
   ensureSimulation(graph);
   updateSelections(graph, seedNodes);
   startWorkerTicker(graph);
@@ -894,11 +1033,12 @@ export function focusNode(hostId, term) {
       || (node.domain || "").toLowerCase().includes(matchTerm);
   });
 
-  graph.nodeSelection
-    .attr("stroke", (d) => (match && d.id === match.id ? "#ff7f0e" : d._seed ? "#d58a00" : "#ffffff"))
-    .attr("stroke-width", (d) => (match && d.id === match.id ? 3.8 : d._seed ? 2.2 : 1.2));
+  graph.selectedNodeId = match ? match.id : null;
+  applySelectionFocus(graph);
 
-  if (!match) return;
+  if (!match) {
+    return;
+  }
 
   const transform = d3.zoomIdentity
     .translate(graph.width / 2 - (match.x || 0) * 1.5, graph.height / 2 - (match.y || 0) * 1.5)

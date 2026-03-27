@@ -130,6 +130,11 @@ public class GraphService : IGraphService
             }
 
             var nodeIds = nodes.Select(n => n.Id).ToHashSet();
+            var nodeIdByUrl = nodes
+                .Where(n => !string.IsNullOrWhiteSpace(n.Url))
+                .GroupBy(n => n.Url, StringComparer.Ordinal)
+                .ToDictionary(group => group.Key, group => group.First().Id, StringComparer.Ordinal);
+
             var links = linkRows
                 .Where(link => nodeIds.Contains(link.Source) && nodeIds.Contains(link.Target))
                 .Distinct()
@@ -140,12 +145,57 @@ public class GraphService : IGraphService
                 })
                 .ToList();
 
+            var workers = await GetActiveWorkersAsync(connection, nodeIdByUrl);
+
             return new GraphDataDto
             {
                 Nodes = nodes,
                 Links = links,
+                Workers = workers,
             };
         }
+    }
+
+    private static async Task<List<GraphWorkerDto>> GetActiveWorkersAsync(
+        NpgsqlConnection connection,
+        IReadOnlyDictionary<string, int> nodeIdByUrl)
+    {
+        const string workerSql = """
+            SELECT COALESCE(external_worker_id, id::int) AS worker_id,
+                   COALESCE(name, '') AS worker_name,
+                   COALESCE(status, 'idle') AS status,
+                   current_url
+                        FROM manager.worker w
+                        JOIN manager.daemon d ON d.id = w.daemon_id
+            WHERE lower(COALESCE(status, '')) = 'active'
+                            AND lower(COALESCE(d.status, '')) IN ('running', 'active')
+                        ORDER BY COALESCE(external_worker_id, id::int);
+            """;
+
+        var workers = new List<GraphWorkerDto>();
+        await using var workerCmd = new NpgsqlCommand(workerSql, connection);
+        await using var workerReader = await workerCmd.ExecuteReaderAsync();
+        while (await workerReader.ReadAsync())
+        {
+            var workerId = workerReader.GetInt32(0);
+            var currentUrl = workerReader.IsDBNull(3) ? null : workerReader.GetString(3);
+            int? nodeId = null;
+            if (!string.IsNullOrWhiteSpace(currentUrl) && nodeIdByUrl.TryGetValue(currentUrl, out var matchedNodeId))
+            {
+                nodeId = matchedNodeId;
+            }
+
+            workers.Add(new GraphWorkerDto
+            {
+                Id = workerId,
+                Name = workerReader.GetString(1),
+                Status = workerReader.GetString(2),
+                CurrentUrl = currentUrl,
+                CurrentNodeId = nodeId,
+            });
+        }
+
+        return workers;
     }
 
     /// <summary>

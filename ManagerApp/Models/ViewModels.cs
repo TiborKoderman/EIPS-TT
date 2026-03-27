@@ -38,6 +38,15 @@ public class GraphLinkDto
     public int Target { get; set; }  // ToPage ID
 }
 
+public class GraphWorkerDto
+{
+    public int Id { get; set; }
+    public string Name { get; set; } = "";
+    public string Status { get; set; } = "idle";
+    public string? CurrentUrl { get; set; }
+    public int? CurrentNodeId { get; set; }
+}
+
 /// <summary>
 /// Container for complete graph data (nodes + links)
 /// Used by D3.js graph visualization component
@@ -46,6 +55,7 @@ public class GraphDataDto
 {
     public List<GraphNodeDto> Nodes { get; set; } = new();
     public List<GraphLinkDto> Links { get; set; } = new();
+    public List<GraphWorkerDto> Workers { get; set; } = new();
 }
 
 /// <summary>

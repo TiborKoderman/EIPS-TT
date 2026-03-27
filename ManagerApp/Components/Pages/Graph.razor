@@ -14,8 +14,8 @@
 <div class="page-body">
     <div class="card mb-lg">
         <div class="flex items-center gap-md">
-            <label class="text-small text-muted">Node limit</label>
-            <select @bind="SelectedLimit">
+            <label class="text-small text-muted">Visible node limit</label>
+            <select @bind="VisibleNodeLimit">
                 <option value="250">250</option>
                 <option value="500">500</option>
                 <option value="1000">1000</option>
@@ -24,6 +24,7 @@
             <button class="btn btn-primary" @onclick="ReloadGraph">
                 <span class="mdi mdi-refresh"></span> Reload
             </button>
+            <span class="text-small text-muted">Loaded: @GraphData.Nodes.Count nodes, @GraphData.Links.Count links</span>
         </div>
     </div>
 
@@ -39,12 +40,14 @@
     {
         <div class="card mb-lg graph-card">
             <div class="graph-shell">
-                <div class="graph-toolbar">
-                    <input type="search" placeholder="Search URL/domain..." @bind="SearchTerm" @bind:event="oninput" />
-                    <button class="btn" @onclick="FocusSearch"><span class="mdi mdi-crosshairs-gps"></span> Focus</button>
-                    <button class="btn" @onclick="ExportSvg"><span class="mdi mdi-file-image"></span> Export SVG</button>
+                <div class="graph-main">
+                    <div class="graph-toolbar">
+                        <input type="search" placeholder="Search URL/domain..." @bind="SearchTerm" @bind:event="oninput" />
+                        <button class="btn" @onclick="FocusSearch"><span class="mdi mdi-crosshairs-gps"></span> Focus</button>
+                        <button class="btn" @onclick="ExportSvg"><span class="mdi mdi-file-image"></span> Export SVG</button>
+                    </div>
+                    <div id="@GraphHostId" class="graph-canvas" style="height:640px;"></div>
                 </div>
-                <div id="@GraphHostId" class="graph-canvas" style="height:640px;"></div>
             </div>
         </div>
     }
@@ -64,12 +67,14 @@
 
 @code {
     private GraphDataDto GraphData = new();
-    private int SelectedLimit = 500;
+    private int VisibleNodeLimit = 500;
     private bool IsLoading = true;
     private string? Error;
     private string? SearchTerm;
     private readonly string GraphHostId = $"graph_{Guid.NewGuid():N}";
     private IJSObjectReference? _graphModule;
+    private readonly CancellationTokenSource _refreshCts = new();
+    private Task? _refreshTask;
 
     private IReadOnlyList<string> GraphPending =>
     [
@@ -82,6 +87,7 @@
     protected override async Task OnInitializedAsync()
     {
         await ReloadGraph();
+        _refreshTask = RunAutoRefreshLoopAsync(_refreshCts.Token);
     }
 
     protected override async Task OnAfterRenderAsync(bool firstRender)
@@ -91,11 +97,7 @@
             _graphModule = await Js.InvokeAsync<IJSObjectReference>("import", "./js/graph.js");
         }
 
-        if (_graphModule != null && !IsLoading && string.IsNullOrWhiteSpace(Error) && GraphData.Nodes.Count > 0)
-        {
-            var payload = JsonSerializer.Serialize(GraphData);
-            await _graphModule.InvokeVoidAsync("renderGraph", GraphHostId, payload);
-        }
+        await TryRenderGraphAsync();
     }
 
     private async Task ReloadGraph()
@@ -105,7 +107,7 @@
 
         try
         {
-            GraphData = await GraphService.GetGraphDataAsync(SelectedLimit);
+            GraphData = await GraphService.GetGraphDataAsync(VisibleNodeLimit);
         }
         catch (Exception ex)
         {
@@ -115,6 +117,47 @@
         {
             IsLoading = false;
         }
+
+        await TryRenderGraphAsync();
+    }
+
+    private async Task RunAutoRefreshLoopAsync(CancellationToken cancellationToken)
+    {
+        using var timer = new PeriodicTimer(TimeSpan.FromSeconds(4));
+        while (!cancellationToken.IsCancellationRequested)
+        {
+            try
+            {
+                if (!await timer.WaitForNextTickAsync(cancellationToken))
+                {
+                    break;
+                }
+            }
+            catch (OperationCanceledException)
+            {
+                break;
+            }
+
+            await InvokeAsync(async () =>
+            {
+                if (!IsLoading)
+                {
+                    await ReloadGraph();
+                    StateHasChanged();
+                }
+            });
+        }
+    }
+
+    private async Task TryRenderGraphAsync()
+    {
+        if (_graphModule == null || IsLoading || !string.IsNullOrWhiteSpace(Error) || GraphData.Nodes.Count == 0)
+        {
+            return;
+        }
+
+        var payload = JsonSerializer.Serialize(GraphData);
+        await _graphModule.InvokeVoidAsync("renderGraph", GraphHostId, payload);
     }
 
     private async Task FocusSearch()
@@ -139,6 +182,20 @@
 
     public async ValueTask DisposeAsync()
     {
+        _refreshCts.Cancel();
+        if (_refreshTask is not null)
+        {
+            try
+            {
+                await _refreshTask;
+            }
+            catch (OperationCanceledException)
+            {
+                // Expected on disposal.
+            }
+        }
+
+        _refreshCts.Dispose();
         if (_graphModule != null)
         {
             try

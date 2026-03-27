@@ -1196,6 +1196,10 @@ textarea:focus {
     position: relative;
 }
 
+.graph-main {
+    min-width: 0;
+}
+
 .graph-status-legend {
     display: flex;
     flex-wrap: wrap;
@@ -1239,6 +1243,38 @@ textarea:focus {
     background: linear-gradient(180deg, #ffffff 0%, #f8fcfa 100%);
     position: relative;
     overflow: hidden;
+}
+
+.graph-details-panel {
+    position: absolute;
+    top: var(--spacing-md);
+    right: var(--spacing-md);
+    width: min(360px, calc(100% - 2 * var(--spacing-md)));
+    border: 1px solid var(--color-border-light);
+    border-radius: var(--radius-md);
+    background: rgba(255, 255, 255, 0.96);
+    backdrop-filter: blur(4px);
+    padding: var(--spacing-md);
+    max-height: calc(100% - 2 * var(--spacing-md));
+    overflow: auto;
+    font-size: var(--font-size-sm);
+    color: var(--color-text-secondary);
+    z-index: 12;
+    box-shadow: 0 12px 28px rgba(15, 34, 24, 0.16);
+}
+
+.graph-details-panel.hidden {
+    display: none;
+}
+
+.graph-details-panel h3 {
+    margin: 0 0 var(--spacing-sm);
+    color: var(--color-text-primary);
+}
+
+.graph-details-panel p {
+    margin: 0 0 var(--spacing-xs);
+    overflow-wrap: anywhere;
 }
 
 .graph-tooltip {
@@ -1299,6 +1335,10 @@ textarea:focus {
 
     .graph-toolbar {
         flex-wrap: wrap;
+    }
+
+    .graph-details-panel {
+        width: calc(100% - 2 * var(--spacing-md));
     }
 
     .pages-toolbar-row {
