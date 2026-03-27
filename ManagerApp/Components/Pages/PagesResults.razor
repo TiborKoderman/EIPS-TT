@@ -9,6 +9,12 @@
 <div class="page-header">
     <h1 class="page-title">Collected Pages</h1>
     <p class="page-subtitle">Search indexed pages and inspect crawl metadata</p>
+    <div class="mt-sm">
+        <a class="btn" href="/relevance">
+            <span class="mdi mdi-chart-bell-curve-cumulative"></span>
+            Relevance Report
+        </a>
+    </div>
 </div>
 
 <div class="page-body">
@@ -63,34 +69,6 @@
 
             <span class="live-pill"><span class="live-dot"></span> Live</span>
             <span class="text-small text-muted">updated @GetSinceUpdateText()</span>
-        </div>
-    </div>
-
-    <div class="card mb-lg">
-        <div class="card-header-inline">
-            <h2 class="card-title">Relevance evaluation (full database)</h2>
-            <span class="text-small text-muted">heuristic, no classifier</span>
-        </div>
-        <div class="grid grid-cols-4">
-            <div>
-                <div class="stat-label">Pages / target</div>
-                <div class="stat-value">@Evaluation.TotalPages / @Evaluation.TargetPageCount</div>
-            </div>
-            <div>
-                <div class="stat-label">Estimated relevant</div>
-                <div class="stat-value">@Evaluation.EstimatedRelevantPages (@Percent(Evaluation.EstimatedRelevantPages, Evaluation.EvaluatedPages))</div>
-            </div>
-            <div>
-                <div class="stat-label">Keyword evidence</div>
-                <div class="stat-value">@Evaluation.KeywordEvidencePages</div>
-            </div>
-            <div>
-                <div class="stat-label">Avg / median / top</div>
-                <div class="stat-value">@Evaluation.AverageScore.ToString("0.00") / @Evaluation.MedianScore.ToString("0.00") / @Evaluation.TopScore.ToString("0.00")</div>
-            </div>
-        </div>
-        <div class="text-small text-muted mt-sm">
-            Signals used: allowed domain suffix match, keyword hits in URL path/query, same-host parent boost, and depth penalty from frontier metadata.
         </div>
     </div>
 
@@ -301,7 +279,6 @@
     private bool ShowFilterDropdown;
     private string? _copiedUrl;
     private DateTime _copiedUrlAtUtc;
-    private PageEvaluationSummaryDto Evaluation = new();
 
     private static readonly IReadOnlyList<(string Value, string Label)> FilterOptions =
     [
@@ -380,7 +357,6 @@
         var selectedId = keepSelection ? SelectedPage?.Id : null;
         Rows = await PageService.SearchPagesAsync(SearchTerm, PageTypeFilter, OrderBy, 0, 120);
         Total = await PageService.GetSearchResultsCountAsync(SearchTerm, PageTypeFilter);
-        Evaluation = await PageService.GetEvaluationSummaryAsync();
         _lastUpdatedUtc = DateTime.UtcNow;
 
         if (Rows.Count == 0)
@@ -408,16 +384,6 @@
     {
         var seconds = Math.Max(0, (int)(DateTime.UtcNow - _lastUpdatedUtc).TotalSeconds);
         return $"{seconds}s ago";
-    }
-
-    private static string Percent(int part, int whole)
-    {
-        if (whole <= 0)
-        {
-            return "0%";
-        }
-
-        return $"{(part * 100.0 / whole):0.0}%";
     }
 
     private static string GetFilterLabel(string value)

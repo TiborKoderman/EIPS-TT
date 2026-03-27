@@ -26,16 +26,33 @@ BEGIN
 END $$;
 
 ALTER TABLE crawldb.frontier_queue
-    ADD CONSTRAINT chk_frontier_queue_state
-    CHECK (state IN (
-        'queued',
-        'in_memory',
-        'locked',
-        'processing',
-        'completed',
-        'done',
-        'failed'
-    ));
+    DROP CONSTRAINT IF EXISTS chk_frontier_queue_state;
+
+DO $$
+BEGIN
+    -- Only add string-state check when the state column is still textual.
+    -- When state is enum (after migration 06), this check would fail on lowercase literals.
+    IF EXISTS (
+        SELECT 1
+        FROM information_schema.columns
+        WHERE table_schema = 'crawldb'
+          AND table_name = 'frontier_queue'
+          AND column_name = 'state'
+          AND data_type IN ('character varying', 'text')
+    ) THEN
+        ALTER TABLE crawldb.frontier_queue
+            ADD CONSTRAINT chk_frontier_queue_state
+            CHECK (state IN (
+                'queued',
+                'in_memory',
+                'locked',
+                'processing',
+                'completed',
+                'done',
+                'failed'
+            ));
+    END IF;
+END $$;
 
 CREATE INDEX IF NOT EXISTS idx_frontier_queue_state_priority
     ON crawldb.frontier_queue(state, priority DESC, discovered_at ASC);

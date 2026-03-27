@@ -5,6 +5,7 @@
 @inject IStatisticsService StatisticsService
 @inject IWorkerService WorkerService
 @inject IGraphService GraphService
+@inject IPageService PageService
 @inject NavigationManager Navigation
 @implements IAsyncDisposable
 
@@ -127,6 +128,28 @@
                             </div>
                         }
                     </div>
+
+                    @if (topQueueItems.Count > 0)
+                    {
+                        <div class="dashboard-queue-widget mt-md">
+                            <div class="text-small font-semibold mb-sm">Top queue items (non-claimed)</div>
+                            <div class="dashboard-queue-viewport">
+                                <ul class="list dashboard-queue-list ticker" style="--rows:@topQueueItems.Count;">
+                                    @foreach (var item in topQueueItems)
+                                    {
+                                        var tooltip = $"{item.State} | reason=queued | url={item.Url}";
+                                        <li class="dashboard-queue-row" title="@tooltip">
+                                            <div class="flex items-center justify-between gap-sm">
+                                                <span class="badge @GetQueueStateBadgeClass(item.State)">@item.State.ToUpperInvariant()</span>
+                                                <span class="text-small font-semibold">R @item.RelevanceScore.ToString("0.00")</span>
+                                            </div>
+                                            <div class="text-small text-muted queue-url">@item.Url</div>
+                                        </li>
+                                    }
+                                </ul>
+                            </div>
+                        </div>
+                    }
                 }
             </div>
 
@@ -148,7 +171,12 @@
                             <li class="list-item worker-list-clickable" @onclick="() => OpenWorkerDetail(worker.Id)">
                                 <div class="flex items-center justify-between gap-sm">
                                     <strong>@worker.Name</strong>
-                                    <span class="badge @GetStatusBadgeClass(worker.Status)">@worker.Status</span>
+                                    <div class="flex items-center gap-sm">
+                                        <span class="badge @GetStatusBadgeClass(worker.Status)">@worker.Status</span>
+                                        <span class="badge @GetStatusBadgeClass(worker.Status) state-badge-short" title="@BuildWorkerStateTooltip(worker)">
+                                            <span class="mdi @GetStatusIcon(worker.Status)"></span>
+                                        </span>
+                                    </div>
                                 </div>
                                 <div class="text-small text-muted worker-url-row">
                                     <HoverTooltip Text="@activity.Label" Class="worker-activity-tooltip-wrap">
@@ -198,10 +226,22 @@
                                 @foreach (var log in recentLogs.OrderByDescending(l => l.TimestampUtc).Take(15))
                                 {
                                     <tr>
-                                        <td><span class="badge @GetLogLevelClass(log.Level)">@log.Level</span></td>
+                                        <td><span class="badge severity-badge @GetLogLevelClass(log.Level)">@ToShortSeverity(log.Level)</span></td>
                                         <td class="workers-log-ts">@log.TimestampUtc.ToLocalTime().ToString("HH:mm:ss")</td>
                                         <td class="text-small text-muted">@((log.DaemonId ?? "local-default") + " / w" + (log.WorkerId?.ToString() ?? "-"))</td>
-                                        <td>@log.Message</td>
+                                        <td>
+                                            <span class="event-icon">@GetEventIcon(log.Message)</span>
+                                            @if (TryRenderStatusTransition(log.Message, out var fromState, out var toState, out var details))
+                                            {
+                                                <span class="badge @GetStatusBadgeClass(fromState) state-badge-short" title="@details"><span class="mdi @GetStatusIcon(fromState)"></span></span>
+                                                <span class="mdi mdi-arrow-right-thin"></span>
+                                                <span class="badge @GetStatusBadgeClass(toState) state-badge-short" title="@details"><span class="mdi @GetStatusIcon(toState)"></span></span>
+                                            }
+                                            else
+                                            {
+                                                <span>@log.Message</span>
+                                            }
+                                        </td>
                                     </tr>
                                 }
                             </tbody>
@@ -271,6 +311,7 @@
     private Dictionary<string, int>? workerStatusCounts;
     private List<WorkerViewModel> workers = new();
     private List<DaemonQueueSnapshot> daemonQueueSnapshots = new();
+    private List<QueueTopItemViewModel> topQueueItems = new();
     private List<WorkerThroughputPointViewModel> dashboardThroughputSeries = new();
     private List<WorkerLogEntryViewModel> recentLogs = new();
     private GraphDataDto graphPreview = new();
@@ -372,6 +413,7 @@
             var daemonStatus = await WorkerService.GetDaemonStatusAsync();
             var events = await WorkerService.GetRecentCrawlerEventsAsync(2000);
             daemonQueueSnapshots = BuildDaemonQueueSnapshots(daemonStatus, events);
+            topQueueItems = await PageService.GetTopQueueItemsAsync(20);
             dashboardThroughputSeries = await WorkerService.GetThroughputSeriesAsync(workerId: null, windowMinutes: 60, bucketSeconds: 30);
             dashboardThroughputUsingFallback = false;
             if (dashboardThroughputSeries.Count == 0)
@@ -420,6 +462,7 @@
             "error" => "badge-error",
             "idle" => "badge-info",
             "paused" => "badge-warning",
+            "stopped" => "badge-warning",
             _ => "badge-info"
         };
     }
@@ -433,6 +476,108 @@
             "debug" => "badge-secondary",
             _ => "badge-secondary"
         };
+
+    private static string ToShortSeverity(string level)
+    {
+        return level.ToUpperInvariant() switch
+        {
+            "WARNING" => "WRN",
+            "INFORMATION" => "INF",
+            "DEBUG" => "DBG",
+            _ => level.ToUpperInvariant() switch
+            {
+                var text when text.Length >= 3 => text[..3],
+                var text => text,
+            }
+        };
+    }
+
+    private static string GetEventIcon(string message)
+    {
+        var text = (message ?? string.Empty).ToLowerInvariant();
+        if (text.Contains("frontier-prune", StringComparison.Ordinal)) return "PRN";
+        if (text.Contains("frontier-lease", StringComparison.Ordinal)) return "LSE";
+        if (text.Contains("frontier-complete", StringComparison.Ordinal)) return "FIN";
+        if (text.Contains("worker-metric", StringComparison.Ordinal)) return "MET";
+        if (text.Contains("page-reported", StringComparison.Ordinal)) return "PGE";
+        if (text.Contains("status-change", StringComparison.Ordinal)) return "STS";
+        return "---";
+    }
+
+    private static bool TryRenderStatusTransition(string message, out string fromState, out string toState, out string details)
+    {
+        fromState = "Idle";
+        toState = "Idle";
+        details = message ?? string.Empty;
+        if (string.IsNullOrWhiteSpace(message) || !message.Contains("[status-change]", StringComparison.OrdinalIgnoreCase))
+        {
+            return false;
+        }
+
+        var text = message;
+        var prevToken = "previousStatus=";
+        var statusToken = "status=";
+        var prevIdx = text.IndexOf(prevToken, StringComparison.OrdinalIgnoreCase);
+        var statusIdx = text.IndexOf(statusToken, StringComparison.OrdinalIgnoreCase);
+        if (statusIdx < 0)
+        {
+            return false;
+        }
+
+        if (prevIdx >= 0)
+        {
+            var prevStart = prevIdx + prevToken.Length;
+            var prevEnd = text.IndexOf('|', prevStart);
+            fromState = (prevEnd >= 0 ? text[prevStart..prevEnd] : text[prevStart..]).Trim();
+        }
+
+        var nextStart = statusIdx + statusToken.Length;
+        var nextEnd = text.IndexOf('|', nextStart);
+        toState = (nextEnd >= 0 ? text[nextStart..nextEnd] : text[nextStart..]).Trim();
+        if (string.IsNullOrWhiteSpace(fromState))
+        {
+            fromState = "Idle";
+        }
+        if (string.IsNullOrWhiteSpace(toState))
+        {
+            toState = "Idle";
+        }
+
+        return true;
+    }
+
+    private static string GetStatusIcon(string status)
+    {
+        return (status ?? string.Empty).Trim().ToLowerInvariant() switch
+        {
+            "active" => "mdi-play-circle",
+            "idle" => "mdi-timer-sand",
+            "paused" => "mdi-pause-circle",
+            "stopped" => "mdi-stop-circle",
+            "error" => "mdi-alert-circle",
+            _ => "mdi-help-circle",
+        };
+    }
+
+    private static string BuildWorkerStateTooltip(WorkerViewModel worker)
+    {
+        return $"{worker.Status} | reason={worker.StatusReason ?? "n/a"} | url={(string.IsNullOrWhiteSpace(worker.CurrentUrl) ? "n/a" : worker.CurrentUrl)}";
+    }
+
+    private static string GetQueueStateBadgeClass(string state)
+    {
+        return (state ?? string.Empty).Trim().ToLowerInvariant() switch
+        {
+            "queued" => "badge-info",
+            "in_memory" => "badge-info",
+            "locked" => "badge-warning",
+            "processing" => "badge-success",
+            "completed" => "badge-success",
+            "duplicate" => "badge-warning",
+            "failed" => "badge-error",
+            _ => "badge-secondary",
+        };
+    }
 
     private string GetRecentEventSourceLabel()
     {
@@ -695,6 +840,7 @@
             }
 
             var parts = new List<string>();
+            AppendPayloadPart(parts, document.RootElement, "previousStatus");
             AppendPayloadPart(parts, document.RootElement, "status");
             AppendPayloadPart(parts, document.RootElement, "reason");
             AppendPayloadPart(parts, document.RootElement, "url");

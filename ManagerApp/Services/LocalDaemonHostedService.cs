@@ -1,5 +1,7 @@
 using System.Diagnostics;
 using System.Net;
+using Microsoft.AspNetCore.Hosting.Server;
+using Microsoft.AspNetCore.Hosting.Server.Features;
 
 namespace ManagerApp.Services;
 
@@ -9,6 +11,7 @@ public sealed class LocalDaemonHostedService : IHostedService
     private readonly ILogger<LocalDaemonHostedService> _logger;
     private readonly DaemonChannelService _daemonChannel;
     private readonly IHostApplicationLifetime _applicationLifetime;
+    private readonly IServer _server;
     private Process? _process;
     private Process? _dockerStartProcess;
 
@@ -16,12 +19,14 @@ public sealed class LocalDaemonHostedService : IHostedService
         IConfiguration configuration,
         ILogger<LocalDaemonHostedService> logger,
         DaemonChannelService daemonChannel,
-        IHostApplicationLifetime applicationLifetime)
+        IHostApplicationLifetime applicationLifetime,
+        IServer server)
     {
         _configuration = configuration;
         _logger = logger;
         _daemonChannel = daemonChannel;
         _applicationLifetime = applicationLifetime;
+        _server = server;
     }
 
     public Task StartAsync(CancellationToken cancellationToken)
@@ -231,6 +236,18 @@ public sealed class LocalDaemonHostedService : IHostedService
         if (!string.IsNullOrWhiteSpace(configuredHttp))
         {
             return NormalizeHttpUrlCandidate(configuredHttp) ?? configuredHttp.TrimEnd('/');
+        }
+
+        var addressesFeature = _server.Features.Get<IServerAddressesFeature>();
+        if (addressesFeature is not null)
+        {
+            var runtimeAddress = addressesFeature.Addresses
+                .Select(NormalizeHttpUrlCandidate)
+                .FirstOrDefault(url => !string.IsNullOrWhiteSpace(url));
+            if (!string.IsNullOrWhiteSpace(runtimeAddress))
+            {
+                return runtimeAddress!;
+            }
         }
 
         var configured = _configuration["CrawlerApi:ManagerSocketUrl"];

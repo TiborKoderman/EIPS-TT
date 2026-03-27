@@ -452,14 +452,66 @@ textarea:focus {
     padding-left: var(--spacing-sm);
 }
 
+.dashboard-queue-viewport {
+    max-height: 240px;
+    overflow: hidden;
+    border: 1px solid var(--color-border-light);
+    border-radius: var(--radius-sm);
+    background: var(--color-bg-base);
+}
+
 .dashboard-queue-list {
     margin: 0;
-    max-height: 170px;
-    overflow: auto;
+    max-height: 240px;
+    overflow: hidden;
+}
+
+.dashboard-queue-list.ticker {
+    --row-h: 54px;
+    animation: queue-ticker 14s steps(var(--rows, 1), end) infinite;
+}
+
+@keyframes queue-ticker {
+    0%, 12% {
+        transform: translateY(0);
+    }
+    100% {
+        transform: translateY(calc((var(--rows, 1) - 1) * -1 * var(--row-h)));
+    }
 }
 
 .dashboard-queue-row {
+    min-height: 54px;
     padding: 8px;
+}
+
+.queue-url {
+    overflow-wrap: anywhere;
+    line-height: 1.25;
+}
+
+.state-badge-short {
+    width: 26px;
+    min-width: 26px;
+    height: 26px;
+    padding: 0;
+    border-radius: 999px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.severity-badge {
+    min-width: 42px;
+    text-align: center;
+    border-radius: 6px;
+    padding: 2px 6px;
+    font-weight: 700;
+    letter-spacing: 0.04em;
+}
+
+.event-icon {
+    margin-right: 6px;
 }
 
 .status-row {

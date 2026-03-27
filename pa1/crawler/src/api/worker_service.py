@@ -258,22 +258,29 @@ class DaemonWorkerService(WorkerControlService):
                 }
             self._daemon_running = True
             self._daemon_started_at = utc_now_iso()
+            seeded = self._enqueue_initial_seeds_locked()
             for worker in self._workers.values():
                 if worker.status == "Stopped":
                     worker.status = "Idle"
                     worker.status_reason = "daemon-started"
-                self._enqueue_worker_seeds_locked(worker.id)
+                if worker.status_reason == "daemon-initialized":
+                    worker.status_reason = "ready-awaiting-queue"
+                worker.current_url = None
                 self._append_log(worker.id, "Info", "Daemon started.")
                 self._emit_manager_event(
                     "status-change",
                     worker_id=worker.id,
-                    payload={"status": worker.status, "reason": "daemon-start"},
+                    payload={
+                        "status": worker.status,
+                        "reason": "daemon-start",
+                        "previousStatus": "Stopped" if worker.status == "Idle" else worker.status,
+                    },
                 )
             return {
                 "running": True,
                 "alreadyRunning": False,
                 "startedAt": self._daemon_started_at,
-                "note": "Crawler daemon started.",
+                "note": f"Crawler daemon started. Seeded queue with {seeded} URL(s).",
             }
 
     def stop_daemon(self) -> dict[str, object]:
@@ -359,7 +366,11 @@ class DaemonWorkerService(WorkerControlService):
             worker.status_reason = "manually-started"
             worker.started_at = utc_now_iso()
             self._append_log(worker_id, "Info", "Worker started via API.")
-            self._emit_manager_event("status-change", worker_id=worker_id, payload={"status": "Active", "reason": "manual-start"})
+            self._emit_manager_event(
+                "status-change",
+                worker_id=worker_id,
+                payload={"status": "Active", "previousStatus": "Idle", "reason": "manual-start"},
+            )
             return True
 
     def pause_worker(self, worker_id: int) -> bool:
@@ -373,7 +384,11 @@ class DaemonWorkerService(WorkerControlService):
             worker.status_reason = "manually-paused"
             self._release_claim_for_worker(worker_id, requeue=True, reason="worker-paused")
             self._append_log(worker_id, "Info", "Worker paused via API.")
-            self._emit_manager_event("status-change", worker_id=worker_id, payload={"status": "Paused", "reason": "manual-pause"})
+            self._emit_manager_event(
+                "status-change",
+                worker_id=worker_id,
+                payload={"status": "Paused", "previousStatus": "Active", "reason": "manual-pause"},
+            )
             return True
 
     def stop_worker(self, worker_id: int) -> bool:
@@ -388,7 +403,11 @@ class DaemonWorkerService(WorkerControlService):
             self._terminate_process_if_running(worker_id)
             self._stop_thread_worker(worker_id, reason="manual-stop")
             self._append_log(worker_id, "Info", "Worker stopped via API.")
-            self._emit_manager_event("status-change", worker_id=worker_id, payload={"status": "Stopped", "reason": "manual-stop"})
+            self._emit_manager_event(
+                "status-change",
+                worker_id=worker_id,
+                payload={"status": "Stopped", "previousStatus": "Active", "reason": "manual-stop"},
+            )
             return True
 
     def spawn_worker(
@@ -411,10 +430,6 @@ class DaemonWorkerService(WorkerControlService):
                 for entry in self._global_config.seed_entries
                 if entry.enabled and entry.url.strip()
             ]
-        effective_seed_url = seed_url
-        if not effective_seed_url and normalized_seed_urls:
-            effective_seed_url = normalized_seed_urls[0]
-
         with self._lock:
             if not self._daemon_running:
                 raise RuntimeError("Crawler daemon is not running. Start daemon before spawning workers.")
@@ -426,8 +441,8 @@ class DaemonWorkerService(WorkerControlService):
                 id=worker_id,
                 name=worker_name,
                 status="Idle",
-                status_reason="spawned-awaiting-start",
-                current_url=effective_seed_url,
+                status_reason="ready-awaiting-queue",
+                current_url=None,
                 pages_processed=0,
                 error_count=0,
                 started_at=None,
@@ -448,8 +463,6 @@ class DaemonWorkerService(WorkerControlService):
             self._groups[target_group_id].worker_ids.append(worker_id)
 
             self._append_log(worker_id, "Info", f"Worker spawned in {requested_mode} mode.")
-            if effective_seed_url:
-                self._append_log(worker_id, "Info", f"Initial seed assigned: {effective_seed_url}")
             if len(normalized_seed_urls) > 1:
                 self._append_log(worker_id, "Info", f"Configured {len(normalized_seed_urls)} seed URLs.")
 
@@ -466,7 +479,7 @@ class DaemonWorkerService(WorkerControlService):
                     "name": worker.name,
                     "mode": worker.mode,
                     "groupId": target_group_id,
-                    "seedUrl": effective_seed_url,
+                    "seedUrl": None,
                 },
             )
 
@@ -1112,15 +1125,6 @@ class DaemonWorkerService(WorkerControlService):
         stop_event = threading.Event()
 
         def run() -> None:
-            with self._lock:
-                queued_count = self._enqueue_worker_seeds_locked(worker_id)
-                if queued_count == 0:
-                    self._append_log(
-                        worker_id,
-                        "Warning",
-                        "No seed URLs were queued for this worker; verify queue mode and seed config.",
-                    )
-
             while not stop_event.is_set():
                 time.sleep(1.2)
 
@@ -2058,22 +2062,17 @@ class DaemonWorkerService(WorkerControlService):
         for key in stale_keys:
             self._site_next_available_monotonic.pop(key, None)
 
-    def _enqueue_worker_seeds_locked(self, worker_id: int) -> int:
-        worker = self._workers.get(worker_id)
-        if worker is None:
-            return 0
-
+    def _enqueue_initial_seeds_locked(self) -> int:
         seeds: list[str] = []
-        runtime_seed_lines = worker.runtime_config.get("Seed URLs", "")
-        if runtime_seed_lines:
-            seeds.extend(
-                line.strip()
-                for line in runtime_seed_lines.splitlines()
-                if line.strip()
-            )
 
-        if worker.current_url:
-            seeds.insert(0, worker.current_url.strip())
+        for worker in self._workers.values():
+            runtime_seed_lines = worker.runtime_config.get("Seed URLs", "")
+            if runtime_seed_lines:
+                seeds.extend(
+                    line.strip()
+                    for line in runtime_seed_lines.splitlines()
+                    if line.strip()
+                )
 
         if not seeds:
             seeds.extend(
@@ -2113,8 +2112,11 @@ class DaemonWorkerService(WorkerControlService):
                 worker_id=worker.id,
                 payload={
                     "status": status,
+                    "previousStatus": prev_status,
                     "reason": reason,
+                    "previousReason": prev_reason,
                     "currentUrl": current_url,
+                    "previousUrl": prev_url,
                 },
             )
 

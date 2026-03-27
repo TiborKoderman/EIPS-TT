@@ -3,6 +3,7 @@ using ManagerApp.Data;
 using ManagerApp.Models;
 using Npgsql;
 using NpgsqlTypes;
+using System.Net;
 using System.Text.Json;
 
 namespace ManagerApp.Services;
@@ -112,6 +113,155 @@ public class PageService : IPageService
             .Skip(skip)
             .Take(take)
             .ToList();
+    }
+
+    public async Task<List<RelevanceReportRowDto>> GetRelevanceReportAsync(string? searchTerm, int skip = 0, int take = 100)
+    {
+        var query = _context.Pages
+            .Where(page => page.Url != null && page.PageTypeCode != "FRONTIER");
+
+        if (!string.IsNullOrWhiteSpace(searchTerm))
+        {
+            var pattern = $"%{searchTerm.Trim()}%";
+            query = query.Where(p =>
+                (p.Url != null && EF.Functions.ILike(p.Url, pattern)) ||
+                (p.HtmlContent != null && EF.Functions.ILike(p.HtmlContent, pattern))
+            );
+        }
+
+        var rows = await query
+            .Include(page => page.Site)
+            .Select(page => new PageSearchDto
+            {
+                Id = page.Id,
+                Url = page.Url ?? string.Empty,
+                PageType = page.PageTypeCode ?? "HTML",
+                HttpStatus = page.HttpStatusCode,
+                AccessedTime = page.AccessedTime,
+                SiteDomain = page.Site != null ? page.Site.Domain : null,
+                IsDuplicate = page.DuplicateOfPageId != null,
+            })
+            .ToListAsync();
+
+        if (rows.Count == 0)
+        {
+            return new List<RelevanceReportRowDto>();
+        }
+
+        var policy = await LoadRelevancePolicyAsync();
+        var hints = await LoadFrontierHintsAsync(rows.Select(row => row.Url));
+        foreach (var row in rows)
+        {
+            var hint = hints.GetValueOrDefault(row.Url);
+            var score = ScorePageUrl(
+                row.Url,
+                hint.SourceUrl,
+                hint.Depth,
+                policy,
+                out var hasKeyword,
+                out var hasAllowedSuffix,
+                out var hasSameHost);
+
+            row.RelevanceScore = score;
+            row.HasKeywordEvidence = hasKeyword;
+            row.HasAllowedSuffixEvidence = hasAllowedSuffix;
+            row.HasSameHostEvidence = hasSameHost;
+            row.FrontierDepth = hint.Depth;
+        }
+
+        return rows
+            .OrderByDescending(row => row.RelevanceScore)
+            .ThenByDescending(row => row.AccessedTime)
+            .ThenBy(row => row.Id)
+            .Skip(Math.Max(0, skip))
+            .Take(Math.Clamp(take, 1, 500))
+            .Select(row => new RelevanceReportRowDto
+            {
+                Id = row.Id,
+                Url = row.Url,
+                PageType = row.PageType,
+                HttpStatus = row.HttpStatus,
+                AccessedTime = row.AccessedTime,
+                SiteDomain = row.SiteDomain,
+                RelevanceScore = row.RelevanceScore,
+                HasKeywordEvidence = row.HasKeywordEvidence,
+                HasAllowedSuffixEvidence = row.HasAllowedSuffixEvidence,
+                HasSameHostEvidence = row.HasSameHostEvidence,
+                FrontierDepth = row.FrontierDepth,
+            })
+            .ToList();
+    }
+
+    public async Task<List<QueueTopItemViewModel>> GetTopQueueItemsAsync(int take = 20)
+    {
+        var boundedTake = Math.Clamp(take, 1, 100);
+        var items = new List<QueueTopItemViewModel>();
+
+        await using var connection = new NpgsqlConnection(_context.Database.GetConnectionString());
+        await connection.OpenAsync();
+
+        const string sql = """
+            SELECT
+                url,
+                source_url,
+                priority,
+                depth,
+                discovered_at,
+                state
+            FROM crawldb.frontier_queue
+            WHERE
+                (
+                    state::text IN ('QUEUED', 'queued', 'in_memory')
+                    OR state::text = 'LOCKED'
+                )
+                AND (
+                    locked_by_worker_id IS NULL
+                    OR state::text IN ('QUEUED', 'queued', 'in_memory')
+                )
+            ORDER BY priority DESC, discovered_at ASC
+            LIMIT @take;
+            """;
+
+        await using (var command = new NpgsqlCommand(sql, connection))
+        {
+            command.Parameters.AddWithValue("take", boundedTake);
+            await using var reader = await command.ExecuteReaderAsync();
+            while (await reader.ReadAsync())
+            {
+                items.Add(new QueueTopItemViewModel
+                {
+                    Url = reader.IsDBNull(0) ? string.Empty : reader.GetString(0),
+                    SourceUrl = reader.IsDBNull(1) ? null : reader.GetString(1),
+                    Priority = reader.IsDBNull(2) ? 0 : reader.GetInt32(2),
+                    Depth = reader.IsDBNull(3) ? 0 : reader.GetInt32(3),
+                    DiscoveredAt = reader.IsDBNull(4) ? DateTime.UtcNow : reader.GetDateTime(4),
+                    State = reader.IsDBNull(5) ? "QUEUED" : reader.GetString(5),
+                });
+            }
+        }
+
+        if (items.Count == 0)
+        {
+            return items;
+        }
+
+        var policy = await LoadRelevancePolicyAsync();
+        foreach (var row in items)
+        {
+            row.RelevanceScore = ScorePageUrl(
+                row.Url,
+                row.SourceUrl,
+                row.Depth,
+                policy,
+                out var hasKeyword,
+                out var hasAllowedSuffix,
+                out var hasSameHost);
+            row.HasKeywordEvidence = hasKeyword;
+            row.HasAllowedSuffixEvidence = hasAllowedSuffix;
+            row.HasSameHostEvidence = hasSameHost;
+        }
+
+        return items;
     }
 
     /// <summary>
@@ -295,7 +445,12 @@ public class PageService : IPageService
     {
         var fallback = new RelevancePolicySnapshot
         {
-            Keywords = ["medicine", "health", "doctor", "clinic", "hospital", "treatment", "disease"],
+            Keywords =
+            [
+                "medicine", "medic", "health", "doctor", "clinic", "hospital", "treatment", "disease",
+                "zdrav", "zdravje", "bolnis", "ambul", "cepl", "preven", "higi"
+            ],
+            AllowedSuffixes = ["gov.si", "nijz.si", "kclj.si", "zdravljenjenadom.si"],
         };
 
         try
@@ -339,6 +494,23 @@ public class PageService : IPageService
                         .ToList())
                 .Distinct(StringComparer.OrdinalIgnoreCase)
                 .ToList();
+
+            if (suffixes.Count == 0)
+            {
+                var seedHosts = (config.SeedEntries ?? new List<SeedEntryViewModel>())
+                    .Where(entry => entry.Enabled && !string.IsNullOrWhiteSpace(entry.Url))
+                    .Select(entry => entry.Url.Trim())
+                    .Concat((config.SeedUrlsText ?? string.Empty)
+                        .Split(new[] { '\r', '\n' }, StringSplitOptions.RemoveEmptyEntries)
+                        .Select(url => url.Trim()))
+                    .Select(TryExtractHost)
+                    .Where(host => !string.IsNullOrWhiteSpace(host))
+                    .Select(host => host!)
+                    .Distinct(StringComparer.OrdinalIgnoreCase)
+                    .ToList();
+
+                suffixes = seedHosts;
+            }
 
             return new RelevancePolicySnapshot
             {
@@ -403,7 +575,9 @@ public class PageService : IPageService
             }
         }
 
-        var haystack = (uri.AbsolutePath + "?" + (uri.Query ?? string.Empty)).ToLowerInvariant();
+        var decodedPath = WebUtility.UrlDecode(uri.AbsolutePath) ?? uri.AbsolutePath;
+        var decodedQuery = WebUtility.UrlDecode(uri.Query) ?? uri.Query;
+        var haystack = (host + " " + decodedPath + " " + decodedQuery).ToLowerInvariant();
         foreach (var keyword in policy.Keywords)
         {
             var normalized = keyword.Trim().ToLowerInvariant();
@@ -419,7 +593,23 @@ public class PageService : IPageService
             }
         }
 
+        // Small non-zero baseline for valid URLs on known hosts to avoid all-zero reports.
+        if (!hasKeyword && !hasAllowedSuffix && !hasSameHost)
+        {
+            score += 0.1;
+        }
+
         score -= policy.DepthPenalty * Math.Max(0, depth);
-        return score;
+        return Math.Max(0, score);
+    }
+
+    private static string? TryExtractHost(string url)
+    {
+        if (!Uri.TryCreate(url, UriKind.Absolute, out var parsed))
+        {
+            return null;
+        }
+
+        return string.IsNullOrWhiteSpace(parsed.Host) ? null : parsed.Host.Trim().ToLowerInvariant();
     }
 }

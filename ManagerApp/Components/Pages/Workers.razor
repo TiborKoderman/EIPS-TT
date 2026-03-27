@@ -245,6 +245,9 @@
                                             </div>
                                             <div class="worker-row-actions" @onclick:stopPropagation="true">
                                                 <span class="badge @GetStatusBadgeClass(worker.Status)">@worker.Status</span>
+                                                <span class="badge @GetStatusBadgeClass(worker.Status) state-badge-short" title="@BuildWorkerStateTooltip(worker)">
+                                                    <span class="mdi @GetStatusIcon(worker.Status)"></span>
+                                                </span>
                                                 <button class="btn btn-icon" title="Logs" aria-label="Logs" @onclick='() => OpenWorkerSection(worker.Id, "logs")' type="button">
                                                     <span class="mdi mdi-text-box-search-outline"></span>
                                                 </button>
@@ -338,14 +341,24 @@
                         @foreach (var log in combinedLogs.Take(80))
                         {
                             <tr>
-                                <td><span class="badge @GetLogBadgeClass(log.Level)">@ToShortSeverity(log.Level)</span></td>
+                                <td><span class="badge severity-badge @GetLogBadgeClass(log.Level)">@ToShortSeverity(log.Level)</span></td>
                                 <td class="workers-log-ts">@log.TimestampUtc.ToLocalTime().ToString("HH:mm:ss")</td>
                                 <td>
                                     @if (log.WorkerId.HasValue)
                                     {
                                         <span class="text-small text-muted">@($"w{log.WorkerId} · ")</span>
                                     }
-                                    @log.Message
+                                    <span class="event-icon">@GetEventIcon(log.Message)</span>
+                                    @if (TryRenderStatusTransition(log.Message, out var fromState, out var toState, out var details))
+                                    {
+                                        <span class="badge @GetStatusBadgeClass(fromState) state-badge-short" title="@details"><span class="mdi @GetStatusIcon(fromState)"></span></span>
+                                        <span class="mdi mdi-arrow-right-thin"></span>
+                                        <span class="badge @GetStatusBadgeClass(toState) state-badge-short" title="@details"><span class="mdi @GetStatusIcon(toState)"></span></span>
+                                    }
+                                    else
+                                    {
+                                        <span>@log.Message</span>
+                                    }
                                 </td>
                             </tr>
                         }
@@ -639,13 +652,14 @@
         var count = Math.Clamp(SpawnCount, 1, 20);
         var success = 0;
         var seeds = GetSeedUrlsForSpawn();
+        var queuedSeeds = 0;
         for (var i = 0; i < count; i++)
         {
             var spawned = await WorkerService.SpawnWorkerAsync(
                 name: $"Worker-{DateTime.Now:HHmmss}-{i + 1}",
                 daemonGroupId: SpawnGroupId,
                 mode: SpawnMode,
-                seedUrls: seeds);
+                seedUrls: null);
 
             if (spawned != null)
             {
@@ -653,9 +667,17 @@
             }
         }
 
+        foreach (var seed in seeds)
+        {
+            if (await WorkerService.AddSeedAsync(seed, null))
+            {
+                queuedSeeds++;
+            }
+        }
+
         actionStatus = success == 0
             ? $"Failed to spawn workers. {WorkerService.LastError}"
-            : $"Spawned {success}/{count} workers in {SpawnMode} mode.";
+            : $"Spawned {success}/{count} workers in {SpawnMode} mode. Queued seeds: {queuedSeeds}.";
 
         if (success > 0)
         {
@@ -676,6 +698,7 @@
         var count = Math.Clamp(GetDaemonSpawnCount(daemon.Id), 1, 20);
         var seeds = GetSeedUrlsForSpawn();
         var success = 0;
+        var queuedSeeds = 0;
 
         for (var i = 0; i < count; i++)
         {
@@ -683,16 +706,24 @@
                 name: $"{daemon.Name}-w-{DateTime.Now:HHmmss}-{i + 1}",
                 daemonGroupId: daemon.Id,
                 mode: SpawnMode,
-                seedUrls: seeds);
+                seedUrls: null);
             if (spawned != null)
             {
                 success++;
             }
         }
 
+        foreach (var seed in seeds)
+        {
+            if (await WorkerService.AddSeedAsync(seed, null))
+            {
+                queuedSeeds++;
+            }
+        }
+
         actionStatus = success == 0
             ? $"{daemon.Name}: spawn failed. {WorkerService.LastError}"
-            : $"{daemon.Name}: spawned {success}/{count} worker(s).";
+            : $"{daemon.Name}: spawned {success}/{count} worker(s), queued seeds: {queuedSeeds}.";
         await RefreshAsync();
         daemonBulkInProgress = false;
     }
@@ -837,6 +868,15 @@
         }
 
         var selectedDaemon = Daemons.FirstOrDefault(group => group.Id == SpawnGroupId);
+        var seeded = 0;
+        foreach (var seed in seeds)
+        {
+            if (await WorkerService.AddSeedAsync(seed, null))
+            {
+                seeded++;
+            }
+        }
+
         var activeWorkerInSelectedDaemon = selectedDaemon is null
             ? null
             : workerItems.FirstOrDefault(worker =>
@@ -845,19 +885,10 @@
 
         if (activeWorkerInSelectedDaemon is not null)
         {
-            var seeded = 0;
-            foreach (var seed in seeds)
-            {
-                if (await WorkerService.AddSeedAsync(seed, activeWorkerInSelectedDaemon.Id))
-                {
-                    seeded++;
-                }
-            }
-
             await RefreshAsync();
             actionStatus = seeded > 0
-                ? $"Quick Start complete: added {seeded} seed URL(s) to active worker {activeWorkerInSelectedDaemon.Id}."
-                : $"Quick Start could not add seeds to active worker {activeWorkerInSelectedDaemon.Id}. {WorkerService.LastError}";
+                ? $"Quick Start complete: queued {seeded} seed URL(s); worker {activeWorkerInSelectedDaemon.Id} is active."
+                : $"Quick Start could not queue seeds. {WorkerService.LastError}";
             return;
         }
 
@@ -868,7 +899,7 @@
                 name: $"Crawler-{DateTime.Now:HHmmss}",
                 daemonGroupId: SpawnGroupId,
                 mode: "thread",
-                seedUrls: seeds);
+                seedUrls: null);
 
             if (spawnedWorker == null)
             {
@@ -887,8 +918,8 @@
 
         await RefreshAsync();
         actionStatus = spawnedWorker is not null
-            ? $"Quick Start complete: worker {spawnedWorker.Id} started with configured seeds."
-            : "Quick Start complete: daemon running and workers active.";
+            ? $"Quick Start complete: queued {seeded} seed URL(s); worker {spawnedWorker.Id} started and waiting on queue claims."
+            : $"Quick Start complete: queued {seeded} seed URL(s); daemon running and workers active.";
     }
 
     private async Task StartDaemonFromDiagnostics()
@@ -959,6 +990,24 @@
             "stopped" => "badge-warning",
             _ => "badge-info"
         };
+    }
+
+    private static string GetStatusIcon(string status)
+    {
+        return (status ?? string.Empty).Trim().ToLowerInvariant() switch
+        {
+            "active" => "mdi-play-circle",
+            "idle" => "mdi-timer-sand",
+            "paused" => "mdi-pause-circle",
+            "stopped" => "mdi-stop-circle",
+            "error" => "mdi-alert-circle",
+            _ => "mdi-help-circle",
+        };
+    }
+
+    private static string BuildWorkerStateTooltip(WorkerViewModel worker)
+    {
+        return $"{worker.Status} | reason={worker.StatusReason ?? "n/a"} | url={(string.IsNullOrWhiteSpace(worker.CurrentUrl) ? "n/a" : worker.CurrentUrl)}";
     }
 
     private List<WorkerViewModel> GetFilteredWorkersForDaemon(WorkerGroupSettingsViewModel daemon)
@@ -1069,6 +1118,60 @@
             "debug" => "badge-info",
             _ => "badge-success",
         };
+
+    private static string GetEventIcon(string message)
+    {
+        var text = (message ?? string.Empty).ToLowerInvariant();
+        if (text.Contains("frontier-prune", StringComparison.Ordinal)) return "PRN";
+        if (text.Contains("frontier-lease", StringComparison.Ordinal)) return "LSE";
+        if (text.Contains("frontier-complete", StringComparison.Ordinal)) return "FIN";
+        if (text.Contains("worker-metric", StringComparison.Ordinal)) return "MET";
+        if (text.Contains("page-reported", StringComparison.Ordinal)) return "PGE";
+        if (text.Contains("status-change", StringComparison.Ordinal)) return "STS";
+        return "---";
+    }
+
+    private static bool TryRenderStatusTransition(string message, out string fromState, out string toState, out string details)
+    {
+        fromState = "Idle";
+        toState = "Idle";
+        details = message ?? string.Empty;
+        if (string.IsNullOrWhiteSpace(message) || !message.Contains("[status-change]", StringComparison.OrdinalIgnoreCase))
+        {
+            return false;
+        }
+
+        var text = message;
+        var prevToken = "previousStatus=";
+        var statusToken = "status=";
+        var prevIdx = text.IndexOf(prevToken, StringComparison.OrdinalIgnoreCase);
+        var statusIdx = text.IndexOf(statusToken, StringComparison.OrdinalIgnoreCase);
+        if (statusIdx < 0)
+        {
+            return false;
+        }
+
+        if (prevIdx >= 0)
+        {
+            var prevStart = prevIdx + prevToken.Length;
+            var prevEnd = text.IndexOf('|', prevStart);
+            fromState = (prevEnd >= 0 ? text[prevStart..prevEnd] : text[prevStart..]).Trim();
+        }
+
+        var nextStart = statusIdx + statusToken.Length;
+        var nextEnd = text.IndexOf('|', nextStart);
+        toState = (nextEnd >= 0 ? text[nextStart..nextEnd] : text[nextStart..]).Trim();
+        if (string.IsNullOrWhiteSpace(fromState))
+        {
+            fromState = "Idle";
+        }
+        if (string.IsNullOrWhiteSpace(toState))
+        {
+            toState = "Idle";
+        }
+
+        return true;
+    }
     }
 
     private string GetCombinedLogSourceLabel()
@@ -1193,6 +1296,7 @@
             }
 
             var parts = new List<string>();
+            AppendPayloadPart(parts, document.RootElement, "previousStatus");
             AppendPayloadPart(parts, document.RootElement, "status");
             AppendPayloadPart(parts, document.RootElement, "reason");
             AppendPayloadPart(parts, document.RootElement, "url");

@@ -93,6 +93,35 @@ public class PageEvaluationSummaryDto
     public double TopScore { get; set; }
 }
 
+public class QueueTopItemViewModel
+{
+    public string Url { get; set; } = "";
+    public string? SourceUrl { get; set; }
+    public string State { get; set; } = "QUEUED";
+    public int Priority { get; set; }
+    public int Depth { get; set; }
+    public DateTime DiscoveredAt { get; set; }
+    public double RelevanceScore { get; set; }
+    public bool HasKeywordEvidence { get; set; }
+    public bool HasAllowedSuffixEvidence { get; set; }
+    public bool HasSameHostEvidence { get; set; }
+}
+
+public class RelevanceReportRowDto
+{
+    public int Id { get; set; }
+    public string Url { get; set; } = "";
+    public string PageType { get; set; } = "";
+    public int? HttpStatus { get; set; }
+    public DateTime? AccessedTime { get; set; }
+    public string? SiteDomain { get; set; }
+    public double RelevanceScore { get; set; }
+    public bool HasKeywordEvidence { get; set; }
+    public bool HasAllowedSuffixEvidence { get; set; }
+    public bool HasSameHostEvidence { get; set; }
+    public int? FrontierDepth { get; set; }
+}
+
 /// <summary>
 /// View model for worker status and metrics
 /// Populated from crawler daemon API via manager service layer

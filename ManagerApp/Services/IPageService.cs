@@ -28,6 +28,16 @@ public interface IPageService
     Task<PageEvaluationSummaryDto> GetEvaluationSummaryAsync();
 
     /// <summary>
+    /// Return top queue URLs that are not currently claimed/processing, enriched with relevance score.
+    /// </summary>
+    Task<List<QueueTopItemViewModel>> GetTopQueueItemsAsync(int take = 20);
+
+    /// <summary>
+    /// Return a relevance-focused report over collected pages.
+    /// </summary>
+    Task<List<RelevanceReportRowDto>> GetRelevanceReportAsync(string? searchTerm, int skip = 0, int take = 100);
+
+    /// <summary>
     /// Get full page details including site, images, and binary data
     /// </summary>
     Task<Page?> GetPageDetailsAsync(int pageId);

@@ -144,8 +144,7 @@ DROP INDEX IF EXISTS crawldb.idx_frontier_queue_finished_at;
 -- QUEUED items first (highest priority), ordered by priority DESC, then discovered_at ASC
 CREATE INDEX IF NOT EXISTS idx_frontier_queue_priority_heap
     ON crawldb.frontier_queue(state, priority DESC, discovered_at ASC)
-    WHERE state IN ('QUEUED', 'LOCKED')
-    ORDER BY priority DESC, discovered_at ASC;
+    WHERE state IN ('QUEUED', 'LOCKED');
 
 -- Secondary index for duplicate detection
 CREATE INDEX IF NOT EXISTS idx_frontier_queue_duplicate
@@ -167,8 +166,18 @@ CREATE INDEX IF NOT EXISTS idx_frontier_queue_locked_at
     WHERE state = 'LOCKED';
 
 -- Constraint to enforce non-null priorities
-ALTER TABLE crawldb.frontier_queue
-    ADD CONSTRAINT chk_priority_non_null CHECK (priority IS NOT NULL);
+DO $$
+BEGIN
+    IF NOT EXISTS (
+        SELECT 1
+        FROM pg_constraint
+        WHERE conname = 'chk_priority_non_null'
+          AND conrelid = 'crawldb.frontier_queue'::regclass
+    ) THEN
+        ALTER TABLE crawldb.frontier_queue
+            ADD CONSTRAINT chk_priority_non_null CHECK (priority IS NOT NULL);
+    END IF;
+END $$;
 
 -- Ensure URLs are properly indexed for lookups
 CREATE INDEX IF NOT EXISTS idx_frontier_queue_url_hash
