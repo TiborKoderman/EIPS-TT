@@ -41,4 +41,19 @@ public interface IPageService
     /// Get full page details including site, images, and binary data
     /// </summary>
     Task<Page?> GetPageDetailsAsync(int pageId);
+
+    /// <summary>
+    /// Get backlink and outgoing link stats for a page.
+    /// </summary>
+    Task<PageBacklinkStatsDto> GetPageBacklinkStatsAsync(int pageId);
+
+    /// <summary>
+    /// Get collected sites with aggregate crawl/link/relevance metrics.
+    /// </summary>
+    Task<List<CollectedSiteSummaryDto>> GetCollectedSitesAsync(string? searchTerm, string? orderBy = null, int skip = 0, int take = 100);
+
+    /// <summary>
+    /// Get details for a specific collected site.
+    /// </summary>
+    Task<CollectedSiteSummaryDto?> GetCollectedSiteDetailsAsync(int siteId);
 }

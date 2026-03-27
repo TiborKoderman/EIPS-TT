@@ -385,7 +385,71 @@ public class PageService : IPageService
             .FirstOrDefaultAsync(p => p.Id == pageId);
     }
 
+    public async Task<PageBacklinkStatsDto> GetPageBacklinkStatsAsync(int pageId)
+    {
+        await using var connection = new NpgsqlConnection(_context.Database.GetConnectionString());
+        await connection.OpenAsync();
+
+        const string sql = """
+            SELECT
+                COALESCE(SUM(CASE WHEN to_page = @pageId THEN 1 ELSE 0 END), 0)::int AS inbound_links,
+                COALESCE(SUM(CASE WHEN from_page = @pageId THEN 1 ELSE 0 END), 0)::int AS outbound_links
+            FROM crawldb.link
+            WHERE from_page = @pageId OR to_page = @pageId;
+            """;
+
+        await using var command = new NpgsqlCommand(sql, connection);
+        command.Parameters.AddWithValue("pageId", pageId);
+
+        await using var reader = await command.ExecuteReaderAsync();
+        if (!await reader.ReadAsync())
+        {
+            return new PageBacklinkStatsDto();
+        }
+
+        var inbound = reader.IsDBNull(0) ? 0 : reader.GetInt32(0);
+        var outbound = reader.IsDBNull(1) ? 0 : reader.GetInt32(1);
+        return new PageBacklinkStatsDto
+        {
+            InboundLinks = inbound,
+            OutboundLinks = outbound,
+            BacklinkScore = Math.Log10(inbound + 1) * 10.0,
+        };
+    }
+
+    public async Task<List<CollectedSiteSummaryDto>> GetCollectedSitesAsync(string? searchTerm, string? orderBy = null, int skip = 0, int take = 100)
+    {
+        var all = await BuildCollectedSiteSummariesAsync(searchTerm);
+        var normalizedOrder = (orderBy ?? "relevance").Trim().ToLowerInvariant();
+
+        IEnumerable<CollectedSiteSummaryDto> ordered = normalizedOrder switch
+        {
+            "pages" => all.OrderByDescending(item => item.PagesCollected).ThenBy(item => item.Domain),
+            "links" => all.OrderByDescending(item => item.OutboundLinks + item.Backlinks).ThenBy(item => item.Domain),
+            _ => all.OrderByDescending(item => item.RelevanceScore).ThenByDescending(item => item.PagesCollected).ThenBy(item => item.Domain),
+        };
+
+        return ordered
+            .Skip(Math.Max(0, skip))
+            .Take(Math.Clamp(take, 1, 500))
+            .ToList();
+    }
+
+    public async Task<CollectedSiteSummaryDto?> GetCollectedSiteDetailsAsync(int siteId)
+    {
+        var all = await BuildCollectedSiteSummariesAsync(searchTerm: null);
+        return all.FirstOrDefault(item => item.SiteId == siteId);
+    }
+
     private readonly record struct FrontierHint(string? SourceUrl, int Depth);
+
+    private sealed class SitePageRow
+    {
+        public int SiteId { get; init; }
+        public string Domain { get; init; } = "";
+        public string Url { get; init; } = "";
+        public DateTime? AccessedTime { get; init; }
+    }
 
     private sealed class RelevancePolicySnapshot
     {
@@ -611,5 +675,141 @@ public class PageService : IPageService
         }
 
         return string.IsNullOrWhiteSpace(parsed.Host) ? null : parsed.Host.Trim().ToLowerInvariant();
+    }
+
+    private async Task<List<CollectedSiteSummaryDto>> BuildCollectedSiteSummariesAsync(string? searchTerm)
+    {
+        var rows = await _context.Pages
+            .AsNoTracking()
+            .Where(page => page.SiteId != null && page.Url != null && page.PageTypeCode != "FRONTIER")
+            .Join(
+                _context.Sites.AsNoTracking(),
+                page => page.SiteId,
+                site => site.Id,
+                (page, site) => new SitePageRow
+                {
+                    SiteId = site.Id,
+                    Domain = site.Domain ?? string.Empty,
+                    Url = page.Url!,
+                    AccessedTime = page.AccessedTime,
+                })
+            .Where(row => row.Domain != "")
+            .ToListAsync();
+
+        if (rows.Count == 0)
+        {
+            return new List<CollectedSiteSummaryDto>();
+        }
+
+        if (!string.IsNullOrWhiteSpace(searchTerm))
+        {
+            var term = searchTerm.Trim();
+            rows = rows
+                .Where(row => row.Domain.Contains(term, StringComparison.OrdinalIgnoreCase))
+                .ToList();
+        }
+
+        if (rows.Count == 0)
+        {
+            return new List<CollectedSiteSummaryDto>();
+        }
+
+        var policy = await LoadRelevancePolicyAsync();
+        var hints = await LoadFrontierHintsAsync(rows.Select(row => row.Url));
+        var outboundCounts = await LoadSiteLinkCountsAsync(backlinksOnly: false);
+        var backlinkCounts = await LoadSiteLinkCountsAsync(backlinksOnly: true);
+
+        var grouped = rows
+            .GroupBy(row => new { row.SiteId, row.Domain })
+            .ToList();
+
+        var result = new List<CollectedSiteSummaryDto>(grouped.Count);
+        foreach (var group in grouped)
+        {
+            var scores = new List<double>(group.Count());
+            DateTime? lastAccessed = null;
+            foreach (var row in group)
+            {
+                var hint = hints.GetValueOrDefault(row.Url);
+                var score = ScorePageUrl(
+                    row.Url,
+                    hint.SourceUrl,
+                    hint.Depth,
+                    policy,
+                    out _,
+                    out _,
+                    out _);
+
+                scores.Add(score);
+                if (row.AccessedTime.HasValue && (!lastAccessed.HasValue || row.AccessedTime.Value > lastAccessed.Value))
+                {
+                    lastAccessed = row.AccessedTime;
+                }
+            }
+
+            scores.Sort();
+            var average = scores.Count > 0 ? scores.Average() : 0;
+            var median = scores.Count > 0 ? scores[scores.Count / 2] : 0;
+            var top = scores.Count > 0 ? scores[^1] : 0;
+            var pageCount = group.Count();
+            var relevanceScore = (average * 0.65) + (top * 0.35) + Math.Min(3.0, Math.Log10(pageCount + 1));
+
+            result.Add(new CollectedSiteSummaryDto
+            {
+                SiteId = group.Key.SiteId,
+                Domain = group.Key.Domain,
+                PagesCollected = pageCount,
+                OutboundLinks = outboundCounts.GetValueOrDefault(group.Key.SiteId),
+                Backlinks = backlinkCounts.GetValueOrDefault(group.Key.SiteId),
+                RelevanceScore = relevanceScore,
+                AveragePageScore = average,
+                MedianPageScore = median,
+                TopPageScore = top,
+                LastPageAccessed = lastAccessed,
+            });
+        }
+
+        return result;
+    }
+
+    private async Task<Dictionary<int, int>> LoadSiteLinkCountsAsync(bool backlinksOnly)
+    {
+        await using var connection = new NpgsqlConnection(_context.Database.GetConnectionString());
+        await connection.OpenAsync();
+
+        var sql = backlinksOnly
+            ? """
+                SELECT target.site_id, COUNT(*)::int
+                FROM crawldb.link link
+                JOIN crawldb.page target ON target.id = link.to_page
+                JOIN crawldb.page source ON source.id = link.from_page
+                WHERE target.site_id IS NOT NULL
+                  AND source.site_id IS NOT NULL
+                  AND source.site_id <> target.site_id
+                GROUP BY target.site_id;
+              """
+            : """
+                SELECT source.site_id, COUNT(*)::int
+                FROM crawldb.link link
+                JOIN crawldb.page source ON source.id = link.from_page
+                WHERE source.site_id IS NOT NULL
+                GROUP BY source.site_id;
+              """;
+
+        var result = new Dictionary<int, int>();
+        await using var command = new NpgsqlCommand(sql, connection);
+        await using var reader = await command.ExecuteReaderAsync();
+        while (await reader.ReadAsync())
+        {
+            var siteId = reader.IsDBNull(0) ? 0 : reader.GetInt32(0);
+            if (siteId <= 0)
+            {
+                continue;
+            }
+
+            result[siteId] = reader.IsDBNull(1) ? 0 : reader.GetInt32(1);
+        }
+
+        return result;
     }
 }

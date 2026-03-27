@@ -1,0 +1,234 @@
+@page "/sites"
+@using ManagerApp.Models
+@using ManagerApp.Services
+@using Microsoft.AspNetCore.WebUtilities
+@inject IPageService PageService
+@inject NavigationManager Navigation
+@implements IAsyncDisposable
+
+<div class="page-header">
+    <h1 class="page-title">Collected Sites</h1>
+    <p class="page-subtitle">Site-level crawl, link, and relevance statistics</p>
+</div>
+
+<div class="page-body">
+    <div class="card mb-lg pages-toolbar-card">
+        <div class="pages-toolbar-row" style="grid-template-columns: minmax(0, 1fr) 220px auto auto;">
+            <div class="pages-search-shell">
+                <span class="mdi mdi-magnify pages-search-icon" aria-hidden="true"></span>
+                <input
+                    class="pages-search-input"
+                    type="search"
+                    placeholder="Search site domain..."
+                    value="@SearchTerm"
+                    @oninput="OnSearchInput" />
+            </div>
+
+            <select class="pages-order-select" @bind="OrderBy" @bind:after="OnOrderChangedAsync">
+                <option value="relevance">Order by relevance</option>
+                <option value="pages">Order by pages</option>
+                <option value="links">Order by links</option>
+            </select>
+
+            <button class="btn btn-primary pages-search-button" @onclick="() => ReloadAsync(keepSelection: true)">
+                <span class="mdi mdi-magnify"></span>
+                <span>Search</span>
+            </button>
+
+            <span class="live-pill"><span class="live-dot"></span> Live</span>
+        </div>
+    </div>
+
+    <div class="grid grid-cols-2">
+        <div class="card">
+            <h2 class="card-title">Sites (@Rows.Count)</h2>
+            @if (Rows.Count == 0)
+            {
+                <p class="text-muted">No sites found for current filter.</p>
+            }
+            else
+            {
+                <div class="page-results-table-wrap">
+                    <table class="workers-log-table page-results-table">
+                        <thead>
+                            <tr>
+                                <th>Site</th>
+                                <th>Pages</th>
+                                <th>Links</th>
+                                <th>Backlinks</th>
+                                <th>Score</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            @foreach (var row in Rows)
+                            {
+                                <tr class="page-row @(SelectedSite?.SiteId == row.SiteId ? "selected" : "")"
+                                    @onclick="() => SelectSite(row.SiteId)">
+                                    <td>@row.Domain</td>
+                                    <td>@row.PagesCollected</td>
+                                    <td>@row.OutboundLinks</td>
+                                    <td>@row.Backlinks</td>
+                                    <td>@row.RelevanceScore.ToString("0.00")</td>
+                                </tr>
+                            }
+                        </tbody>
+                    </table>
+                </div>
+            }
+        </div>
+
+        <div class="card">
+            <h2 class="card-title">Details</h2>
+            @if (SelectedSite is null)
+            {
+                <p class="text-muted">Select a site to show details.</p>
+            }
+            else
+            {
+                <div class="flex flex-col gap-sm">
+                    <div>
+                        <strong>Site:</strong>
+                        <a href="@BuildSiteExternalUrl(SelectedSite.Domain)" target="_blank" rel="noopener noreferrer">@SelectedSite.Domain</a>
+                    </div>
+                    <div><strong>Pages collected:</strong> @SelectedSite.PagesCollected</div>
+                    <div><strong>Outgoing links:</strong> @SelectedSite.OutboundLinks</div>
+                    <div><strong>Backlinks:</strong> @SelectedSite.Backlinks</div>
+                    <div><strong>Relevance score:</strong> @SelectedSite.RelevanceScore.ToString("0.00")</div>
+                    <div><strong>Avg / median / top page score:</strong> @SelectedSite.AveragePageScore.ToString("0.00") / @SelectedSite.MedianPageScore.ToString("0.00") / @SelectedSite.TopPageScore.ToString("0.00")</div>
+                    <div><strong>Last collected page:</strong> @(SelectedSite.LastPageAccessed?.ToLocalTime().ToString("yyyy-MM-dd HH:mm:ss") ?? "-")</div>
+                    <a class="btn mt-md" href="@($"/pages")">
+                        <span class="mdi mdi-file-document-multiple-outline"></span> Open Collected Pages
+                    </a>
+                </div>
+            }
+        </div>
+    </div>
+</div>
+
+@code {
+    private string SearchTerm { get; set; } = "";
+    private string OrderBy { get; set; } = "relevance";
+    private List<CollectedSiteSummaryDto> Rows { get; set; } = new();
+    private CollectedSiteSummaryDto? SelectedSite { get; set; }
+
+    private PeriodicTimer? _liveTimer;
+    private CancellationTokenSource? _liveCts;
+    private CancellationTokenSource? _searchDebounceCts;
+
+    protected override async Task OnInitializedAsync()
+    {
+        ApplyQueryStringSearch();
+        await ReloadAsync(keepSelection: false);
+
+        _liveCts = new CancellationTokenSource();
+        _liveTimer = new PeriodicTimer(TimeSpan.FromSeconds(4));
+        _ = Task.Run(async () =>
+        {
+            while (_liveTimer is not null && await _liveTimer.WaitForNextTickAsync(_liveCts.Token))
+            {
+                await InvokeAsync(async () =>
+                {
+                    await ReloadAsync(keepSelection: true);
+                    StateHasChanged();
+                });
+            }
+        }, _liveCts.Token);
+    }
+
+    private void ApplyQueryStringSearch()
+    {
+        var uri = new Uri(Navigation.Uri);
+        var query = QueryHelpers.ParseQuery(uri.Query);
+        if (query.TryGetValue("search", out var search) && !string.IsNullOrWhiteSpace(search.ToString()))
+        {
+            SearchTerm = search.ToString().Trim();
+        }
+    }
+
+    private async Task OnSearchInput(ChangeEventArgs args)
+    {
+        SearchTerm = args.Value?.ToString() ?? string.Empty;
+
+        _searchDebounceCts?.Cancel();
+        _searchDebounceCts?.Dispose();
+        _searchDebounceCts = new CancellationTokenSource();
+
+        try
+        {
+            await Task.Delay(280, _searchDebounceCts.Token);
+            await ReloadAsync(keepSelection: true);
+        }
+        catch (OperationCanceledException)
+        {
+            // Ignore debounce cancellations.
+        }
+    }
+
+    private async Task OnOrderChangedAsync()
+    {
+        await ReloadAsync(keepSelection: true);
+    }
+
+    private async Task ReloadAsync(bool keepSelection)
+    {
+        var selectedId = keepSelection ? SelectedSite?.SiteId : null;
+        Rows = await PageService.GetCollectedSitesAsync(SearchTerm, OrderBy, skip: 0, take: 300);
+
+        if (Rows.Count == 0)
+        {
+            SelectedSite = null;
+            return;
+        }
+
+        if (selectedId.HasValue && Rows.Any(site => site.SiteId == selectedId.Value))
+        {
+            await SelectSite(selectedId.Value);
+        }
+        else
+        {
+            await SelectSite(Rows[0].SiteId);
+        }
+    }
+
+    private async Task SelectSite(int siteId)
+    {
+        SelectedSite = await PageService.GetCollectedSiteDetailsAsync(siteId)
+            ?? Rows.FirstOrDefault(site => site.SiteId == siteId);
+    }
+
+    private static string BuildSiteExternalUrl(string? domain)
+    {
+        if (string.IsNullOrWhiteSpace(domain))
+        {
+            return "#";
+        }
+
+        var normalized = domain.Trim();
+        if (normalized.StartsWith("http://", StringComparison.OrdinalIgnoreCase)
+            || normalized.StartsWith("https://", StringComparison.OrdinalIgnoreCase))
+        {
+            return normalized;
+        }
+
+        return $"https://{normalized}";
+    }
+
+    public ValueTask DisposeAsync()
+    {
+        _searchDebounceCts?.Cancel();
+        _searchDebounceCts?.Dispose();
+
+        try
+        {
+            _liveCts?.Cancel();
+        }
+        catch
+        {
+            // Ignore shutdown race when cancelling live timer.
+        }
+
+        _liveTimer?.Dispose();
+        _liveCts?.Dispose();
+        return ValueTask.CompletedTask;
+    }
+}

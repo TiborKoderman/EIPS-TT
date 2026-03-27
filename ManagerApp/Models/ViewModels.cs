@@ -122,6 +122,27 @@ public class RelevanceReportRowDto
     public int? FrontierDepth { get; set; }
 }
 
+public class PageBacklinkStatsDto
+{
+    public int InboundLinks { get; set; }
+    public int OutboundLinks { get; set; }
+    public double BacklinkScore { get; set; }
+}
+
+public class CollectedSiteSummaryDto
+{
+    public int SiteId { get; set; }
+    public string Domain { get; set; } = "";
+    public int PagesCollected { get; set; }
+    public int OutboundLinks { get; set; }
+    public int Backlinks { get; set; }
+    public double RelevanceScore { get; set; }
+    public double AveragePageScore { get; set; }
+    public double MedianPageScore { get; set; }
+    public double TopPageScore { get; set; }
+    public DateTime? LastPageAccessed { get; set; }
+}
+
 /// <summary>
 /// View model for worker status and metrics
 /// Populated from crawler daemon API via manager service layer

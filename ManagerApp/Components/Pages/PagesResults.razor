@@ -161,6 +161,19 @@
                     <div><strong>Type:</strong> @SelectedPage.PageTypeCode</div>
                     <div><strong>HTTP:</strong> @SelectedPage.HttpStatusCode</div>
                     <div><strong>Accessed:</strong> @SelectedPage.AccessedTime</div>
+                    <div>
+                        <strong>Site:</strong>
+                        @if (!string.IsNullOrWhiteSpace(SelectedPage.Site?.Domain))
+                        {
+                            <a href="@BuildSiteExternalUrl(SelectedPage.Site.Domain)" target="_blank" rel="noopener noreferrer">@SelectedPage.Site.Domain</a>
+                            <span class="text-small text-muted"> · </span>
+                            <a href="@($"/sites?search={Uri.EscapeDataString(SelectedPage.Site.Domain)}")">site details</a>
+                        }
+                        else
+                        {
+                            <span>-</span>
+                        }
+                    </div>
                     @if (SelectedRow is not null)
                     {
                         <div><strong>Relevance score:</strong> @SelectedRow.RelevanceScore.ToString("0.00")</div>
@@ -170,6 +183,14 @@
                             @(SelectedRow.HasAllowedSuffixEvidence ? " allowed-suffix" : "")
                             @(SelectedRow.HasSameHostEvidence ? " same-host" : "")
                             @(SelectedRow.FrontierDepth.HasValue ? $" depth={SelectedRow.FrontierDepth.Value}" : string.Empty)
+                        </div>
+                    }
+                    @if (SelectedBacklinkStats is not null)
+                    {
+                        <div>
+                            <strong>Backlink score:</strong>
+                            @SelectedBacklinkStats.BacklinkScore.ToString("0.00")
+                            <span class="text-small text-muted">(inbound: @SelectedBacklinkStats.InboundLinks, outbound: @SelectedBacklinkStats.OutboundLinks)</span>
                         </div>
                     }
                     <div><strong>Images:</strong> @SelectedPage.Images.Count</div>
@@ -291,6 +312,7 @@
 
     private List<PageSearchDto> Rows = new();
     private Page? SelectedPage;
+    private PageBacklinkStatsDto? SelectedBacklinkStats;
     private PeriodicTimer? _liveTimer;
     private CancellationTokenSource? _liveCts;
     private CancellationTokenSource? _searchDebounceCts;
@@ -362,6 +384,7 @@
         if (Rows.Count == 0)
         {
             SelectedPage = null;
+            SelectedBacklinkStats = null;
             return;
         }
 
@@ -378,6 +401,24 @@
     private async Task SelectPage(int pageId)
     {
         SelectedPage = await PageService.GetPageDetailsAsync(pageId);
+        SelectedBacklinkStats = SelectedPage is null ? null : await PageService.GetPageBacklinkStatsAsync(pageId);
+    }
+
+    private static string BuildSiteExternalUrl(string? domain)
+    {
+        if (string.IsNullOrWhiteSpace(domain))
+        {
+            return "#";
+        }
+
+        var normalized = domain.Trim();
+        if (normalized.StartsWith("http://", StringComparison.OrdinalIgnoreCase)
+            || normalized.StartsWith("https://", StringComparison.OrdinalIgnoreCase))
+        {
+            return normalized;
+        }
+
+        return $"https://{normalized}";
     }
 
     private string GetSinceUpdateText()
