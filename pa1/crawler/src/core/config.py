@@ -30,6 +30,11 @@ class CrawlerConfig:
         "treatment",
         "disease",
     )
+    relevance_allowed_domain_suffixes: tuple[str, ...] = ()
+    relevance_same_host_boost: float = 10.0
+    relevance_allowed_suffix_boost: float = 20.0
+    relevance_keyword_boost: float = 5.0
+    relevance_depth_penalty: float = 0.2
 
 
 def load_crawler_config() -> CrawlerConfig:
@@ -63,8 +68,30 @@ def load_crawler_config() -> CrawlerConfig:
             ).split(",")
             if kw.strip()
         ),
+        relevance_allowed_domain_suffixes=_parse_csv_hosts(
+            os.getenv("CRAWLER_RELEVANCE_ALLOWED_SUFFIXES", ""),
+        ),
+        relevance_same_host_boost=float(
+            os.getenv("CRAWLER_RELEVANCE_SAME_HOST_BOOST", "10"),
+        ),
+        relevance_allowed_suffix_boost=float(
+            os.getenv("CRAWLER_RELEVANCE_ALLOWED_SUFFIX_BOOST", "20"),
+        ),
+        relevance_keyword_boost=float(
+            os.getenv("CRAWLER_RELEVANCE_KEYWORD_BOOST", "5"),
+        ),
+        relevance_depth_penalty=float(
+            os.getenv("CRAWLER_RELEVANCE_DEPTH_PENALTY", "0.2"),
+        ),
     )
 
 
 def _parse_bool(raw_value: str) -> bool:
     return raw_value.strip().lower() in {"1", "true", "yes", "y", "on"}
+
+
+def _parse_csv_hosts(raw_value: str) -> tuple[str, ...]:
+    if not raw_value:
+        return ()
+    parts = [p.strip().lower().lstrip(".") for p in raw_value.split(",")]
+    return tuple(p for p in parts if p)

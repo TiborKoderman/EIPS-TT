@@ -25,15 +25,18 @@ from api.contracts import (
     default_seed_entries,
     utc_now_iso,
 )
+from core.config import load_crawler_config
 from api.service_protocol import WorkerControlService
 from core.downloader import DownloadResult, Downloader
 from core.frontier import FrontierEntry
 from core.link_extractor import LinkExtractor
 from core.politeness import PerIpRateLimiter
+from core.relevance import RelevancePolicy, score_url
 from core.robots import RobotsPolicy
 from core.robots import RobotsPolicyManager
 from db.frontier_store import PostgresFrontierSwapStore
 from db.pg_connect import get_connection
+from utils.url_canonicalizer import DefaultUrlCanonicalizer
 
 
 @dataclass
@@ -43,6 +46,17 @@ class FrontierLease:
     token: str
     expires_at_monotonic: float
     source: str
+    depth: int
+    priority: int
+    source_url: str | None
+
+
+@dataclass
+class FrontierMetadata:
+    priority: int
+    depth: int
+    source_url: str | None
+    discovered_at_monotonic: float
 
 
 def _coerce_int(value: object, default: int) -> int:
@@ -114,8 +128,10 @@ class DaemonWorkerService(WorkerControlService):
         self._thread_workers: dict[int, tuple[threading.Thread, threading.Event]] = {}
         self._frontier_queue: deque[str] = deque()
         self._known_frontier_urls: set[str] = set()
+        self._frontier_metadata: dict[str, FrontierMetadata] = {}
         self._worker_local_queues: dict[int, deque[str]] = defaultdict(deque)
         self._worker_local_known_urls: dict[int, set[str]] = defaultdict(set)
+        self._worker_local_metadata: dict[int, dict[str, FrontierMetadata]] = defaultdict(dict)
         self._active_claim_by_worker: dict[int, FrontierLease] = {}
         self._frontier_leases: dict[str, FrontierLease] = {}
         self._completed_tombstones: dict[str, float] = {}
@@ -157,6 +173,8 @@ class DaemonWorkerService(WorkerControlService):
         self._frontier_swap_conn = None
         self._frontier_swap_store: PostgresFrontierSwapStore | None = None
         self._link_extractor = LinkExtractor()
+        self._url_canonicalizer = DefaultUrlCanonicalizer()
+        self._crawler_config = load_crawler_config()
         self._robots_policy_manager = RobotsPolicyManager(user_agent=self._global_config.user_agent)
         self._ip_rate_limiter = PerIpRateLimiter(min_interval_seconds=0.0)
 
@@ -760,7 +778,7 @@ class DaemonWorkerService(WorkerControlService):
                 raise RuntimeError("Crawler daemon is not running.")
 
             queue_mode = self._global_config.queue_mode
-            queued = self._enqueue_frontier_url(url)
+            queued = self._enqueue_frontier_url(url, depth=0, explicit_priority=100)
             if worker_id is None:
                 return {
                     "appliedTo": "daemon-frontier",
@@ -777,7 +795,7 @@ class DaemonWorkerService(WorkerControlService):
 
             local_queued = False
             if queue_mode in {"local", "both"}:
-                local_queued = self._enqueue_local_frontier_url(worker_id, url)
+                local_queued = self._enqueue_local_frontier_url(worker_id, url, depth=0, explicit_priority=100)
 
             self._append_log(
                 worker_id,
@@ -816,6 +834,8 @@ class DaemonWorkerService(WorkerControlService):
                 "leaseToken": lease.token,
                 "leaseTtlSeconds": self._lease_ttl_seconds,
                 "source": lease.source,
+                "depth": lease.depth,
+                "priority": lease.priority,
             }
 
     def dequeue_frontier_urls(
@@ -866,6 +886,8 @@ class DaemonWorkerService(WorkerControlService):
                         "leaseToken": lease.token,
                         "leaseTtlSeconds": self._lease_ttl_seconds,
                         "source": lease.source,
+                        "depth": lease.depth,
+                        "priority": lease.priority,
                     }
                 )
 
@@ -889,11 +911,13 @@ class DaemonWorkerService(WorkerControlService):
             if worker is None:
                 raise KeyError(f"Worker {worker_id} was not found.")
 
-            completed = self._complete_frontier_claim(worker_id, url, lease_token, status)
+            canonical = self._normalize_frontier_url(url) or url.strip()
+
+            completed = self._complete_frontier_claim(worker_id, canonical, lease_token, status)
             return {
                 "completed": completed,
                 "workerId": worker_id,
-                "url": url,
+                "url": canonical,
                 "status": status,
             }
 
@@ -902,11 +926,12 @@ class DaemonWorkerService(WorkerControlService):
             worker = self._workers.get(worker_id)
             if worker is None:
                 raise KeyError(f"Worker {worker_id} was not found.")
-            pruned = self._prune_worker_local_url(worker_id, url, reason or "server-conflict")
+            canonical = self._normalize_frontier_url(url) or url.strip()
+            pruned = self._prune_worker_local_url(worker_id, canonical, reason or "server-conflict")
             return {
                 "pruned": pruned,
                 "workerId": worker_id,
-                "url": url,
+                "url": canonical,
                 "reason": reason or "server-conflict",
             }
 
@@ -1021,7 +1046,12 @@ class DaemonWorkerService(WorkerControlService):
         worker = self._workers[worker_id]
         stop_event = threading.Event()
         if seed_url:
-            queued_seed = self._enqueue_frontier_url(seed_url)
+            queued_seed = self._enqueue_frontier_url(
+                seed_url,
+                source_url=None,
+                depth=0,
+                explicit_priority=100,
+            )
             if not queued_seed:
                 self._append_log(
                     worker_id,
@@ -1072,7 +1102,11 @@ class DaemonWorkerService(WorkerControlService):
                         )
 
                     for link in processing["discoveredLinks"]:
-                        self._enqueue_frontier_url(link)
+                        self._enqueue_frontier_url(
+                            link,
+                            source_url=str(processing["finalUrl"] or lease.url),
+                            depth=max(lease.depth + 1, 1),
+                        )
 
                     self._report_page_to_manager(
                         current,
@@ -1251,6 +1285,12 @@ class DaemonWorkerService(WorkerControlService):
                 continue
             self._known_frontier_urls.add(entry.url)
             self._frontier_queue.append(entry.url)
+            self._frontier_metadata[entry.url] = FrontierMetadata(
+                priority=int(entry.priority),
+                depth=int(entry.depth),
+                source_url=entry.source_url,
+                discovered_at_monotonic=time.monotonic(),
+            )
             loaded += 1
 
         if loaded > 0:
@@ -1276,15 +1316,99 @@ class DaemonWorkerService(WorkerControlService):
                 return bool(group.avoid_duplicate_paths_across_daemons)
         return bool(self._global_config.avoid_duplicate_paths_across_daemons)
 
-    def _enqueue_frontier_url(self, raw_url: str) -> bool:
+    def _normalize_frontier_url(self, raw_url: str, *, base_url: str | None = None) -> str | None:
         candidate = raw_url.strip()
+        if not candidate:
+            return None
+        try:
+            return self._url_canonicalizer.canonicalize(candidate, base_url=base_url)
+        except Exception:
+            return None
+
+    def _build_relevance_policy(self) -> RelevancePolicy:
+        suffixes = list(self._crawler_config.relevance_allowed_domain_suffixes)
+        if not suffixes:
+            for seed in self._global_config.seed_entries:
+                if not seed.enabled or not seed.url.strip():
+                    continue
+                host = self._url_canonicalizer.extract_host(seed.url)
+                if host:
+                    suffixes.append(host)
+
+        return RelevancePolicy(
+            allowed_domain_suffixes=tuple(dict.fromkeys(suffixes)),
+            keywords=tuple(self._global_config.topic_keywords),
+            same_host_boost=self._crawler_config.relevance_same_host_boost,
+            allowed_suffix_boost=self._crawler_config.relevance_allowed_suffix_boost,
+            keyword_boost=self._crawler_config.relevance_keyword_boost,
+            depth_penalty=self._crawler_config.relevance_depth_penalty,
+        )
+
+    @staticmethod
+    def _choose_best_candidate(
+        queue: deque[str],
+        metadata: dict[str, FrontierMetadata],
+    ) -> tuple[int, str, FrontierMetadata] | None:
+        best: tuple[int, str, FrontierMetadata] | None = None
+        for idx, url in enumerate(queue):
+            meta = metadata.get(url)
+            if meta is None:
+                meta = FrontierMetadata(
+                    priority=0,
+                    depth=0,
+                    source_url=None,
+                    discovered_at_monotonic=0.0,
+                )
+
+            if best is None:
+                best = (idx, url, meta)
+                continue
+
+            _, _, current = best
+            if meta.priority > current.priority:
+                best = (idx, url, meta)
+                continue
+
+            if meta.priority == current.priority and meta.discovered_at_monotonic < current.discovered_at_monotonic:
+                best = (idx, url, meta)
+
+        return best
+
+    def _enqueue_frontier_url(
+        self,
+        raw_url: str,
+        *,
+        source_url: str | None = None,
+        depth: int = 0,
+        explicit_priority: int | None = None,
+    ) -> bool:
+        candidate = self._normalize_frontier_url(raw_url, base_url=source_url)
         if not candidate:
             return False
         self._purge_expired_frontier_state()
         prevent_collisions = bool(self._global_config.avoid_duplicate_paths_across_daemons)
         if self._is_tombstoned(candidate):
             return False
+
+        policy = self._build_relevance_policy()
+        priority_value = explicit_priority
+        if priority_value is None:
+            priority_value = int(round(score_url(
+                candidate,
+                parent_url=source_url,
+                depth=depth,
+                policy=policy,
+            )))
+
         if prevent_collisions and self._is_url_active_any_queue(candidate):
+            existing = self._frontier_metadata.get(candidate)
+            if existing is not None:
+                self._frontier_metadata[candidate] = FrontierMetadata(
+                    priority=max(existing.priority, priority_value),
+                    depth=min(existing.depth, depth),
+                    source_url=existing.source_url or source_url,
+                    discovered_at_monotonic=existing.discovered_at_monotonic,
+                )
             self._emit_manager_event(
                 "frontier-prune",
                 payload={
@@ -1297,7 +1421,12 @@ class DaemonWorkerService(WorkerControlService):
         queue_mode = self._global_config.queue_mode
         relayed = False
         if queue_mode in {"server", "both"}:
-            relayed = self._relay_frontier_seed(candidate)
+            relayed = self._relay_frontier_seed(
+                candidate,
+                priority=priority_value,
+                depth=depth,
+                source_url=source_url,
+            )
 
         should_enqueue_local = queue_mode in {"local", "both"}
         if queue_mode == "server" and not relayed and self._allow_daemon_db_fallback:
@@ -1316,13 +1445,19 @@ class DaemonWorkerService(WorkerControlService):
 
         if should_enqueue_local:
             self._known_frontier_urls.add(candidate)
+            self._frontier_metadata[candidate] = FrontierMetadata(
+                priority=priority_value,
+                depth=depth,
+                source_url=source_url,
+                discovered_at_monotonic=time.monotonic(),
+            )
         spilled_to_db = False
         if should_enqueue_local:
             entry = FrontierEntry(
                 url=candidate,
-                priority=0,
-                source_url=None,
-                depth=0,
+                priority=priority_value,
+                source_url=source_url,
+                depth=depth,
             )
             max_in_memory = max(1, self._global_config.max_frontier_in_memory)
             if len(self._frontier_queue) >= max_in_memory and self._frontier_swap_store is not None:
@@ -1337,9 +1472,9 @@ class DaemonWorkerService(WorkerControlService):
         if self._frontier_db_sync_enabled:
             self._persist_frontier_row(
                 url=candidate,
-                priority=0,
-                source_url=None,
-                depth=0,
+                priority=priority_value,
+                source_url=source_url,
+                depth=depth,
                 state="queued",
             )
         self._emit_manager_event(
@@ -1353,12 +1488,22 @@ class DaemonWorkerService(WorkerControlService):
                 "knownUrls": len(self._known_frontier_urls),
                 "relayed": relayed,
                 "spilledToDb": spilled_to_db,
+                "priority": priority_value,
+                "depth": depth,
             },
         )
         return True
 
-    def _enqueue_local_frontier_url(self, worker_id: int, raw_url: str) -> bool:
-        candidate = raw_url.strip()
+    def _enqueue_local_frontier_url(
+        self,
+        worker_id: int,
+        raw_url: str,
+        *,
+        source_url: str | None = None,
+        depth: int = 0,
+        explicit_priority: int | None = None,
+    ) -> bool:
+        candidate = self._normalize_frontier_url(raw_url, base_url=source_url)
         if not candidate:
             return False
         self._purge_expired_frontier_state()
@@ -1366,7 +1511,26 @@ class DaemonWorkerService(WorkerControlService):
         prevent_collisions = self._collision_prevention_enabled_for_worker(worker_id)
         if self._is_tombstoned(candidate):
             return False
+
+        policy = self._build_relevance_policy()
+        priority_value = explicit_priority
+        if priority_value is None:
+            priority_value = int(round(score_url(
+                candidate,
+                parent_url=source_url,
+                depth=depth,
+                policy=policy,
+            )))
+
         if candidate in local_known:
+            existing = self._worker_local_metadata[worker_id].get(candidate)
+            if existing is not None:
+                self._worker_local_metadata[worker_id][candidate] = FrontierMetadata(
+                    priority=max(existing.priority, priority_value),
+                    depth=min(existing.depth, depth),
+                    source_url=existing.source_url or source_url,
+                    discovered_at_monotonic=existing.discovered_at_monotonic,
+                )
             return False
         if prevent_collisions and self._is_url_active_any_queue(candidate):
             self._emit_manager_event(
@@ -1382,12 +1546,18 @@ class DaemonWorkerService(WorkerControlService):
 
         self._worker_local_queues[worker_id].append(candidate)
         local_known.add(candidate)
+        self._worker_local_metadata[worker_id][candidate] = FrontierMetadata(
+            priority=priority_value,
+            depth=depth,
+            source_url=source_url,
+            discovered_at_monotonic=time.monotonic(),
+        )
         if self._frontier_db_sync_enabled:
             self._persist_frontier_row(
                 url=candidate,
-                priority=0,
-                source_url=None,
-                depth=0,
+                priority=priority_value,
+                source_url=source_url,
+                depth=depth,
                 state="queued",
             )
         self._emit_manager_event(
@@ -1398,6 +1568,8 @@ class DaemonWorkerService(WorkerControlService):
                 "url": candidate,
                 "workerId": worker_id,
                 "inMemoryWorkerQueued": len(self._worker_local_queues[worker_id]),
+                "priority": priority_value,
+                "depth": depth,
             },
         )
         return True
@@ -1418,8 +1590,15 @@ class DaemonWorkerService(WorkerControlService):
         self._hydrate_frontier_from_swap_store_if_needed()
 
         while self._frontier_queue:
-            candidate = self._frontier_queue.popleft()
+            best = self._choose_best_candidate(self._frontier_queue, self._frontier_metadata)
+            if best is None:
+                return None
+
+            idx, candidate, metadata = best
+            del self._frontier_queue[idx]
+
             if self._is_tombstoned(candidate):
+                self._frontier_metadata.pop(candidate, None)
                 continue
 
             lease = self._frontier_leases.get(candidate)
@@ -1427,7 +1606,13 @@ class DaemonWorkerService(WorkerControlService):
                 continue
 
             self._known_frontier_urls.discard(candidate)
-            created = self._create_lease(candidate, worker_id, "global")
+            self._frontier_metadata.pop(candidate, None)
+            created = self._create_lease(
+                candidate,
+                worker_id,
+                "global",
+                metadata,
+            )
             self._emit_manager_event(
                 "queue-change",
                 worker_id=worker_id,
@@ -1436,6 +1621,8 @@ class DaemonWorkerService(WorkerControlService):
                     "url": candidate,
                     "workerId": worker_id,
                     "inMemoryQueued": len(self._frontier_queue),
+                    "priority": metadata.priority,
+                    "depth": metadata.depth,
                 },
             )
             return created
@@ -1448,14 +1635,22 @@ class DaemonWorkerService(WorkerControlService):
             return None
 
         while queue:
-            candidate = queue.popleft()
+            best = self._choose_best_candidate(queue, self._worker_local_metadata[worker_id])
+            if best is None:
+                return None
+
+            idx, candidate, metadata = best
+            del queue[idx]
+
             if self._is_tombstoned(candidate):
                 self._worker_local_known_urls[worker_id].discard(candidate)
+                self._worker_local_metadata[worker_id].pop(candidate, None)
                 continue
 
             lease = self._frontier_leases.get(candidate)
             if lease is not None and lease.expires_at_monotonic > time.monotonic() and lease.worker_id != worker_id:
                 self._worker_local_known_urls[worker_id].discard(candidate)
+                self._worker_local_metadata[worker_id].pop(candidate, None)
                 self._emit_manager_event(
                     "frontier-prune",
                     worker_id=worker_id,
@@ -1468,7 +1663,13 @@ class DaemonWorkerService(WorkerControlService):
                 continue
 
             self._worker_local_known_urls[worker_id].discard(candidate)
-            created = self._create_lease(candidate, worker_id, "local")
+            self._worker_local_metadata[worker_id].pop(candidate, None)
+            created = self._create_lease(
+                candidate,
+                worker_id,
+                "local",
+                metadata,
+            )
             self._emit_manager_event(
                 "queue-change",
                 worker_id=worker_id,
@@ -1477,13 +1678,21 @@ class DaemonWorkerService(WorkerControlService):
                     "url": candidate,
                     "workerId": worker_id,
                     "inMemoryWorkerQueued": len(queue),
+                    "priority": metadata.priority,
+                    "depth": metadata.depth,
                 },
             )
             return created
 
         return None
 
-    def _create_lease(self, url: str, worker_id: int, source: str) -> FrontierLease:
+    def _create_lease(
+        self,
+        url: str,
+        worker_id: int,
+        source: str,
+        metadata: FrontierMetadata,
+    ) -> FrontierLease:
         token = secrets.token_hex(12)
         lease = FrontierLease(
             url=url,
@@ -1491,6 +1700,9 @@ class DaemonWorkerService(WorkerControlService):
             token=token,
             expires_at_monotonic=time.monotonic() + self._lease_ttl_seconds,
             source=source,
+            depth=metadata.depth,
+            priority=metadata.priority,
+            source_url=metadata.source_url,
         )
         self._frontier_leases[url] = lease
         self._active_claim_by_worker[worker_id] = lease
@@ -1504,6 +1716,8 @@ class DaemonWorkerService(WorkerControlService):
                 "workerId": worker_id,
                 "source": source,
                 "leaseTtlSeconds": self._lease_ttl_seconds,
+                "priority": metadata.priority,
+                "depth": metadata.depth,
             },
         )
         return lease
@@ -1526,6 +1740,9 @@ class DaemonWorkerService(WorkerControlService):
         active = self._active_claim_by_worker.get(worker_id)
         if active is not None and active.url == url:
             self._active_claim_by_worker.pop(worker_id, None)
+
+        self._frontier_metadata.pop(url, None)
+        self._worker_local_metadata[worker_id].pop(url, None)
 
         self._completed_tombstones[url] = time.monotonic() + self._tombstone_ttl_seconds
         if self._frontier_db_sync_enabled:
@@ -1557,6 +1774,7 @@ class DaemonWorkerService(WorkerControlService):
             filtered.append(item)
         self._worker_local_queues[worker_id] = filtered
         self._worker_local_known_urls[worker_id].discard(url)
+        self._worker_local_metadata[worker_id].pop(url, None)
         if removed:
             self._emit_manager_event(
                 "frontier-prune",
@@ -1578,6 +1796,12 @@ class DaemonWorkerService(WorkerControlService):
         if requeue and not self._is_tombstoned(active.url) and active.url not in self._known_frontier_urls:
             self._known_frontier_urls.add(active.url)
             self._frontier_queue.appendleft(active.url)
+            self._frontier_metadata[active.url] = FrontierMetadata(
+                priority=active.priority,
+                depth=active.depth,
+                source_url=active.source_url,
+                discovered_at_monotonic=time.monotonic(),
+            )
             if self._frontier_db_sync_enabled:
                 self._mark_frontier_state(url=active.url, state="queued")
         elif self._frontier_db_sync_enabled:
@@ -1610,6 +1834,12 @@ class DaemonWorkerService(WorkerControlService):
             if url not in self._known_frontier_urls and not self._is_tombstoned(url):
                 self._known_frontier_urls.add(url)
                 self._frontier_queue.appendleft(url)
+                self._frontier_metadata[url] = FrontierMetadata(
+                    priority=lease.priority,
+                    depth=lease.depth,
+                    source_url=lease.source_url,
+                    discovered_at_monotonic=time.monotonic(),
+                )
                 if self._frontier_db_sync_enabled:
                     self._mark_frontier_state(url=url, state="queued")
                 self._emit_manager_event(
@@ -1635,11 +1865,26 @@ class DaemonWorkerService(WorkerControlService):
             return False
         return True
 
-    def _relay_frontier_seed(self, url: str) -> bool:
+    def _relay_frontier_seed(
+        self,
+        url: str,
+        *,
+        priority: int,
+        depth: int,
+        source_url: str | None,
+    ) -> bool:
         if self._frontier_relay_url is None:
             return False
 
-        payload = json.dumps({"url": url, "source": "daemon-frontier"}).encode("utf-8")
+        payload = json.dumps(
+            {
+                "url": url,
+                "source": "daemon-frontier",
+                "priority": priority,
+                "depth": depth,
+                "sourceUrl": source_url,
+            }
+        ).encode("utf-8")
         headers = {
             "Content-Type": "application/json",
             "Accept": "application/json",
