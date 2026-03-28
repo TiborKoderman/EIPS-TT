@@ -379,7 +379,7 @@
             return;
         }
 
-        config.MaxConcurrentWorkers = 1;
+        config.MaxConcurrentWorkers = 4;
         config.RequestTimeoutSeconds = 20;
         config.CrawlDelayMilliseconds = 500;
         config.RespectRobotsTxt = true;
@@ -390,14 +390,26 @@
         config.TopicKeywordsText = string.Join("\n", new[]
         {
             "medicine",
+            "medicina",
             "health",
+            "zdravje",
             "clinic",
+            "klinika",
+            "ambulanta",
             "hospital",
+            "bolnisnica",
             "doctor",
+            "zdravnik",
+            "treatment",
+            "zdravljenje",
+            "disease",
+            "bolezen",
             "fitness",
             "fitnes",
             "exercise",
+            "telovadba",
             "training",
+            "trening",
             "workout",
             "wellness",
             "nutrition",

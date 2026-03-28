@@ -602,8 +602,14 @@ public class PageService : IPageService
         {
             Keywords =
             [
-                "medicine", "medic", "health", "doctor", "clinic", "hospital", "treatment", "disease",
-                "zdrav", "zdravje", "bolnis", "ambul", "cepl", "preven", "higi",
+                "medicine", "medicina", "medic",
+                "health", "zdrav", "zdravje",
+                "doctor", "zdravnik",
+                "clinic", "klinika", "ambul", "ambulanta",
+                "hospital", "bolnis", "bolnisnica",
+                "treatment", "zdravljenje",
+                "disease", "bolezen",
+                "cepl", "preven", "higi",
                 "fitness", "fitnes", "exercise", "training", "workout", "wellness", "nutrition", "prehrana", "vadba"
             ],
             AllowedSuffixes = ["gov.si", "nijz.si", "kclj.si", "zdravljenjenadom.si"],

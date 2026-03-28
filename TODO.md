@@ -110,6 +110,7 @@ Last rebuilt: 2026-03-26
 - [x] Performed assignment-compliant DB dump (`pa1/db`) excluding `crawldb.image` and `crawldb.page_data` payload rows.
 - [x] Ran clean DB reset/rebuild and validated multi-worker start flow from GUI (5 total workers, 4 active under concurrency cap).
 - [x] Enforced hard minimum 5s server politeness cooldown and wired robots/effective delay reports from worker ingest to manager timeout scheduling.
+- [x] Added Slovenian default keyword translations across crawler/manager defaults and validated a clean ground-up run with default seed + default keywords at 4 concurrent workers.
 
 ## Pending follow-ups
 
