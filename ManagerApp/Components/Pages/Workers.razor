@@ -300,7 +300,7 @@
         </div>
 
         <div class="grid grid-cols-3 mb-md">
-            <StatCard Label="Throughput (1h)" Value="@GetCombinedThroughputTotal()" Footnote="pages processed" />
+            <StatCard Label="Throughput (1h)" Value="@GetCombinedThroughputTotal()" Footnote="sum of pages/30s buckets" />
             <StatCard Label="Logs (filtered)" Value="@combinedLogs.Count.ToString()" Footnote="recent rows" />
             <StatCard Label="Warnings+Errors" Value="@combinedLogs.Count(log => IsWarnOrError(log.Level)).ToString()" Footnote="recent rows" />
         </div>
@@ -316,7 +316,7 @@
             }
             else
             {
-                <ThroughputLineChart Points="combinedThroughputSeries" />
+                <ThroughputLineChart Points="combinedThroughputSeries" BucketSeconds="30" />
             }
         </div>
 

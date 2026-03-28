@@ -162,7 +162,7 @@
         {
             <div class="grid grid-cols-3 mb-lg">
                 <StatCard Label="Success Rate" Value="@GetSuccessRate()" Footnote="Processed vs errors" />
-                <StatCard Label="Recent Throughput" Value="@GetRecentThroughput()" Footnote="pages/bucket" />
+                <StatCard Label="Recent Throughput" Value="@GetRecentThroughput()" Footnote="pages/30s" />
                 <StatCard Label="Uptime" Value="@GetUptime()" Footnote="Since started" />
             </div>
 
@@ -174,7 +174,7 @@
                 }
                 else
                 {
-                    <ThroughputLineChart Points="throughputSeries" />
+                    <ThroughputLineChart Points="throughputSeries" BucketSeconds="30" />
                 }
             </div>
 

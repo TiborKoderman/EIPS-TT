@@ -26,6 +26,7 @@ public class GraphNodeDto
     public string Domain { get; set; } = "";
     public string PageType { get; set; } = "HTML";
     public int Size { get; set; } = 1; // Based on incoming links count
+    public double RelevanceScore { get; set; }
 }
 
 /// <summary>
@@ -56,6 +57,28 @@ public class GraphDataDto
     public List<GraphNodeDto> Nodes { get; set; } = new();
     public List<GraphLinkDto> Links { get; set; } = new();
     public List<GraphWorkerDto> Workers { get; set; } = new();
+}
+
+public class SiteGraphNodeDto
+{
+    public int SiteId { get; set; }
+    public string Domain { get; set; } = "unknown";
+    public int PagesCount { get; set; }
+    public double AverageScore { get; set; }
+    public double TopScore { get; set; }
+}
+
+public class SiteGraphEdgeDto
+{
+    public int SourceSiteId { get; set; }
+    public int TargetSiteId { get; set; }
+    public int EdgeCount { get; set; }
+}
+
+public class SiteGraphDataDto
+{
+    public List<SiteGraphNodeDto> Nodes { get; set; } = new();
+    public List<SiteGraphEdgeDto> Edges { get; set; } = new();
 }
 
 /// <summary>
@@ -267,6 +290,7 @@ public class DaemonStatusViewModel
 
 public class DaemonFrontierSnapshotViewModel
 {
+    public int InQueue { get; set; }
     public int InMemoryQueued { get; set; }
     public int KnownUrls { get; set; }
     public int LocalQueued { get; set; }
@@ -307,6 +331,7 @@ public class FrontierClaimViewModel
 /// </summary>
 public class FrontierStatusViewModel
 {
+    public int InQueue { get; set; }
     public int InMemoryQueued { get; set; }
     public int KnownUrls { get; set; }
     public int LocalQueued { get; set; }
@@ -314,6 +339,16 @@ public class FrontierStatusViewModel
     public int Tombstones { get; set; }
     public int LeaseTtlSeconds { get; set; }
     public bool RelayEnabled { get; set; }
+    public List<IpTimeoutViewModel> IpTimeouts { get; set; } = new();
+}
+
+public class IpTimeoutViewModel
+{
+    public string CrawlerId { get; set; } = "local-default";
+    public string SiteIpKey { get; set; } = string.Empty;
+    public List<string> Domains { get; set; } = new();
+    public DateTime ReadyAtUtc { get; set; }
+    public int RemainingMilliseconds { get; set; }
 }
 
 public class FrontierDequeueItemViewModel

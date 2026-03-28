@@ -56,45 +56,95 @@
         }
 
         <div class="dashboard-main-grid mb-lg">
-            <div class="card dashboard-worker-status-card">
-                <div class="card-header-inline mb-sm">
-                    <h2 class="card-title mb-0">Worker Status</h2>
-                    <span class="live-pill"><span class="live-dot"></span> Live</span>
-                </div>
-                @if (workerStatusCounts != null && WorkerStatusTotal > 0)
-                {
-                    <div class="dashboard-worker-status">
-                        <div style="flex: 0 0 auto;">
-                            <WorkerStatusPieChart StatusCounts="workerStatusCounts"
-                                                  SelectedStatus="selectedWorkerStatus"
-                                                  OnSliceClick="OnWorkerSliceClick" />
-                        </div>
-                        <div class="dashboard-worker-status-list">
-                            @foreach (var status in DashboardStatuses)
-                            {
-                                var count = workerStatusCounts.GetValueOrDefault(status, 0);
-                                <button class="status-row @(selectedWorkerStatus == status ? "active" : "")"
-                                        @onclick="() => ToggleWorkerStatus(status)">
-                                    <span class="badge @GetStatusBadgeClass(status) status-pill">
-                                        <span>@status</span>
-                                        <span class="pill-count">@count</span>
-                                    </span>
-                                </button>
-                            }
-                        </div>
+            <div class="dashboard-worker-column">
+                <div class="card dashboard-worker-status-card">
+                    <div class="card-header-inline mb-sm">
+                        <h2 class="card-title mb-0">Worker Status</h2>
+                        <span class="live-pill"><span class="live-dot"></span> Live</span>
                     </div>
-                }
-                else
-                {
-                    <p class="text-muted">No workers currently running</p>
-                }
+                    @if (workerStatusCounts != null && WorkerStatusTotal > 0)
+                    {
+                        <div class="dashboard-worker-status">
+                            <div style="flex: 0 0 auto;">
+                                <WorkerStatusPieChart StatusCounts="workerStatusCounts"
+                                                      SelectedStatus="selectedWorkerStatus"
+                                                      OnSliceClick="OnWorkerSliceClick" />
+                            </div>
+                            <div class="dashboard-worker-status-list">
+                                @foreach (var status in DashboardStatuses)
+                                {
+                                    var count = workerStatusCounts.GetValueOrDefault(status, 0);
+                                    <button class="status-row @(selectedWorkerStatus == status ? "active" : "")"
+                                            @onclick="() => ToggleWorkerStatus(status)">
+                                        <span class="badge @GetStatusBadgeClass(status) status-pill">
+                                            <span>@status</span>
+                                            <span class="pill-count">@count</span>
+                                        </span>
+                                    </button>
+                                }
+                            </div>
+                        </div>
+                    }
+                    else
+                    {
+                        <p class="text-muted">No workers currently running</p>
+                    }
+                </div>
+
+                <div class="card dashboard-worker-snapshot-card">
+                    <div class="card-header-inline">
+                        <h2 class="card-title mb-0">Workers Snapshot</h2>
+                        <span class="live-pill"><span class="live-dot"></span> Live</span>
+                    </div>
+                    @if (visibleWorkers.Count == 0)
+                    {
+                        <p class="text-muted">No workers available.</p>
+                    }
+                    else
+                    {
+                        <ul class="list dashboard-worker-list">
+                            @foreach (var worker in visibleWorkers.Take(6))
+                            {
+                                var activity = GetWorkerActivity(worker);
+                                <li class="list-item worker-list-clickable" @onclick="() => OpenWorkerDetail(worker.Id)">
+                                    <div class="flex items-center justify-between gap-sm">
+                                        <strong>@worker.Name</strong>
+                                        <div class="flex items-center gap-sm">
+                                            <span class="badge @GetStatusBadgeClass(worker.Status)">@worker.Status</span>
+                                            <span class="badge @GetStatusBadgeClass(worker.Status) state-badge-short" title="@BuildWorkerStateTooltip(worker)">
+                                                <span class="mdi @GetStatusIcon(worker.Status)"></span>
+                                            </span>
+                                        </div>
+                                    </div>
+                                    <div class="text-small text-muted worker-url-row">
+                                        <HoverTooltip Text="@activity.Label" Class="worker-activity-tooltip-wrap">
+                                            <span class="mdi @activity.IconClass worker-activity-icon @activity.CssClass"></span>
+                                        </HoverTooltip>
+                                        <span class="worker-url-processing @(activity.IsProcessing ? "is-processing" : "")">
+                                            @(string.IsNullOrWhiteSpace(worker.CurrentUrl) ? "Waiting for next page..." : worker.CurrentUrl) · @worker.Status
+                                        </span>
+                                        @if (activity.IsProcessing)
+                                        {
+                                            <span class="processing-ellipsis" aria-hidden="true">
+                                                <span></span><span></span><span></span>
+                                            </span>
+                                        }
+                                    </div>
+                                </li>
+                            }
+                        </ul>
+                    }
+                </div>
             </div>
 
-            <div class="card">
+            <div class="card dashboard-queue-card">
                 <div class="card-header-inline mb-sm">
                     <h2 class="card-title mb-0">Frontier Queue</h2>
                     <span class="live-pill"><span class="live-dot"></span> Live</span>
                 </div>
+                @{
+                    var activeIpTimeouts = GetActiveIpTimeouts();
+                }
                 @if (daemonQueueSnapshots.Count == 0)
                 {
                     <p class="text-small text-muted">No daemon queue data yet.</p>
@@ -106,26 +156,46 @@
                         {
                             <div>
                                 <div class="text-small font-semibold">@snapshot.DaemonId</div>
-                                <div class="grid grid-cols-2 gap-sm mt-sm text-small">
+                                <div class="grid grid-cols-3 gap-sm mt-sm text-small">
                                     <div>
-                                        <div class="text-muted">In Memory</div>
-                                        <div class="font-semibold">@snapshot.InMemoryQueued</div>
+                                        <div class="text-muted">In queue</div>
+                                        <div class="font-semibold">@snapshot.InQueue</div>
                                     </div>
                                     <div>
-                                        <div class="text-muted">Local</div>
-                                        <div class="font-semibold">@snapshot.LocalQueued</div>
+                                        <div class="text-muted">In memory</div>
+                                        <div class="font-semibold">@snapshot.InMemoryQueued</div>
                                     </div>
                                     <div>
                                         <div class="text-muted">Leases</div>
                                         <div class="font-semibold">@snapshot.ActiveLeases</div>
                                     </div>
-                                    <div>
-                                        <div class="text-muted">Known URLs</div>
-                                        <div class="font-semibold">@snapshot.KnownUrls</div>
-                                    </div>
+                                </div>
+                                <div class="text-small text-muted mt-sm">
+                                    Local: @snapshot.LocalQueued | Known URLs: @snapshot.KnownUrls
                                 </div>
                             </div>
                         }
+                    </div>
+                }
+
+                @if (activeIpTimeouts.Count > 0)
+                {
+                    <div class="dashboard-ip-timeout-widget mt-md">
+                        <div class="text-small font-semibold mb-sm">IP timeouts</div>
+                        <ul class="list dashboard-ip-timeout-list">
+                            @foreach (var timeout in activeIpTimeouts)
+                            {
+                                <li class="dashboard-ip-timeout-row">
+                                    <div class="flex items-center justify-between gap-sm">
+                                        <span class="text-small font-semibold">@timeout.SiteIpKey</span>
+                                        <span class="badge badge-warning">@FormatTimeoutRemaining(timeout.RemainingMilliseconds)</span>
+                                    </div>
+                                    <div>
+                                        <span class="text-small text-muted">@FormatTimeoutDomains(timeout)</span>
+                                    </div>
+                                </li>
+                            }
+                        </ul>
                     </div>
                 }
 
@@ -137,10 +207,17 @@
                             <ul class="list dashboard-queue-list">
                                 @foreach (var item in topQueueItems)
                                 {
+                                    var timeoutInfo = GetQueueTimeoutInfo(item.Url, activeIpTimeouts);
                                     var tooltip = $"{item.State} | reason=queued | url={item.Url}";
-                                    <li class="dashboard-queue-row" title="@tooltip" @key="item.Url">
+                                    <li class="dashboard-queue-row @(timeoutInfo.IsTimedOut ? "is-timeout" : string.Empty)" title="@tooltip" @key="item.Url">
                                         <div class="flex items-center justify-between gap-sm">
-                                            <span class="badge @GetQueueStateBadgeClass(item.State)">@item.State.ToUpperInvariant()</span>
+                                            <div class="flex items-center gap-sm">
+                                                <span class="badge @GetQueueStateBadgeClass(item.State)">@item.State.ToUpperInvariant()</span>
+                                                @if (timeoutInfo.IsTimedOut)
+                                                {
+                                                    <span class="badge badge-warning" title="Rate-limited by @timeoutInfo.SiteIpKey">Timeout @FormatTimeoutRemaining(timeoutInfo.RemainingMilliseconds)</span>
+                                                }
+                                            </div>
                                             <span class="text-small font-semibold">R @item.RelevanceScore.ToString("0.00")</span>
                                         </div>
                                         <div class="text-small text-muted queue-url">@item.Url</div>
@@ -153,51 +230,6 @@
                 else
                 {
                     <p class="text-small text-muted mt-sm">No queued frontier items available.</p>
-                }
-            </div>
-
-            <div class="card">
-                <div class="card-header-inline">
-                    <h2 class="card-title mb-0">Workers Snapshot</h2>
-                    <span class="live-pill"><span class="live-dot"></span> Live</span>
-                </div>
-                @if (visibleWorkers.Count == 0)
-                {
-                    <p class="text-muted">No workers available.</p>
-                }
-                else
-                {
-                    <ul class="list dashboard-worker-list">
-                        @foreach (var worker in visibleWorkers.Take(6))
-                        {
-                            var activity = GetWorkerActivity(worker);
-                            <li class="list-item worker-list-clickable" @onclick="() => OpenWorkerDetail(worker.Id)">
-                                <div class="flex items-center justify-between gap-sm">
-                                    <strong>@worker.Name</strong>
-                                    <div class="flex items-center gap-sm">
-                                        <span class="badge @GetStatusBadgeClass(worker.Status)">@worker.Status</span>
-                                        <span class="badge @GetStatusBadgeClass(worker.Status) state-badge-short" title="@BuildWorkerStateTooltip(worker)">
-                                            <span class="mdi @GetStatusIcon(worker.Status)"></span>
-                                        </span>
-                                    </div>
-                                </div>
-                                <div class="text-small text-muted worker-url-row">
-                                    <HoverTooltip Text="@activity.Label" Class="worker-activity-tooltip-wrap">
-                                        <span class="mdi @activity.IconClass worker-activity-icon @activity.CssClass"></span>
-                                    </HoverTooltip>
-                                    <span class="worker-url-processing @(activity.IsProcessing ? "is-processing" : "")">
-                                        @(string.IsNullOrWhiteSpace(worker.CurrentUrl) ? "Waiting for next page..." : worker.CurrentUrl) · @worker.Status
-                                    </span>
-                                    @if (activity.IsProcessing)
-                                    {
-                                        <span class="processing-ellipsis" aria-hidden="true">
-                                            <span></span><span></span><span></span>
-                                        </span>
-                                    }
-                                </div>
-                            </li>
-                        }
-                    </ul>
                 }
             </div>
 
@@ -259,6 +291,7 @@
                     <div class="flex items-center gap-sm">
                         <span class="live-pill"><span class="live-dot"></span> Live</span>
                         <span class="text-small text-muted">@GetThroughputSourceLabel()</span>
+                        <span class="text-small text-muted">unit: pages/30s</span>
                     </div>
                 </div>
                 @if (dashboardThroughputSeries.Count == 0)
@@ -267,7 +300,7 @@
                 }
                 else
                 {
-                    <ThroughputLineChart Points="dashboardThroughputSeries" />
+                    <ThroughputLineChart Points="dashboardThroughputSeries" BucketSeconds="30" />
                 }
             </div>
         </div>
@@ -541,6 +574,117 @@
         };
     }
 
+    private List<IpTimeoutViewModel> GetActiveIpTimeouts()
+    {
+        if (frontierStatus?.IpTimeouts is null || frontierStatus.IpTimeouts.Count == 0)
+        {
+            return new List<IpTimeoutViewModel>();
+        }
+
+        return frontierStatus.IpTimeouts
+            .Where(item => item.RemainingMilliseconds > 0)
+            .OrderByDescending(item => item.RemainingMilliseconds)
+            .ThenBy(item => item.SiteIpKey, StringComparer.OrdinalIgnoreCase)
+            .Take(12)
+            .ToList();
+    }
+
+    private static QueueTimeoutInfo GetQueueTimeoutInfo(string? url, IReadOnlyCollection<IpTimeoutViewModel> activeIpTimeouts)
+    {
+        if (string.IsNullOrWhiteSpace(url) || activeIpTimeouts.Count == 0)
+        {
+            return QueueTimeoutInfo.None;
+        }
+
+        if (!Uri.TryCreate(url, UriKind.Absolute, out var parsedUri))
+        {
+            return QueueTimeoutInfo.None;
+        }
+
+        var host = NormalizeHost(parsedUri.Host);
+        if (string.IsNullOrWhiteSpace(host))
+        {
+            return QueueTimeoutInfo.None;
+        }
+
+        foreach (var timeout in activeIpTimeouts)
+        {
+            if (IsTimeoutMatch(host, timeout))
+            {
+                return new QueueTimeoutInfo(true, timeout.RemainingMilliseconds, timeout.SiteIpKey);
+            }
+        }
+
+        return QueueTimeoutInfo.None;
+    }
+
+    private static bool IsTimeoutMatch(string normalizedHost, IpTimeoutViewModel timeout)
+    {
+        if (string.IsNullOrWhiteSpace(normalizedHost))
+        {
+            return false;
+        }
+
+        if (string.Equals(normalizedHost, NormalizeHost(timeout.SiteIpKey), StringComparison.OrdinalIgnoreCase))
+        {
+            return true;
+        }
+
+        foreach (var domain in timeout.Domains)
+        {
+            if (string.Equals(normalizedHost, NormalizeHost(domain), StringComparison.OrdinalIgnoreCase))
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    private static string NormalizeHost(string? host)
+    {
+        return (host ?? string.Empty).Trim().TrimEnd('.').ToLowerInvariant();
+    }
+
+    private static string FormatTimeoutDomains(IpTimeoutViewModel timeout)
+    {
+        if (timeout.Domains.Count == 0)
+        {
+            return "No domains mapped";
+        }
+
+        var domains = timeout.Domains
+            .Where(domain => !string.IsNullOrWhiteSpace(domain))
+            .Select(NormalizeHost)
+            .Where(domain => !string.IsNullOrWhiteSpace(domain))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .Take(4)
+            .ToList();
+
+        if (domains.Count == 0)
+        {
+            return "No domains mapped";
+        }
+
+        return string.Join(", ", domains);
+    }
+
+    private static string FormatTimeoutRemaining(int remainingMilliseconds)
+    {
+        if (remainingMilliseconds <= 0)
+        {
+            return "0s";
+        }
+
+        var remaining = TimeSpan.FromMilliseconds(remainingMilliseconds);
+        if (remaining.TotalMinutes >= 1)
+        {
+            return $"{(int)remaining.TotalMinutes}m {remaining.Seconds}s";
+        }
+
+        return $"{Math.Max(1, (int)Math.Ceiling(remaining.TotalSeconds))}s";
+    }
+
     private string GetRecentEventSourceLabel()
     {
         return recentLogsUsingFallback ? "source: live event fallback" : "source: persisted worker_log";
@@ -589,6 +733,7 @@
             byDaemon["server-frontier"] = new DaemonQueueSnapshot
             {
                 DaemonId = "server-frontier",
+                InQueue = frontierStatus.InQueue,
                 InMemoryQueued = frontierStatus.InMemoryQueued,
                 LocalQueued = frontierStatus.LocalQueued,
                 ActiveLeases = frontierStatus.ActiveLeases,
@@ -599,9 +744,11 @@
 
         if (daemonStatus?.Frontier != null)
         {
+            var inQueue = daemonStatus.Frontier.InQueue;
             byDaemon["local-default"] = new DaemonQueueSnapshot
             {
                 DaemonId = "local-default",
+                InQueue = inQueue > 0 ? inQueue : daemonStatus.Frontier.InMemoryQueued,
                 InMemoryQueued = daemonStatus.Frontier.InMemoryQueued,
                 LocalQueued = daemonStatus.Frontier.LocalQueued,
                 ActiveLeases = daemonStatus.Frontier.ActiveLeases,
@@ -632,6 +779,11 @@
             if (payload.TryGetValue("inMemoryQueued", out var inMemory))
             {
                 snapshot.InMemoryQueued = inMemory;
+            }
+
+            if (payload.TryGetValue("inQueue", out var inQueue))
+            {
+                snapshot.InQueue = inQueue;
             }
 
             if (payload.TryGetValue("localQueued", out var localQueued))
@@ -1104,10 +1256,16 @@
     private sealed class DaemonQueueSnapshot
     {
         public string DaemonId { get; set; } = "local-default";
+        public int InQueue { get; set; }
         public int InMemoryQueued { get; set; }
         public int LocalQueued { get; set; }
         public int ActiveLeases { get; set; }
         public int KnownUrls { get; set; }
+    }
+
+    private readonly record struct QueueTimeoutInfo(bool IsTimedOut, int RemainingMilliseconds, string SiteIpKey)
+    {
+        public static QueueTimeoutInfo None => new(false, 0, string.Empty);
     }
 
     private void OpenWorkerDetail(int workerId)

@@ -24,4 +24,9 @@ public interface IGraphService
     /// Get incoming link counts for all pages (used for node sizing)
     /// </summary>
     Task<Dictionary<int, int>> GetIncomingLinkCountsAsync();
+
+    /// <summary>
+    /// Get aggregated site graph data with per-site score/page metrics and inter-site edge counts.
+    /// </summary>
+    Task<SiteGraphDataDto> GetSiteGraphDataAsync();
 }

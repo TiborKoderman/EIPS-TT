@@ -78,19 +78,23 @@ All transitions are logged with timestamp and reason.
 
 ## Queue Management Features
 
-- **Live frontier stats:** queued, active lease, and completion/failure counters
+- **Live frontier stats:** explicit In queue / In memory / Leased counters with completion/failure context
 - **Duplicate detection:** Identify and link duplicate URLs
+- **Terminal duplicate handling:** manager-side enqueue upsert keeps `DUPLICATE` rows terminal instead of re-queuing them
 - **Lease management:** Automatic requeue on worker timeout/failure
 - **Delegate politeness scheduling:** Claim/dequeue skips cooled-down candidates per crawler daemon and resolved site IP, then returns the next valid URL
 - **Priority visualization:** Show high-priority pending URLs to operators
 - **Queue list continuity:** Dashboard queue view refreshes frequently and immediately shows replacement queued URLs after claims
+- **Rate-limit observability:** queue rows and dedicated widget surface active IP cooldown windows with mapped domains
 
 ## Graph Visualization Features
 
 - **Static graph:** Current page/link topology snapshot for results inspection
+- **Dedicated site graph view:** Separate renderer aggregates unique visited sites, sizes nodes by page count, colors by score, and labels inter-site edge counts
 - **Dynamic replay:** Timeline playback that replays crawler event history over graph growth
 - **Replay controls:** Play/pause, reset, speed control, and scrub slider
-- **Two-level interaction:** Site-level and page-level exploration via zoom/click or explicit level controls
+- **Three-level interaction (topology/replay):** Domain, subdomain, and page exploration via explicit level controls (page-first default)
+- **Aggregate edge weights:** Domain/subdomain modes render cross-group links with edge-count labels
 
 ## Instance Management Rule
 

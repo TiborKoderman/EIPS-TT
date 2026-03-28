@@ -1290,6 +1290,7 @@ public sealed class ReverseChannelWorkerService : IWorkerService
     {
         return new FrontierStatusViewModel
         {
+            InQueue = status.InQueue,
             InMemoryQueued = status.InMemoryQueued,
             KnownUrls = status.KnownUrls,
             LocalQueued = status.LocalQueued,
@@ -1297,6 +1298,16 @@ public sealed class ReverseChannelWorkerService : IWorkerService
             Tombstones = status.Tombstones,
             LeaseTtlSeconds = status.LeaseTtlSeconds,
             RelayEnabled = status.RelayEnabled,
+            IpTimeouts = status.IpTimeouts
+                .Select(item => new IpTimeoutViewModel
+                {
+                    CrawlerId = item.CrawlerId,
+                    SiteIpKey = item.SiteIpKey,
+                    Domains = new List<string>(item.Domains),
+                    ReadyAtUtc = item.ReadyAtUtc,
+                    RemainingMilliseconds = item.RemainingMilliseconds,
+                })
+                .ToList(),
         };
     }
 
@@ -1312,6 +1323,7 @@ public sealed class ReverseChannelWorkerService : IWorkerService
             LocalProcessCount = status.LocalProcessCount,
             Frontier = new DaemonFrontierSnapshotViewModel
             {
+                InQueue = status.Frontier.InQueue,
                 InMemoryQueued = status.Frontier.InMemoryQueued,
                 KnownUrls = status.Frontier.KnownUrls,
                 LocalQueued = status.Frontier.LocalQueued,

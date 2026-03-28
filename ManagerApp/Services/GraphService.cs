@@ -118,13 +118,17 @@ public class GraphService : IGraphService
             {
                 while (await nodeReader.ReadAsync())
                 {
+                    var id = nodeReader.GetInt32(0);
+                    var url = nodeReader.GetString(1);
+                    var domain = nodeReader.GetString(2);
                     nodes.Add(new GraphNodeDto
                     {
-                        Id = nodeReader.GetInt32(0),
-                        Url = nodeReader.GetString(1),
-                        Domain = nodeReader.GetString(2),
+                        Id = id,
+                        Url = url,
+                        Domain = domain,
                         PageType = nodeReader.GetString(3),
-                        Size = incomingCounts.GetValueOrDefault(nodeReader.GetInt32(0), 1),
+                        Size = incomingCounts.GetValueOrDefault(id, 1),
+                        RelevanceScore = EstimateGraphRelevanceScore(url, domain),
                     });
                 }
             }
@@ -233,6 +237,151 @@ public class GraphService : IGraphService
         }
 
         return counts;
+    }
+
+    public async Task<SiteGraphDataDto> GetSiteGraphDataAsync()
+    {
+        var result = new SiteGraphDataDto();
+
+        await using var connection = new NpgsqlConnection(_context.Database.GetConnectionString());
+        await connection.OpenAsync();
+
+        const string sitesSql = """
+            SELECT
+                s.id,
+                COALESCE(s.domain, 'unknown') AS domain,
+                COALESCE(p.url, '') AS url
+            FROM crawldb.site s
+            JOIN crawldb.page p ON p.site_id = s.id
+            ORDER BY s.id ASC;
+            """;
+
+        var siteAggregates = new Dictionary<int, SiteAggregate>();
+
+        await using (var sitesCmd = new NpgsqlCommand(sitesSql, connection))
+        await using (var reader = await sitesCmd.ExecuteReaderAsync())
+        {
+            while (await reader.ReadAsync())
+            {
+                var siteId = reader.GetInt32(0);
+                var domain = reader.GetString(1);
+                var url = reader.GetString(2);
+                var score = EstimateGraphRelevanceScore(url, domain);
+
+                if (!siteAggregates.TryGetValue(siteId, out var aggregate))
+                {
+                    aggregate = new SiteAggregate
+                    {
+                        SiteId = siteId,
+                        Domain = domain,
+                    };
+                    siteAggregates[siteId] = aggregate;
+                }
+
+                if (string.IsNullOrWhiteSpace(aggregate.Domain) || string.Equals(aggregate.Domain, "unknown", StringComparison.OrdinalIgnoreCase))
+                {
+                    aggregate.Domain = domain;
+                }
+
+                aggregate.PagesCount += 1;
+                aggregate.ScoreSum += score;
+                aggregate.TopScore = Math.Max(aggregate.TopScore, score);
+            }
+        }
+
+        result.Nodes = siteAggregates
+            .Values
+            .OrderByDescending(item => item.PagesCount)
+            .ThenBy(item => item.Domain, StringComparer.OrdinalIgnoreCase)
+            .Select(item => new SiteGraphNodeDto
+            {
+                SiteId = item.SiteId,
+                Domain = item.Domain,
+                PagesCount = item.PagesCount,
+                AverageScore = item.PagesCount > 0 ? item.ScoreSum / item.PagesCount : 0,
+                TopScore = item.TopScore,
+            })
+            .ToList();
+
+        const string edgesSql = """
+            SELECT
+                LEAST(from_page.site_id, to_page.site_id)::int AS source_site_id,
+                GREATEST(from_page.site_id, to_page.site_id)::int AS target_site_id,
+                COUNT(*)::int AS edge_count
+            FROM crawldb.link l
+            JOIN crawldb.page from_page ON from_page.id = l.from_page
+            JOIN crawldb.page to_page ON to_page.id = l.to_page
+            WHERE from_page.site_id IS NOT NULL
+              AND to_page.site_id IS NOT NULL
+              AND from_page.site_id <> to_page.site_id
+            GROUP BY LEAST(from_page.site_id, to_page.site_id), GREATEST(from_page.site_id, to_page.site_id)
+            ORDER BY edge_count DESC, source_site_id ASC, target_site_id ASC;
+            """;
+
+        await using (var edgesCmd = new NpgsqlCommand(edgesSql, connection))
+        await using (var reader = await edgesCmd.ExecuteReaderAsync())
+        {
+            while (await reader.ReadAsync())
+            {
+                result.Edges.Add(new SiteGraphEdgeDto
+                {
+                    SourceSiteId = reader.GetInt32(0),
+                    TargetSiteId = reader.GetInt32(1),
+                    EdgeCount = reader.GetInt32(2),
+                });
+            }
+        }
+
+        return result;
+    }
+
+    private static double EstimateGraphRelevanceScore(string? url, string? domain)
+    {
+        var urlValue = (url ?? string.Empty).Trim().ToLowerInvariant();
+        var domainValue = (domain ?? string.Empty).Trim().ToLowerInvariant();
+        if (string.IsNullOrWhiteSpace(urlValue) && string.IsNullOrWhiteSpace(domainValue))
+        {
+            return 0;
+        }
+
+        var combined = $"{urlValue} {domainValue}";
+        var score = 0.05;
+
+        if (combined.Contains(".gov") || combined.Contains("government") || combined.Contains("ministr") || combined.Contains("uprava"))
+        {
+            score += 0.18;
+        }
+
+        if (combined.Contains("health") || combined.Contains("medic") || combined.Contains("hospital") || combined.Contains("clinic") || combined.Contains("doctor") || combined.Contains("disease") || combined.Contains("nijz") || combined.Contains("who.int"))
+        {
+            score += 0.24;
+        }
+
+        if (combined.Contains("research") || combined.Contains("science") || combined.Contains("university") || combined.Contains("faculty") || combined.Contains("edu"))
+        {
+            score += 0.14;
+        }
+
+        if (combined.Contains("news") || combined.Contains("blog") || combined.Contains("article"))
+        {
+            score += 0.1;
+        }
+
+        if (combined.Contains("covid") || combined.Contains("epidem") || combined.Contains("pandem") || combined.Contains("vaccine") || combined.Contains("virus"))
+        {
+            score += 0.18;
+        }
+
+        return Math.Clamp(score, 0, 1);
+    }
+
+    private sealed class SiteAggregate
+    {
+        public int SiteId { get; set; }
+        public string Domain { get; set; } = "unknown";
+        public int PagesCount { get; set; }
+        public double ScoreSum { get; set; }
+        public double TopScore { get; set; }
     }
 
 }

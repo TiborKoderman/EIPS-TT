@@ -68,8 +68,8 @@
                             <button class="btn" @onclick="ExportStaticSvg"><span class="mdi mdi-file-image"></span> Export SVG</button>
                             <div class="graph-view-switch">
                                 <span class="text-small text-muted">View</span>
-                                <button class="btn graph-view-btn" @onclick='() => SetStaticViewLevelAsync("site")'>Sites</button>
-                                <button class="btn graph-view-btn" @onclick='() => SetStaticViewLevelAsync("page")'>Pages</button>
+                                <button class="btn graph-view-btn @(StaticViewLevel == "site" ? "active" : string.Empty)" @onclick='() => SetStaticViewLevelAsync("site")'>Sites</button>
+                                <button class="btn graph-view-btn @(StaticViewLevel == "page" ? "active" : string.Empty)" @onclick='() => SetStaticViewLevelAsync("page")'>Pages</button>
                             </div>
                         </div>
                         <div id="@StaticGraphHostId" class="graph-canvas" style="height:640px;"></div>
@@ -97,8 +97,9 @@
                     </select>
                     <div class="graph-view-switch">
                         <span class="text-small text-muted">View</span>
-                        <button class="btn graph-view-btn" @onclick='() => SetReplayViewLevelAsync("site")'>Sites</button>
-                        <button class="btn graph-view-btn" @onclick='() => SetReplayViewLevelAsync("page")'>Pages</button>
+                        <button class="btn graph-view-btn @(ReplayViewLevel == "domain" ? "active" : string.Empty)" @onclick='() => SetReplayViewLevelAsync("domain")'>Domains</button>
+                        <button class="btn graph-view-btn @(ReplayViewLevel == "subdomain" ? "active" : string.Empty)" @onclick='() => SetReplayViewLevelAsync("subdomain")'>Subdomains</button>
+                        <button class="btn graph-view-btn @(ReplayViewLevel == "page" ? "active" : string.Empty)" @onclick='() => SetReplayViewLevelAsync("page")'>Pages</button>
                     </div>
                 </div>
 
@@ -129,13 +130,16 @@
 
 @code {
     private GraphDataDto StaticGraphData = new();
+    private SiteGraphDataDto StaticSiteGraphData = new();
     private GraphDataDto ReplayGraphData = new();
     private List<ReplayFrame> ReplayFrames = new();
-    private int VisibleNodeLimit = 500;
+    private int VisibleNodeLimit = 250;
     private int ReplayEventLimit = 2500;
     private bool IsLoading = true;
     private string? Error;
     private string GraphMode = "static";
+    private string StaticViewLevel = "page";
+    private string ReplayViewLevel = "page";
     private string? StaticSearchTerm;
     private string? ReplaySearchTerm;
     private int ReplayFrameIndex;
@@ -181,6 +185,7 @@
         try
         {
             StaticGraphData = await GraphService.GetGraphDataAsync(VisibleNodeLimit);
+            StaticSiteGraphData = await GraphService.GetSiteGraphDataAsync();
             var recentEvents = await WorkerService.GetRecentCrawlerEventsAsync(ReplayEventLimit);
             ReplayFrames = BuildReplayFrames(StaticGraphData, recentEvents);
 
@@ -257,13 +262,31 @@
 
     private async Task TryRenderStaticGraphAsync()
     {
-        if (_graphModule == null || IsLoading || !string.IsNullOrWhiteSpace(Error) || StaticGraphData.Nodes.Count == 0)
+        if (_graphModule == null || IsLoading || !string.IsNullOrWhiteSpace(Error))
+        {
+            return;
+        }
+
+        if (string.Equals(StaticViewLevel, "site", StringComparison.OrdinalIgnoreCase))
+        {
+            if (StaticSiteGraphData.Nodes.Count == 0)
+            {
+                return;
+            }
+
+            var sitePayload = JsonSerializer.Serialize(StaticSiteGraphData);
+            await _graphModule.InvokeVoidAsync("renderSiteGraph", StaticGraphHostId, sitePayload);
+            return;
+        }
+
+        if (StaticGraphData.Nodes.Count == 0)
         {
             return;
         }
 
         var payload = JsonSerializer.Serialize(StaticGraphData);
         await _graphModule.InvokeVoidAsync("renderGraph", StaticGraphHostId, payload);
+        await _graphModule.InvokeVoidAsync("setViewLevel", StaticGraphHostId, "page");
     }
 
     private async Task TryRenderReplayGraphAsync()
@@ -275,6 +298,7 @@
 
         var payload = JsonSerializer.Serialize(ReplayGraphData);
         await _graphModule.InvokeVoidAsync("renderGraph", ReplayGraphHostId, payload);
+        await _graphModule.InvokeVoidAsync("setViewLevel", ReplayGraphHostId, ReplayViewLevel);
     }
 
     private async Task ShowStaticMode()
@@ -341,7 +365,14 @@
             return;
         }
 
-        await _graphModule.InvokeVoidAsync("setViewLevel", StaticGraphHostId, level);
+        var resolvedLevel = NormalizeStaticViewLevel(level);
+        if (string.Equals(StaticViewLevel, resolvedLevel, StringComparison.OrdinalIgnoreCase))
+        {
+            return;
+        }
+
+        StaticViewLevel = resolvedLevel;
+        await TryRenderStaticGraphAsync();
     }
 
     private async Task SetReplayViewLevelAsync(string level)
@@ -351,7 +382,29 @@
             return;
         }
 
-        await _graphModule.InvokeVoidAsync("setViewLevel", ReplayGraphHostId, level);
+        ReplayViewLevel = NormalizeGraphViewLevel(level);
+        await _graphModule.InvokeVoidAsync("setViewLevel", ReplayGraphHostId, ReplayViewLevel);
+    }
+
+    private static string NormalizeGraphViewLevel(string? level)
+    {
+        var normalized = (level ?? string.Empty).Trim().ToLowerInvariant();
+        return normalized switch
+        {
+            "domain" => "domain",
+            "subdomain" => "subdomain",
+            _ => "page",
+        };
+    }
+
+    private static string NormalizeStaticViewLevel(string? level)
+    {
+        var normalized = (level ?? string.Empty).Trim().ToLowerInvariant();
+        return normalized switch
+        {
+            "site" or "domain" => "site",
+            _ => "page",
+        };
     }
 
     private async Task ToggleReplayPlaybackAsync()
@@ -881,6 +934,7 @@
             Domain = source.Domain,
             PageType = source.PageType,
             Size = source.Size,
+            RelevanceScore = source.RelevanceScore,
         };
     }
 

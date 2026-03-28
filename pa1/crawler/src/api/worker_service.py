@@ -1150,7 +1150,7 @@ class DaemonWorkerService(WorkerControlService):
                         current_url=lease.url,
                     )
 
-                processing = self._download_and_extract_links(lease.url)
+                processing = self._download_and_extract_links(worker_id, lease.url)
 
                 with self._lock:
                     current = self._workers.get(worker_id)
@@ -2173,11 +2173,11 @@ class DaemonWorkerService(WorkerControlService):
             self._append_log(1, "Warning", f"Frontier relay failed, using daemon-local queue: {exc}")
             return False
 
-    def _download_and_extract_links(self, url: str) -> dict[str, Any]:
+    def _download_and_extract_links(self, worker_id: int, url: str) -> dict[str, Any]:
         downloader = Downloader(user_agent=self._global_config.user_agent)
         policy = self._resolve_robots_policy(url)
         robots_allowed = self._robots_allowed_for_url(policy, url)
-        effective_delay_seconds = self._effective_delay_seconds(policy)
+        effective_delay_seconds = self._effective_delay_seconds(policy, worker_id)
 
         if not robots_allowed:
             return {
@@ -2318,10 +2318,29 @@ class DaemonWorkerService(WorkerControlService):
         except Exception:
             return True
 
-    def _effective_delay_seconds(self, policy: RobotsPolicy | None) -> float:
+    def _effective_delay_seconds(self, policy: RobotsPolicy | None, worker_id: int | None = None) -> float:
         configured_delay = max(0.0, float(self._global_config.crawl_delay_milliseconds) / 1000.0)
         robots_delay = 0.0 if policy is None or policy.crawl_delay_seconds is None else max(0.0, float(policy.crawl_delay_seconds))
-        return max(configured_delay, robots_delay)
+        group_rate_limit_delay = 0.0 if worker_id is None else self._group_rate_limit_delay_seconds(worker_id)
+        return max(configured_delay, robots_delay, group_rate_limit_delay)
+
+    def _group_rate_limit_delay_seconds(self, worker_id: int) -> float:
+        with self._lock:
+            worker_group_limits = [
+                int(group.rate_limit_per_minute)
+                for group in self._groups.values()
+                if worker_id in group.worker_ids
+                and group.enabled
+                and group.rate_limit_per_minute is not None
+                and int(group.rate_limit_per_minute) > 0
+            ]
+
+        if not worker_group_limits:
+            return 0.0
+
+        # Multiple group assignments should not bypass a stricter cap.
+        strictest_limit_per_minute = min(worker_group_limits)
+        return 60.0 / float(strictest_limit_per_minute)
 
     def _robots_policy_allows_enqueue(self, url: str) -> tuple[bool, RobotsPolicy | None]:
         policy = self._resolve_robots_policy(url)

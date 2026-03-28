@@ -42,32 +42,28 @@ public sealed class FrontierService
                state = CASE
                    WHEN crawldb.frontier_queue.state IN (
                        'COMPLETED'::crawldb.frontier_queue_state,
-                       'FAILED'::crawldb.frontier_queue_state,
-                       'DUPLICATE'::crawldb.frontier_queue_state
+                       'FAILED'::crawldb.frontier_queue_state
                    ) THEN 'QUEUED'::crawldb.frontier_queue_state
                    ELSE crawldb.frontier_queue.state
                END,
                finished_at = CASE
                    WHEN crawldb.frontier_queue.state IN (
                        'COMPLETED'::crawldb.frontier_queue_state,
-                       'FAILED'::crawldb.frontier_queue_state,
-                       'DUPLICATE'::crawldb.frontier_queue_state
+                       'FAILED'::crawldb.frontier_queue_state
                    ) THEN NULL
                    ELSE crawldb.frontier_queue.finished_at
                END,
                locked_at = CASE
                    WHEN crawldb.frontier_queue.state IN (
                        'COMPLETED'::crawldb.frontier_queue_state,
-                       'FAILED'::crawldb.frontier_queue_state,
-                       'DUPLICATE'::crawldb.frontier_queue_state
+                       'FAILED'::crawldb.frontier_queue_state
                    ) THEN NULL
                    ELSE crawldb.frontier_queue.locked_at
                END,
                locked_by_worker_id = CASE
                    WHEN crawldb.frontier_queue.state IN (
                        'COMPLETED'::crawldb.frontier_queue_state,
-                       'FAILED'::crawldb.frontier_queue_state,
-                       'DUPLICATE'::crawldb.frontier_queue_state
+                       'FAILED'::crawldb.frontier_queue_state
                    ) THEN NULL
                    ELSE crawldb.frontier_queue.locked_by_worker_id
                END;
@@ -435,33 +431,54 @@ public sealed class FrontierService
         await RequeueExpiredLeasesAsync(connection, cancellationToken);
 
         const string sql = """
-            SELECT state::text, COUNT(*)
-            FROM crawldb.frontier_queue
-            GROUP BY state;
+            SELECT
+                COUNT(*) FILTER (WHERE state = 'QUEUED'::crawldb.frontier_queue_state) AS queued,
+                COUNT(*) FILTER (
+                    WHERE memory_cached = true
+                      AND state IN (
+                        'QUEUED'::crawldb.frontier_queue_state,
+                        'LOCKED'::crawldb.frontier_queue_state,
+                        'PROCESSING'::crawldb.frontier_queue_state
+                    )
+                ) AS in_memory,
+                COUNT(*) FILTER (WHERE state = 'LOCKED'::crawldb.frontier_queue_state) AS locked,
+                COUNT(*) FILTER (WHERE state = 'PROCESSING'::crawldb.frontier_queue_state) AS processing,
+                COUNT(*) FILTER (WHERE state = 'COMPLETED'::crawldb.frontier_queue_state) AS completed,
+                COUNT(*) FILTER (WHERE state = 'DUPLICATE'::crawldb.frontier_queue_state) AS duplicate,
+                COUNT(*) FILTER (WHERE state = 'FAILED'::crawldb.frontier_queue_state) AS failed
+            FROM crawldb.frontier_queue;
             """;
 
-        var counts = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+        var queued = 0;
+        var inMemory = 0;
+        var locked = 0;
+        var processing = 0;
+        var completed = 0;
+        var duplicate = 0;
+        var failed = 0;
+
         await using (var cmd = new NpgsqlCommand(sql, connection))
         await using (var reader = await cmd.ExecuteReaderAsync(cancellationToken))
         {
-            while (await reader.ReadAsync(cancellationToken))
+            if (await reader.ReadAsync(cancellationToken))
             {
-                counts[reader.GetString(0)] = reader.GetInt32(1);
+                queued = reader.IsDBNull(0) ? 0 : reader.GetInt32(0);
+                inMemory = reader.IsDBNull(1) ? 0 : reader.GetInt32(1);
+                locked = reader.IsDBNull(2) ? 0 : reader.GetInt32(2);
+                processing = reader.IsDBNull(3) ? 0 : reader.GetInt32(3);
+                completed = reader.IsDBNull(4) ? 0 : reader.GetInt32(4);
+                duplicate = reader.IsDBNull(5) ? 0 : reader.GetInt32(5);
+                failed = reader.IsDBNull(6) ? 0 : reader.GetInt32(6);
             }
         }
 
-        var queued = counts.GetValueOrDefault("QUEUED");
-        var locked = counts.GetValueOrDefault("LOCKED");
-        var processing = counts.GetValueOrDefault("PROCESSING");
-        var completed = counts.GetValueOrDefault("COMPLETED");
-        var duplicate = counts.GetValueOrDefault("DUPLICATE");
-        var failed = counts.GetValueOrDefault("FAILED");
-
-        status.InMemoryQueued = queued;
+        status.InQueue = queued;
+        status.InMemoryQueued = inMemory;
         status.KnownUrls = queued + locked + processing + completed + duplicate + failed;
         status.LocalQueued = 0;
         status.ActiveLeases = locked + processing;
         status.Tombstones = completed + duplicate + failed;
+        status.IpTimeouts = BuildIpTimeoutSnapshot(DateTime.UtcNow, maxItems: 32);
 
         return status;
     }
@@ -679,6 +696,69 @@ public sealed class FrontierService
     private static string ComposeCrawlerSiteKey(string crawlerKey, string siteIpKey)
     {
         return $"{crawlerKey}|{siteIpKey}";
+    }
+
+    private static bool TryParseCrawlerSiteKey(string scopedKey, out string crawlerId, out string siteIpKey)
+    {
+        crawlerId = "local-default";
+        siteIpKey = string.Empty;
+        var separator = scopedKey.IndexOf('|', StringComparison.Ordinal);
+        if (separator <= 0 || separator >= scopedKey.Length - 1)
+        {
+            return false;
+        }
+
+        crawlerId = scopedKey[..separator].Trim();
+        siteIpKey = scopedKey[(separator + 1)..].Trim();
+        return !string.IsNullOrWhiteSpace(crawlerId) && !string.IsNullOrWhiteSpace(siteIpKey);
+    }
+
+    private List<IpTimeoutViewModel> BuildIpTimeoutSnapshot(DateTime nowUtc, int maxItems)
+    {
+        PruneExpiredPolitenessEntries(nowUtc);
+
+        var hostsByIp = _resolvedSiteIdentityCache
+            .Where(item => item.Value.ExpiresAtUtc > nowUtc)
+            .GroupBy(item => item.Value.SiteIpKey, StringComparer.Ordinal)
+            .ToDictionary(
+                group => group.Key,
+                group => group
+                    .Select(item => item.Key)
+                    .Where(host => !string.IsNullOrWhiteSpace(host))
+                    .Distinct(StringComparer.OrdinalIgnoreCase)
+                    .OrderBy(host => host, StringComparer.OrdinalIgnoreCase)
+                    .Take(6)
+                    .ToList(),
+                StringComparer.Ordinal);
+
+        return _crawlerSiteNextAllowedUtc
+            .Select(entry => new { entry.Key, ReadyAtUtc = entry.Value })
+            .Where(entry => entry.ReadyAtUtc > nowUtc)
+            .Select(entry =>
+            {
+                if (!TryParseCrawlerSiteKey(entry.Key, out var crawlerId, out var siteIpKey))
+                {
+                    return null;
+                }
+
+                var remaining = (int)Math.Max(1, Math.Ceiling((entry.ReadyAtUtc - nowUtc).TotalMilliseconds));
+                hostsByIp.TryGetValue(siteIpKey, out var domains);
+
+                return new IpTimeoutViewModel
+                {
+                    CrawlerId = crawlerId,
+                    SiteIpKey = siteIpKey,
+                    Domains = domains ?? new List<string>(),
+                    ReadyAtUtc = entry.ReadyAtUtc,
+                    RemainingMilliseconds = remaining,
+                };
+            })
+            .Where(item => item is not null)
+            .Cast<IpTimeoutViewModel>()
+            .OrderByDescending(item => item.RemainingMilliseconds)
+            .ThenBy(item => item.SiteIpKey, StringComparer.Ordinal)
+            .Take(Math.Clamp(maxItems, 1, 128))
+            .ToList();
     }
 
     private static string ExtractHost(string url)

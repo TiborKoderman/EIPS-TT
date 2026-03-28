@@ -97,6 +97,10 @@ Last rebuilt: 2026-03-26
 - [x] Split graph UI into two force-graph modes: static results snapshot and dynamic replay timeline driven by crawler event history.
 - [x] Added replay controls (play/pause/reset/speed/scrub) and explicit two-level graph focus controls (sites/pages).
 - [x] Updated dashboard queue list rendering/poll cadence so replacement queued URLs reappear immediately after claims.
+- [x] Kept terminal `DUPLICATE` frontier rows from being reset back to `QUEUED` during manager enqueue upserts.
+- [x] Expanded dashboard frontier diagnostics with `In queue / In memory / Leased` metrics and an IP timeout widget (including mapped domains).
+- [x] Added queue row timeout badges and static-height queue viewport to visualize rate-limited URLs without layout jump.
+- [x] Rebuilt static site graph mode as a dedicated renderer with unique site nodes, score-based colors, page-count sizing, and numbered inter-site edge weights.
 
 ## Pending follow-ups
 

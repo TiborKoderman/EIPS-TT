@@ -1,4 +1,5 @@
 const state = new Map();
+const siteState = new Map();
 
 function sanitize(input) {
   if (!input) return "";
@@ -12,6 +13,19 @@ function sanitize(input) {
 
 function clamp(value, min, max) {
   return Math.max(min, Math.min(max, value));
+}
+
+function normalizeRelevanceScore(value) {
+  const numeric = Number(value);
+  if (!Number.isFinite(numeric)) {
+    return 0;
+  }
+
+  if (numeric <= 1) {
+    return clamp(numeric, 0, 1);
+  }
+
+  return clamp(Math.tanh(numeric / 8), 0, 1);
 }
 
 function safeHostFromUrl(rawUrl) {
@@ -197,6 +211,7 @@ function parsePayload(payloadJson) {
       domain: n.domain ?? n.Domain ?? "unknown",
       pageType: n.pageType ?? n.PageType ?? "HTML",
       size: Number(n.size ?? n.Size ?? 1),
+      relevanceScore: Number(n.relevanceScore ?? n.RelevanceScore ?? 0),
     }))
     .filter((n) => Number.isFinite(n.id));
 
@@ -234,6 +249,515 @@ function parsePayload(payloadJson) {
   };
 }
 
+function parseSitePayload(payloadJson) {
+  const payload = JSON.parse(payloadJson || "{}");
+  const rawNodes = Array.isArray(payload.nodes)
+    ? payload.nodes
+    : (Array.isArray(payload.Nodes) ? payload.Nodes : []);
+
+  if (rawNodes.length === 0) {
+    return null;
+  }
+
+  const hasSiteMarkers = rawNodes.some((node) =>
+    node.siteId !== undefined
+    || node.SiteId !== undefined
+    || node.pagesCount !== undefined
+    || node.PagesCount !== undefined);
+
+  if (!hasSiteMarkers) {
+    return null;
+  }
+
+  const nodes = rawNodes
+    .map((node) => {
+      const siteId = Number(node.siteId ?? node.SiteId);
+      const domain = String(node.domain ?? node.Domain ?? "unknown").trim().toLowerCase();
+      if (!Number.isFinite(siteId) || !domain) {
+        return null;
+      }
+
+      return {
+        id: `site:${siteId}`,
+        label: domain,
+        pagesCount: Math.max(1, Number(node.pagesCount ?? node.PagesCount ?? 1)),
+        averageScore: Number(node.averageScore ?? node.AverageScore ?? 0),
+        topScore: Number(node.topScore ?? node.TopScore ?? 0),
+      };
+    })
+    .filter((node) => node !== null);
+
+  const rawEdges = Array.isArray(payload.edges)
+    ? payload.edges
+    : (Array.isArray(payload.Edges) ? payload.Edges : []);
+
+  const links = rawEdges
+    .map((edge) => {
+      const sourceSiteId = Number(edge.sourceSiteId ?? edge.SourceSiteId);
+      const targetSiteId = Number(edge.targetSiteId ?? edge.TargetSiteId);
+      if (!Number.isFinite(sourceSiteId) || !Number.isFinite(targetSiteId) || sourceSiteId === targetSiteId) {
+        return null;
+      }
+
+      return {
+        id: sourceSiteId < targetSiteId
+          ? `site:${sourceSiteId}|site:${targetSiteId}`
+          : `site:${targetSiteId}|site:${sourceSiteId}`,
+        sourceId: `site:${Math.min(sourceSiteId, targetSiteId)}`,
+        targetId: `site:${Math.max(sourceSiteId, targetSiteId)}`,
+        weight: Math.max(1, Number(edge.edgeCount ?? edge.EdgeCount ?? 1)),
+      };
+    })
+    .filter((edge) => edge !== null);
+
+  return { nodes, links };
+}
+
+function destroyPageGraph(hostId) {
+  const graph = state.get(hostId);
+  if (!graph) {
+    return;
+  }
+
+  if (graph.workerTimer) {
+    graph.workerTimer.stop();
+    graph.workerTimer = null;
+  }
+
+  if (graph.simulation) {
+    graph.simulation.stop();
+    graph.simulation = null;
+  }
+
+  if (graph.tooltip) {
+    graph.tooltip.remove();
+  }
+
+  state.delete(hostId);
+}
+
+function destroySiteGraph(hostId) {
+  const graph = siteState.get(hostId);
+  if (!graph) {
+    return;
+  }
+
+  graph.destroy();
+  siteState.delete(hostId);
+}
+
+class SiteGraphRenderer {
+  constructor(hostId, host) {
+    this.hostId = hostId;
+    this.host = host;
+    this.simulation = null;
+    this.nodePositions = new Map();
+    this.selectedNodeId = null;
+    this.currentTransform = d3.zoomIdentity;
+    this.nodes = [];
+    this.links = [];
+    this.adjacency = new Map();
+    this._renderShell();
+  }
+
+  _renderShell() {
+    this.host.innerHTML = "";
+
+    const width = this.host.clientWidth || 900;
+    const height = this.host.clientHeight || 640;
+    this.width = width;
+    this.height = height;
+
+    this.svg = d3
+      .select(this.host)
+      .append("svg")
+      .attr("width", width)
+      .attr("height", height)
+      .attr("class", "graph-svg");
+
+    this.canvas = this.svg.append("g");
+    this.linkLayer = this.canvas.append("g").attr("class", "site-graph-links");
+    this.edgeLabelLayer = this.canvas.append("g").attr("class", "site-graph-edge-labels");
+    this.nodeLayer = this.canvas.append("g").attr("class", "site-graph-nodes");
+
+    this.tooltip = d3
+      .select(this.host)
+      .append("div")
+      .attr("class", "graph-tooltip")
+      .style("opacity", 0);
+
+    this.zoom = d3.zoom().scaleExtent([0.2, 5]).on("zoom", (event) => {
+      this.currentTransform = event.transform;
+      this.canvas.attr("transform", event.transform);
+    });
+
+    this.svg.call(this.zoom);
+  }
+
+  destroy() {
+    if (this.simulation) {
+      this.simulation.stop();
+      this.simulation = null;
+    }
+
+    if (this.tooltip) {
+      this.tooltip.remove();
+    }
+  }
+
+  _buildData(payload) {
+    const preAggregated = payload.nodes.every((node) => node.pagesCount !== undefined && node.label !== undefined)
+      && payload.links.every((edge) => edge.sourceId !== undefined && edge.targetId !== undefined);
+
+    if (preAggregated) {
+      const nodes = payload.nodes
+        .map((node) => ({
+          id: String(node.id),
+          label: String(node.label),
+          pagesCount: Math.max(1, Number(node.pagesCount || 1)),
+          averageScore: Number(node.averageScore || 0),
+          topScore: Number(node.topScore || 0),
+        }))
+        .sort((a, b) => {
+          if (b.pagesCount !== a.pagesCount) {
+            return b.pagesCount - a.pagesCount;
+          }
+
+          return a.label.localeCompare(b.label);
+        });
+
+      const nodeById = new Map(nodes.map((node) => [node.id, node]));
+      const links = payload.links
+        .map((edge) => ({
+          id: String(edge.id || `${edge.sourceId}|${edge.targetId}`),
+          sourceId: String(edge.sourceId),
+          targetId: String(edge.targetId),
+          weight: Math.max(1, Number(edge.weight || 1)),
+          source: nodeById.get(String(edge.sourceId)),
+          target: nodeById.get(String(edge.targetId)),
+        }))
+        .filter((edge) => edge.source && edge.target);
+
+      return { nodes, links };
+    }
+
+    const siteByPage = new Map();
+    const siteStats = new Map();
+
+    for (const node of payload.nodes) {
+      const sourceHost = safeHostFromUrl(node.url) || String(node.domain || "").toLowerCase();
+      const site = toRegistrableDomain(sourceHost || "unknown");
+      siteByPage.set(node.id, site);
+
+      if (!siteStats.has(site)) {
+        siteStats.set(site, {
+          id: site,
+          label: site,
+          pagesCount: 0,
+          scoreSum: 0,
+          scoreMax: Number.NEGATIVE_INFINITY,
+        });
+      }
+
+      const scoreSeed = Number.isFinite(node.relevanceScore) && node.relevanceScore > 0
+        ? Number(node.relevanceScore)
+        : normalizeRelevanceScore(classifyNode(node.url, node.domain).score);
+
+      const stats = siteStats.get(site);
+      stats.pagesCount += 1;
+      stats.scoreSum += scoreSeed;
+      stats.scoreMax = Math.max(stats.scoreMax, scoreSeed);
+    }
+
+    const nodes = [...siteStats.values()]
+      .map((item) => ({
+        id: item.id,
+        label: item.label,
+        pagesCount: item.pagesCount,
+        averageScore: item.pagesCount > 0 ? item.scoreSum / item.pagesCount : 0,
+        topScore: Number.isFinite(item.scoreMax) ? item.scoreMax : 0,
+      }))
+      .sort((a, b) => {
+        if (b.pagesCount !== a.pagesCount) {
+          return b.pagesCount - a.pagesCount;
+        }
+
+        return a.label.localeCompare(b.label);
+      });
+
+    const nodeById = new Map(nodes.map((node) => [node.id, node]));
+    const edgeMap = new Map();
+    for (const link of payload.links) {
+      const sourceSite = siteByPage.get(link.source);
+      const targetSite = siteByPage.get(link.target);
+      if (!sourceSite || !targetSite || sourceSite === targetSite) {
+        continue;
+      }
+
+      const pair = sourceSite < targetSite
+        ? `${sourceSite}|${targetSite}`
+        : `${targetSite}|${sourceSite}`;
+
+      if (!edgeMap.has(pair)) {
+        edgeMap.set(pair, {
+          id: pair,
+          sourceId: sourceSite,
+          targetId: targetSite,
+          weight: 0,
+        });
+      }
+
+      edgeMap.get(pair).weight += 1;
+    }
+
+    const links = [...edgeMap.values()]
+      .map((edge) => ({
+        ...edge,
+        source: nodeById.get(edge.sourceId),
+        target: nodeById.get(edge.targetId),
+      }))
+      .filter((edge) => edge.source && edge.target)
+      .sort((a, b) => {
+        if (b.weight !== a.weight) {
+          return b.weight - a.weight;
+        }
+
+        return a.id.localeCompare(b.id);
+      });
+
+    return { nodes, links };
+  }
+
+  _applySelection() {
+    if (!this.nodeSelection || !this.linkSelection) {
+      return;
+    }
+
+    if (!this.selectedNodeId) {
+      this.nodeSelection
+        .attr("opacity", 1)
+        .attr("stroke", "#173a2f")
+        .attr("stroke-width", 1.8);
+
+      this.linkSelection
+        .attr("opacity", 0.68)
+        .attr("stroke-opacity", 0.68);
+
+      this.edgeLabelSelection.attr("opacity", 0.92);
+      return;
+    }
+
+    const selectedId = this.selectedNodeId;
+    const neighbors = this.adjacency.get(selectedId) || new Set();
+
+    this.nodeSelection
+      .attr("opacity", (node) => (node.id === selectedId || neighbors.has(node.id) ? 1 : 0.22))
+      .attr("stroke", (node) => (node.id === selectedId ? "#b5452a" : "#173a2f"))
+      .attr("stroke-width", (node) => (node.id === selectedId ? 3.2 : 1.8));
+
+    this.linkSelection
+      .attr("opacity", (edge) => (edge.source.id === selectedId || edge.target.id === selectedId ? 0.95 : 0.08))
+      .attr("stroke-opacity", (edge) => (edge.source.id === selectedId || edge.target.id === selectedId ? 0.95 : 0.08));
+
+    this.edgeLabelSelection
+      .attr("opacity", (edge) => (edge.source.id === selectedId || edge.target.id === selectedId ? 1 : 0.2));
+  }
+
+  render(payload) {
+    const built = this._buildData(payload);
+    this.nodes = built.nodes;
+    this.links = built.links;
+
+    if (this.simulation) {
+      this.simulation.stop();
+      this.simulation = null;
+    }
+
+    if (this.nodes.length === 0) {
+      this.linkLayer.selectAll("*").remove();
+      this.edgeLabelLayer.selectAll("*").remove();
+      this.nodeLayer.selectAll("*").remove();
+      return;
+    }
+
+    const maxPages = Math.max(...this.nodes.map((node) => node.pagesCount), 1);
+    const minPages = Math.min(...this.nodes.map((node) => node.pagesCount), 1);
+    const radiusScale = d3
+      .scaleSqrt()
+      .domain([minPages, maxPages])
+      .range([12, 44]);
+
+    const minScore = Math.min(...this.nodes.map((node) => node.averageScore), 0);
+    const maxScore = Math.max(...this.nodes.map((node) => node.averageScore), 1);
+    const midpoint = (minScore + maxScore) / 2;
+    const colorScale = d3
+      .scaleLinear()
+      .domain([minScore, midpoint, maxScore])
+      .range(["#c84f4f", "#e0b94c", "#2f9a64"])
+      .clamp(true);
+
+    for (const node of this.nodes) {
+      node.radius = radiusScale(node.pagesCount);
+      node.fill = maxScore === minScore ? "#2f9a64" : colorScale(node.averageScore);
+      const previous = this.nodePositions.get(node.id);
+      node.x = previous?.x ?? this.width / 2 + (Math.random() - 0.5) * 180;
+      node.y = previous?.y ?? this.height / 2 + (Math.random() - 0.5) * 120;
+    }
+
+    const maxWeight = Math.max(...this.links.map((edge) => edge.weight), 1);
+    const edgeWidth = d3
+      .scaleSqrt()
+      .domain([1, maxWeight])
+      .range([1.2, 5.4]);
+
+    this.adjacency = new Map(this.nodes.map((node) => [node.id, new Set()]));
+    for (const edge of this.links) {
+      this.adjacency.get(edge.source.id)?.add(edge.target.id);
+      this.adjacency.get(edge.target.id)?.add(edge.source.id);
+    }
+
+    this.linkSelection = this.linkLayer
+      .selectAll("line.site-graph-edge")
+      .data(this.links, (edge) => edge.id)
+      .join("line")
+      .attr("class", "site-graph-edge")
+      .attr("stroke", "#5a6f8d")
+      .attr("stroke-width", (edge) => edgeWidth(edge.weight))
+      .attr("stroke-opacity", 0.68);
+
+    this.edgeLabelSelection = this.edgeLabelLayer
+      .selectAll("text.site-graph-edge-label")
+      .data(this.links, (edge) => edge.id)
+      .join("text")
+      .attr("class", "graph-edge-label site-graph-edge-label")
+      .attr("text-anchor", "middle")
+      .attr("dominant-baseline", "middle")
+      .style("pointer-events", "none")
+      .text((edge) => String(edge.weight));
+
+    this.nodeSelection = this.nodeLayer
+      .selectAll("circle.site-graph-node")
+      .data(this.nodes, (node) => node.id)
+      .join("circle")
+      .attr("class", "site-graph-node")
+      .attr("r", (node) => node.radius)
+      .attr("fill", (node) => node.fill)
+      .attr("stroke", "#173a2f")
+      .attr("stroke-width", 1.8)
+      .call(
+        d3
+          .drag()
+          .on("start", (event, node) => {
+            if (!event.active) this.simulation.alphaTarget(0.25).restart();
+            node.fx = node.x;
+            node.fy = node.y;
+          })
+          .on("drag", (event, node) => {
+            node.fx = event.x;
+            node.fy = event.y;
+          })
+          .on("end", (event, node) => {
+            if (!event.active) this.simulation.alphaTarget(0);
+            node.fx = null;
+            node.fy = null;
+          })
+      );
+
+    this.nodeTextSelection = this.nodeLayer
+      .selectAll("text.site-graph-label")
+      .data(this.nodes, (node) => node.id)
+      .join("text")
+      .attr("class", "site-graph-label")
+      .attr("text-anchor", "middle")
+      .attr("dominant-baseline", "middle")
+      .attr("fill", "#ffffff")
+      .attr("font-size", 11)
+      .attr("font-weight", 700)
+      .style("pointer-events", "none")
+      .text((node) => compactLabel(`${node.label} (${node.pagesCount})`, 24));
+
+    this.nodeSelection
+      .on("mouseover", (_, node) => {
+        this.tooltip
+          .style("opacity", 1)
+          .html(
+            `<div><strong>${sanitize(node.label)}</strong></div>` +
+            `<div>pages: ${sanitize(node.pagesCount)}</div>` +
+            `<div>avg score: ${sanitize(Number(node.averageScore || 0).toFixed(2))}</div>` +
+            `<div>max score: ${sanitize(Number(node.topScore || 0).toFixed(2))}</div>`
+          );
+      })
+      .on("mousemove", (event) => {
+        this.tooltip.style("left", `${event.offsetX + 12}px`).style("top", `${event.offsetY + 12}px`);
+      })
+      .on("mouseout", () => this.tooltip.style("opacity", 0))
+      .on("click", (_, node) => {
+        this.selectedNodeId = this.selectedNodeId === node.id ? null : node.id;
+        this._applySelection();
+      });
+
+    this.simulation = d3
+      .forceSimulation(this.nodes)
+      .force("link", d3.forceLink(this.links).id((node) => node.id).distance((edge) => clamp(80 + edge.weight * 2.5, 80, 180)).strength(0.2))
+      .force("charge", d3.forceManyBody().strength(-260).distanceMax(440))
+      .force("center", d3.forceCenter(this.width / 2, this.height / 2))
+      .force("collision", d3.forceCollide().radius((node) => node.radius + 5))
+      .alpha(0.9)
+      .alphaDecay(0.06)
+      .on("tick", () => {
+        this.linkSelection
+          .attr("x1", (edge) => edge.source.x)
+          .attr("y1", (edge) => edge.source.y)
+          .attr("x2", (edge) => edge.target.x)
+          .attr("y2", (edge) => edge.target.y);
+
+        this.edgeLabelSelection
+          .attr("x", (edge) => ((edge.source.x || 0) + (edge.target.x || 0)) / 2)
+          .attr("y", (edge) => ((edge.source.y || 0) + (edge.target.y || 0)) / 2);
+
+        this.nodeSelection
+          .attr("cx", (node) => node.x)
+          .attr("cy", (node) => node.y);
+
+        this.nodeTextSelection
+          .attr("x", (node) => node.x)
+          .attr("y", (node) => node.y);
+
+        for (const node of this.nodes) {
+          this.nodePositions.set(node.id, { x: Number(node.x || 0), y: Number(node.y || 0) });
+        }
+      });
+
+    this._applySelection();
+  }
+
+  focus(term) {
+    const normalized = String(term || "").trim().toLowerCase();
+    if (!normalized || this.nodes.length === 0) {
+      return;
+    }
+
+    const match = this.nodes.find((node) => String(node.label || "").toLowerCase().includes(normalized));
+    if (!match) {
+      return;
+    }
+
+    this.selectedNodeId = match.id;
+    this._applySelection();
+
+    const targetScale = 1.35;
+    const transform = d3.zoomIdentity
+      .translate(this.width / 2 - (match.x || this.width / 2) * targetScale, this.height / 2 - (match.y || this.height / 2) * targetScale)
+      .scale(targetScale);
+
+    this.currentTransform = transform;
+    this.svg
+      .transition()
+      .duration(360)
+      .call(this.zoom.transform, transform);
+  }
+}
+
 function initializeGraph(hostId, host, queueMode) {
   host.innerHTML = "";
   renderLegend(host, queueMode);
@@ -261,6 +785,7 @@ function initializeGraph(hostId, host, queueMode) {
   const canvas = svg.append("g");
   const clusterLayer = canvas.append("g").attr("class", "graph-clusters");
   const linkLayer = canvas.append("g").attr("class", "graph-links-base");
+  const edgeLabelLayer = canvas.append("g").attr("class", "graph-edge-labels");
   const nodeLayer = canvas.append("g").attr("class", "graph-nodes");
   const seedLayer = canvas.append("g").attr("class", "graph-seeds");
   const workerLayer = canvas.append("g").attr("class", "graph-workers");
@@ -293,6 +818,7 @@ function initializeGraph(hostId, host, queueMode) {
     canvas,
     clusterLayer,
     linkLayer,
+    edgeLabelLayer,
     nodeLayer,
     seedLayer,
     workerLayer,
@@ -318,24 +844,37 @@ function initializeGraph(hostId, host, queueMode) {
     simulation: null,
     nodeSelection: null,
     linkSelection: null,
+    edgeLabelSelection: null,
     seedSelection: null,
     workerSelection: null,
     clusterSelection: null,
     gradientSelection: null,
     groupNodePositions: new Map(),
-    currentViewLevel: "item",
+    currentViewLevel: "page",
+    requestedViewLevel: "page",
+    initialViewApplied: false,
   };
 
   state.set(hostId, graph);
   return graph;
 }
 
-function getViewLevel(scale) {
-  if (scale < 0.95) {
+function normalizeViewLevel(level) {
+  const normalized = String(level || "").toLowerCase().trim();
+  if (normalized === "site") {
     return "domain";
   }
+  if (normalized === "item") {
+    return "page";
+  }
+  if (normalized === "domain" || normalized === "subdomain") {
+    return normalized;
+  }
+  return "page";
+}
 
-  return "item";
+function activeViewLevel(graph) {
+  return normalizeViewLevel(graph?.requestedViewLevel || "page");
 }
 
 function groupKeyForNode(node, level) {
@@ -353,7 +892,7 @@ function groupLabelForKey(key) {
 }
 
 function buildRenderData(graph, level) {
-  if (level === "item") {
+  if (level === "page") {
     const linkData = graph.visibleLinks.map((link) => {
       const sourceId = linkSourceId(link);
       const targetId = linkTargetId(link);
@@ -362,13 +901,13 @@ function buildRenderData(graph, level) {
         target: graph.nodeById.get(targetId),
         _key: edgeKey(sourceId, targetId),
         _gradientId: linkGradientId(graph, edgeKey(sourceId, targetId)),
-        _kind: "item",
+        _kind: "page",
       };
     }).filter((item) => item.source && item.target);
 
     const nodeData = graph.visibleNodes;
     for (const node of nodeData) {
-      node._kind = "item";
+      node._kind = "page";
     }
     return { nodeData, linkData };
   }
@@ -401,7 +940,7 @@ function buildRenderData(graph, level) {
     group.y += Number(node.y || graph.height / 2);
   }
 
-  const nodeData = [...groups.values()].map((group) => {
+  const groupNodes = [...groups.values()].map((group) => {
     const prev = graph.groupNodePositions.get(group.id);
     const centroidX = group.count > 0 ? group.x / group.count : graph.width / 2;
     const centroidY = group.count > 0 ? group.y / group.count : graph.height / 2;
@@ -417,6 +956,18 @@ function buildRenderData(graph, level) {
     };
   });
 
+  const maxGroups = level === "domain" ? 28 : 56;
+  const nodeData = groupNodes
+    .sort((a, b) => {
+      if (b.count !== a.count) {
+        return b.count - a.count;
+      }
+      return (a.label || "").localeCompare(b.label || "");
+    })
+    .slice(0, maxGroups);
+
+  const allowedGroupIds = new Set(nodeData.map((group) => group.id));
+
   const nodeByGroup = new Map(nodeData.map((group) => [group.id, group]));
   const edgeMap = new Map();
   for (const link of graph.visibleLinks) {
@@ -429,6 +980,10 @@ function buildRenderData(graph, level) {
     const sourceGroup = groupKeyForNode(sourceNode, level);
     const targetGroup = groupKeyForNode(targetNode, level);
     if (sourceGroup === targetGroup) {
+      continue;
+    }
+
+    if (!allowedGroupIds.has(sourceGroup) || !allowedGroupIds.has(targetGroup)) {
       continue;
     }
 
@@ -451,13 +1006,23 @@ function buildRenderData(graph, level) {
     });
   }
 
-  const linkData = [...edgeMap.values()].filter((edge) => edge.source && edge.target);
+  const maxEdges = level === "domain" ? 96 : 160;
+  const linkData = [...edgeMap.values()]
+    .filter((edge) => edge.source && edge.target)
+    .sort((a, b) => {
+      if (b.weight !== a.weight) {
+        return b.weight - a.weight;
+      }
+      return String(a._key).localeCompare(String(b._key));
+    })
+    .slice(0, maxEdges);
+
   return { nodeData, linkData };
 }
 
 function updateAggregateNodePositions(graph) {
   // When in aggregated view, recompute aggregate node positions from member nodes
-  if (!graph.nodeSelection || graph.currentViewLevel === "item") {
+  if (!graph.nodeSelection || graph.currentViewLevel === "page") {
     return;
   }
 
@@ -475,7 +1040,7 @@ function updateAggregateNodePositions(graph) {
   
   // Update each rendered node's position if it's an aggregate
   graph.nodeSelection.each(function(aggNode) {
-    if (aggNode._kind !== "item" && membersByGroup.has(aggNode.id)) {
+    if (aggNode._kind !== "page" && membersByGroup.has(aggNode.id)) {
       const members = membersByGroup.get(aggNode.id);
       if (members.length > 0) {
         // Compute centroid of current member positions
@@ -504,12 +1069,12 @@ function ensureSimulation(graph) {
 
   graph.simulation = d3
     .forceSimulation(graph.nodes)
-    .force("link", d3.forceLink(graph.links).id((d) => d.id).distance(58).strength(0.2))
-    .force("charge", d3.forceManyBody().strength(-58).distanceMax(180))
+    .force("link", d3.forceLink(graph.links).id((d) => d.id).distance(74).strength(0.12))
+    .force("charge", d3.forceManyBody().strength(-118).distanceMax(260))
     .force("center", d3.forceCenter(graph.width / 2, graph.height / 2))
-    .force("collision", d3.forceCollide().radius((d) => 5 + Math.sqrt(Number(d.size || 1)) * 1.8))
-    .velocityDecay(0.42)
-    .alphaDecay(0.06);
+    .force("collision", d3.forceCollide().radius((d) => 7 + Math.sqrt(Number(d.size || 1)) * 2.4))
+    .velocityDecay(0.5)
+    .alphaDecay(0.08);
 
   graph.simulation.on("tick", () => {
     // Update aggregate node positions before rendering
@@ -521,6 +1086,12 @@ function ensureSimulation(graph) {
         .attr("y1", (d) => d.source.y)
         .attr("x2", (d) => d.target.x)
         .attr("y2", (d) => d.target.y);
+    }
+
+    if (graph.edgeLabelSelection) {
+      graph.edgeLabelSelection
+        .attr("x", (d) => ((d.source.x || 0) + (d.target.x || 0)) / 2)
+        .attr("y", (d) => ((d.source.y || 0) + (d.target.y || 0)) / 2);
     }
 
     if (graph.gradientSelection) {
@@ -627,6 +1198,8 @@ function mergeGraphData(graph, incomingNodes, incomingLinks) {
     seenIds.add(id);
     const existing = graph.nodeById.get(id);
     const classification = classifyNode(raw.url, raw.domain);
+    const normalizedRelevance = normalizeRelevanceScore(raw.relevanceScore);
+    const resolvedScore = normalizedRelevance > 0 ? normalizedRelevance : classification.score;
     const inferredQueue = String(raw.pageType || "").toUpperCase() === "FRONTIER";
 
     if (existing) {
@@ -635,7 +1208,7 @@ function mergeGraphData(graph, incomingNodes, incomingLinks) {
       existing.pageType = raw.pageType;
       existing.size = raw.size;
       existing._topic = classification.topic;
-      existing._score = existing._isQueue ? existing._score : classification.score;
+      existing._score = existing._isQueue ? existing._score : resolvedScore;
       if (!existing._classified) {
         existing._isQueue = inferredQueue;
       }
@@ -649,7 +1222,7 @@ function mergeGraphData(graph, incomingNodes, incomingLinks) {
       vx: 0,
       vy: 0,
       _topic: classification.topic,
-      _score: classification.score,
+      _score: resolvedScore,
       _visited: false,
       _seed: false,
       _isQueue: inferredQueue,
@@ -1025,24 +1598,39 @@ function applyZoomDetail(graph, scale) {
     return;
   }
 
-  graph.currentViewLevel = getViewLevel(scale);
+  graph.currentViewLevel = activeViewLevel(graph);
+  const isPageView = graph.currentViewLevel === "page";
 
   graph.clusterLayer.style("display", "none");
   graph.linkLayer.style("display", null);
+  graph.edgeLabelLayer.style("display", isPageView ? "none" : null);
   graph.nodeLayer.style("display", null);
-  graph.seedLayer.style("display", null);
-  graph.workerLayer.style("display", null);
+  graph.seedLayer.style("display", isPageView ? null : "none");
+  graph.workerLayer.style("display", isPageView ? null : "none");
 
   graph.linkSelection.attr("display", null);
 
   graph.nodeSelection
     .attr("opacity", 1)
     .attr("r", (d) => {
-      if (d._kind === "item") {
+      if (d._kind === "page") {
         return seedRadius(d);
       }
       return clamp(12 + Math.sqrt(Number(d.count || 1)) * 4.2, 14, 48);
     });
+}
+
+function shouldRenderAggregateEdgeLabel(level, edge, totalEdges) {
+  const weight = Number(edge?.weight || 0);
+  if (weight <= 0) {
+    return false;
+  }
+
+  if (level === "domain") {
+    return totalEdges <= 72 ? weight >= 1 : weight >= 2;
+  }
+
+  return totalEdges <= 96 ? weight >= 2 : weight >= 3;
 }
 
 function applyLinkStyles(graph) {
@@ -1111,20 +1699,32 @@ function applySelectionFocus(graph) {
     if (graph.nodeSelection) {
       graph.nodeSelection
         .attr("opacity", 1)
-        .attr("stroke", (d) => d._kind === "item" ? (d._seed ? "#d58a00" : "#ffffff") : "#1f3a5f")
-        .attr("stroke-width", (d) => d._kind === "item" ? (d._seed ? 2.2 : 1.2) : 2.2);
+        .attr("stroke", (d) => d._kind === "page" ? (d._seed ? "#d58a00" : "#ffffff") : "#1f3a5f")
+        .attr("stroke-width", (d) => d._kind === "page" ? (d._seed ? 2.2 : 1.2) : 2.2);
     }
     if (graph.linkSelection) {
       graph.linkSelection
         .attr("opacity", 1)
-        .attr("stroke-opacity", (d) => (d.target?._isQueue ? 0.75 : 0.52));
-      applyLinkStyles(graph);
+        .attr("stroke-opacity", (d) => {
+          if (graph.currentViewLevel === "page") {
+            return d.target?._isQueue ? 0.75 : 0.52;
+          }
+          return 0.5;
+        });
+
+      if (graph.currentViewLevel === "page") {
+        applyLinkStyles(graph);
+      } else {
+        graph.linkSelection
+          .attr("stroke", "#5e7697")
+          .attr("stroke-width", (d) => clamp(1.2 + Math.log2((d.weight || 1) + 1) * 0.6, 1.2, 4.8));
+      }
     }
     renderNodeDetails(graph, null);
     return;
   }
 
-  if (graph.currentViewLevel !== "item") {
+  if (graph.currentViewLevel !== "page") {
     if (graph.nodeSelection) {
       graph.nodeSelection
         .attr("opacity", (d) => (d.id === selectedId ? 1 : 0.3))
@@ -1190,13 +1790,13 @@ function applySelectionFocus(graph) {
 function updateSelections(graph, seedNodes) {
   const visibleSeedIds = new Set(seedNodes.map((node) => node.id));
 
-  const level = getViewLevel(graph.currentTransform?.k || 1);
+  const level = activeViewLevel(graph);
   graph.currentViewLevel = level;
   const { nodeData, linkData } = buildRenderData(graph, level);
 
   graph.gradientSelection = graph.defs
     .selectAll("linearGradient")
-    .data(level === "item" ? linkData : [], (d) => d._key)
+    .data(level === "page" ? linkData : [], (d) => d._key)
     .join((enter) => {
       const gradient = enter
         .append("linearGradient")
@@ -1211,7 +1811,7 @@ function updateSelections(graph, seedNodes) {
     .attr("x2", (d) => d.target.x || 0)
     .attr("y2", (d) => d.target.y || 0);
 
-  if (level === "item") {
+  if (level === "page") {
     graph.gradientSelection.each(function(d) {
       const gradient = d3.select(this);
       gradient.select("stop[offset='0%']").attr("stop-color", makeNodeColor(d.source));
@@ -1224,36 +1824,52 @@ function updateSelections(graph, seedNodes) {
     .data(linkData, (d) => d._key)
     .join("line");
 
-  if (level === "item") {
+  if (level === "page") {
     applyLinkStyles(graph);
   } else {
     graph.linkSelection
       .attr("stroke", "#5e7697")
-      .attr("stroke-width", (d) => clamp(1 + Math.log10((d.weight || 1) + 1), 1, 4))
-      .attr("stroke-opacity", 0.55);
+      .attr("stroke-width", (d) => clamp(1.2 + Math.log2((d.weight || 1) + 1) * 0.6, 1.2, 4.8))
+      .attr("stroke-opacity", 0.5);
   }
+
+  const aggregateEdgeLabels = level === "page"
+    ? []
+    : linkData.filter((edge) => shouldRenderAggregateEdgeLabel(level, edge, linkData.length));
+
+  graph.edgeLabelSelection = graph.edgeLabelLayer
+    .selectAll("text.graph-edge-label")
+    .data(aggregateEdgeLabels, (d) => d._key)
+    .join("text")
+    .attr("class", "graph-edge-label")
+    .attr("text-anchor", "middle")
+    .attr("dominant-baseline", "middle")
+    .style("pointer-events", "none")
+    .text((d) => String(d.weight || 0))
+    .attr("x", (d) => ((d.source.x || 0) + (d.target.x || 0)) / 2)
+    .attr("y", (d) => ((d.source.y || 0) + (d.target.y || 0)) / 2);
 
   graph.nodeSelection = graph.nodeLayer
     .selectAll("circle")
     .data(nodeData, (d) => d.id)
     .join("circle")
-    .attr("r", (d) => d._kind === "item"
+    .attr("r", (d) => d._kind === "page"
       ? seedRadius(d)
       : clamp(12 + Math.sqrt(Number(d.count || 1)) * 4.2, 14, 48))
     .attr("fill", (d) => {
-      if (d._kind === "item") {
+      if (d._kind === "page") {
         return makeNodeColor(d);
       }
 
       return d._kind === "domain" ? "hsl(204 42% 58%)" : "hsl(164 42% 52%)";
     })
-    .attr("stroke", (d) => d._kind === "item" ? (d._seed ? "#d58a00" : "#ffffff") : "#1f3a5f")
-    .attr("stroke-width", (d) => d._kind === "item" ? (d._seed ? 2.2 : 1.2) : 2.2)
+    .attr("stroke", (d) => d._kind === "page" ? (d._seed ? "#d58a00" : "#ffffff") : "#1f3a5f")
+    .attr("stroke-width", (d) => d._kind === "page" ? (d._seed ? 2.2 : 1.2) : 2.2)
     .call(
       d3
         .drag()
         .on("start", (event, d) => {
-          if (d._kind !== "item") {
+          if (d._kind !== "page") {
             return;
           }
           if (!event.active) graph.simulation.alphaTarget(0.3).restart();
@@ -1261,14 +1877,14 @@ function updateSelections(graph, seedNodes) {
           d.fy = d.y;
         })
         .on("drag", (event, d) => {
-          if (d._kind !== "item") {
+          if (d._kind !== "page") {
             return;
           }
           d.fx = event.x;
           d.fy = event.y;
         })
         .on("end", (event, d) => {
-          if (d._kind !== "item") {
+          if (d._kind !== "page") {
             return;
           }
           if (!event.active) graph.simulation.alphaTarget(0);
@@ -1282,13 +1898,14 @@ function updateSelections(graph, seedNodes) {
       graph.tooltip
         .style("opacity", 1)
         .html(
-          d._kind === "item"
+          d._kind === "page"
             ? (`<div><strong>${sanitize(d.domain || "unknown")}</strong></div>` +
               `<div>${sanitize(d.url)}</div>` +
               `<div>backlinks: ${sanitize(d.size || 0)}</div>` +
               `<div>score: ${sanitize((d._score || 0).toFixed(2))}</div>`)
             : (`<div><strong>${sanitize(d.label || "group")}</strong></div>` +
               `<div>grouped pages: ${sanitize(d.count || 0)}</div>` +
+              `<div>cross-links: ${sanitize(linkData.filter((edge) => edge.source.id === d.id || edge.target.id === d.id).reduce((sum, edge) => sum + Number(edge.weight || 0), 0))}</div>` +
               `<div>avg score: ${sanitize((d.avgScore || 0).toFixed(2))}</div>`)
         );
     })
@@ -1297,8 +1914,8 @@ function updateSelections(graph, seedNodes) {
     })
     .on("mouseout", () => graph.tooltip.style("opacity", 0))
     .on("click", (_, d) => {
-      if (d._kind !== "item") {
-        const nextScale = d._kind === "domain" ? 1.0 : 2.0;
+      if (d._kind !== "page") {
+        const nextScale = Math.max(0.35, Number(graph.currentTransform?.k || 1));
         const targetTransform = d3.zoomIdentity
           .translate(graph.width / 2 - (d.x || graph.width / 2) * nextScale, graph.height / 2 - (d.y || graph.height / 2) * nextScale)
           .scale(nextScale);
@@ -1318,7 +1935,7 @@ function updateSelections(graph, seedNodes) {
 
   graph.seedSelection = graph.seedLayer
     .selectAll("circle")
-    .data(level === "item" ? graph.visibleNodes.filter((node) => visibleSeedIds.has(node.id)) : [], (d) => d.id)
+    .data(level === "page" ? graph.visibleNodes.filter((node) => visibleSeedIds.has(node.id)) : [], (d) => d.id)
     .join("circle")
     .attr("r", (d) => seedRadius(d) + 4)
     .attr("fill", "none")
@@ -1328,7 +1945,7 @@ function updateSelections(graph, seedNodes) {
 
   graph.workerSelection = graph.workerLayer
     .selectAll("g")
-    .data(level === "item" ? graph.workers : [], (d) => d.id)
+    .data(level === "page" ? graph.workers : [], (d) => d.id)
     .join((enter) => {
       const group = enter.append("g").attr("class", "graph-worker");
       group
@@ -1352,7 +1969,7 @@ function updateSelections(graph, seedNodes) {
 
   const groupLabels = graph.nodeLayer
     .selectAll("text.graph-group-label")
-    .data(level === "item" ? [] : nodeData, (d) => d.id)
+    .data(level === "page" ? [] : nodeData, (d) => d.id)
     .join("text")
     .attr("class", "graph-group-label")
     .attr("text-anchor", "middle")
@@ -1365,7 +1982,7 @@ function updateSelections(graph, seedNodes) {
     .attr("x", (d) => d.x)
     .attr("y", (d) => d.y);
 
-  if (level === "item") {
+  if (level === "page") {
     graph.nodeLayer.selectAll("text.graph-group-label").remove();
   }
 
@@ -1386,6 +2003,8 @@ export function renderGraph(hostId, payloadJson) {
     host.innerHTML = `<div class=\"text-small text-muted\">D3 library unavailable.</div>`;
     return;
   }
+
+  destroySiteGraph(hostId);
 
   let graph = state.get(hostId);
   if (!graph) {
@@ -1416,7 +2035,41 @@ export function renderGraph(hostId, payloadJson) {
   applyZoomDetail(graph, graph.currentTransform?.k || 1);
 }
 
+export function renderSiteGraph(hostId, payloadJson) {
+  const host = document.getElementById(hostId);
+  if (!host) return;
+
+  const payload = parseSitePayload(payloadJson) || parsePayload(payloadJson);
+  if (payload.nodes.length === 0) {
+    host.innerHTML = `<div class="text-small text-muted">No site data available yet.</div>`;
+    destroyPageGraph(hostId);
+    destroySiteGraph(hostId);
+    return;
+  }
+
+  if (typeof d3 === "undefined") {
+    host.innerHTML = `<div class=\"text-small text-muted\">D3 library unavailable.</div>`;
+    return;
+  }
+
+  destroyPageGraph(hostId);
+
+  let graph = siteState.get(hostId);
+  if (!graph) {
+    graph = new SiteGraphRenderer(hostId, host);
+    siteState.set(hostId, graph);
+  }
+
+  graph.render(payload);
+}
+
 export function focusNode(hostId, term) {
+  const siteGraph = siteState.get(hostId);
+  if (siteGraph) {
+    siteGraph.focus(term);
+    return;
+  }
+
   const graph = state.get(hostId);
   if (!graph || !term || !graph.nodeSelection) {
     return;
@@ -1439,6 +2092,7 @@ export function focusNode(hostId, term) {
     .translate(graph.width / 2 - (match.x || 0) * 1.5, graph.height / 2 - (match.y || 0) * 1.5)
     .scale(1.5);
 
+  graph.requestedViewLevel = "page";
   graph.currentTransform = transform;
   graph.svg
     .transition()
@@ -1474,17 +2128,31 @@ export function setViewLevel(hostId, level) {
     return;
   }
 
-  const normalized = String(level || "").toLowerCase();
-  const targetScale = normalized === "site" ? 0.45 : 2;
+  const normalized = normalizeViewLevel(level);
+  if (normalized === graph.requestedViewLevel && graph.initialViewApplied) {
+    return;
+  }
+
+  graph.requestedViewLevel = normalized;
+  graph.initialViewApplied = true;
+
+  const targetScale = normalized === "domain"
+    ? 0.5
+    : normalized === "subdomain"
+      ? 0.9
+      : 1.55;
+
   const current = graph.currentTransform || d3.zoomIdentity;
-  const centerWorldX = (graph.width / 2 - current.x) / current.k;
-  const centerWorldY = (graph.height / 2 - current.y) / current.k;
+  const currentScale = Math.max(0.01, Number(current.k || 1));
+  const centerWorldX = (graph.width / 2 - current.x) / currentScale;
+  const centerWorldY = (graph.height / 2 - current.y) / currentScale;
 
   const targetTransform = d3.zoomIdentity
     .translate(graph.width / 2 - centerWorldX * targetScale, graph.height / 2 - centerWorldY * targetScale)
     .scale(targetScale);
 
   graph.currentTransform = targetTransform;
+  graph.selectedNodeId = null;
   graph.svg
     .transition()
     .duration(280)
