@@ -17,10 +17,11 @@ def utc_now_iso() -> str:
 def default_seed_entries() -> list["SeedEntry"]:
     """Provide sensible initial seeds for local development and crawling tests."""
     return [
-        SeedEntry(url="https://www.gov.si/", enabled=True, label="SI Government"),
-        SeedEntry(url="https://nijz.si/", enabled=True, label="NIJZ Public Health"),
+        SeedEntry(url="https://medover.zurnal24.si/", enabled=True, label="Med.Over"),
+        SeedEntry(url="https://www.gov.si/", enabled=False, label="SI Government"),
+        SeedEntry(url="https://nijz.si/", enabled=False, label="NIJZ Public Health"),
         SeedEntry(url="https://zdravljenjenadom.si/", enabled=False, label="Health Info"),
-        SeedEntry(url="https://www.kclj.si/", enabled=True, label="UKC Ljubljana"),
+        SeedEntry(url="https://www.kclj.si/", enabled=False, label="UKC Ljubljana"),
         SeedEntry(url="https://www.who.int/", enabled=False, label="WHO"),
         SeedEntry(url="https://www.ema.europa.eu/", enabled=False, label="EMA"),
     ]
@@ -114,6 +115,15 @@ class GlobalWorkerConfig:
             "hospital",
             "treatment",
             "disease",
+            "fitness",
+            "fitnes",
+            "exercise",
+            "training",
+            "workout",
+            "wellness",
+            "nutrition",
+            "prehrana",
+            "vadba",
         ]
     )
     relevance_allowed_domain_suffixes: list[str] = field(default_factory=list)

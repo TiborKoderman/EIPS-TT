@@ -59,9 +59,14 @@ UI-configurable parameters should cover:
 - Script includes websocket registration parameters and runtime command:
 - `CRAWLER_DAEMON_ID`
 - `MANAGER_DAEMON_WS_URL`
-- `MANAGER_DAEMON_WS_TOKEN` (when configured)
+- `MANAGER_HTTP_BASE_URL`
+- `MANAGER_DAEMON_WS_TOKEN`
+- `MANAGER_INGEST_API_TOKEN`
 - `python pa1/crawler/src/main.py`
-- Optional docker command format for remote worker hosts
+- Supports bash and docker templates. If no token is configured/provided, UI generates one for the script output.
+- Docker template is loopback-aware for local manager URLs:
+   - Linux loopback manager: uses `--network host`
+   - non-loopback/local translation: uses `--add-host host.docker.internal:host-gateway`
 
 ## Worker State Machine Integration
 
@@ -83,9 +88,12 @@ All transitions are logged with timestamp and reason.
 - **Terminal duplicate handling:** manager-side enqueue upsert keeps `DUPLICATE` rows terminal instead of re-queuing them
 - **Lease management:** Automatic requeue on worker timeout/failure
 - **Delegate politeness scheduling:** Claim/dequeue skips cooled-down candidates per crawler daemon and resolved site IP, then returns the next valid URL
+- **Robots-aware cooldown extension:** worker ingest payloads report observed `robotsCrawlDelaySeconds` / `effectiveDelaySeconds`, and manager extends per-IP cooldowns accordingly
 - **Priority visualization:** Show high-priority pending URLs to operators
 - **Queue list continuity:** Dashboard queue view refreshes frequently and immediately shows replacement queued URLs after claims
 - **Rate-limit observability:** queue rows and dedicated widget surface active IP cooldown windows with mapped domains
+- **Stable dashboard layout:** IP timeout diagnostics render in a fixed-height queue header panel to avoid layout jumps
+- **Locked-item visibility:** dashboard includes a collapsed `LOCKED` / `PROCESSING` queue snapshot so active locks do not push queued candidates out of view
 
 ## Graph Visualization Features
 

@@ -2,82 +2,257 @@
 
 \usepackage[english]{babel}
 \usepackage{graphicx}
-\usepackage{epstopdf}
-\usepackage{fancyhdr}
-\usepackage{amsmath}
-\usepackage{amsthm}
-\usepackage{amssymb}
 \usepackage{url}
-\usepackage{array}
-\usepackage{textcomp}
-\usepackage{listings}
+\usepackage{booktabs}
+\usepackage{amsmath}
 \usepackage{hyperref}
-\usepackage{xcolor}
-\usepackage{colortbl}
 \usepackage{float}
-\usepackage{gensymb}
-\usepackage{longtable}
-\usepackage{supertabular}
-\usepackage{multicol}
-
-\usepackage[utf8x]{inputenc}
-
 \usepackage[T1]{fontenc}
+\usepackage[utf8]{inputenc}
 \usepackage{lmodern}
 \input{glyphtounicode}
 \pdfgentounicode=1
 
-\graphicspath{{./figures/}}
-\DeclareGraphicsExtensions{.pdf,.png,.jpg,.eps}
-
-% correct bad hyphenation here
-\hyphenation{op-tical net-works semi-conduc-tor trig-gs}
-
-% ============================================================================================
-
 \title{\vspace{0ex}
-Project Title}
+Programming Assignment 1: Preferential Web Crawler for MedOverNet}
 
-\author{Firs-name Last-name\vspace{-4.0ex}}
-
-% ============================================================================================
+\author{Tibor Koderman, Jerneja Krajcar, Dino Džaferagić}\vspace{-4.0ex}
 
 \begin{document}
-
 \maketitle
 
 \section{Introduction}
+In this project, we built a standalone preferential crawler for the MedOverNet domain (\url{https://medover.zurnal24.si/}). The goal is to crawl relevant pages first, respect robots rules, avoid duplicate content, and store crawl data in PostgreSQL using the required crawldb schema.
 
-A brief description of the problem and how you have solved it. This should be a short paragraph - just a few sentences is enough.
-Do not repeat text from instructions, but rather briefly summarize what is the main problem.
-Note that the page limit is two pages, so make sure that you write only that is the most important.
+The crawler is designed as a multi-worker system with a database-backed frontier. Each worker takes one URL, checks robots and politeness limits, downloads or renders the page, detects duplicates, stores the result, extracts new links and images, scores discovered URLs, and pushes them back to the frontier.
 
-\section{Experiments}
+\section{System architecture and implementation}
+\subsection{High-level pipeline}
+The crawler processes each URL in the following order:
+\begin{enumerate}
+    \item Claim next URL from the frontier.
+    \item If the canonical URL already exists in \texttt{crawldb.page} as \texttt{HTML/BINARY/DUPLICATE}, do not re-download; only insert the \texttt{link} record (from the source page to the already-known target).
+    \item Check robots rules and enforce politeness delay.
+    \item Download content (or render with headless browser when needed).
+    \item Detect exact duplicates using content hash.
+    \item Store page data and metadata in crawldb.
+    \item Parse outgoing links and images.
+    \item Score discovered URLs and enqueue them into frontier.
+\end{enumerate}
 
-This section should be structured so that it answers the questions/tasks given at the end of the instructions document (Section Grading). 
-Make sure that each experiment is supported with a figure or table and do not forget to reference it in text (e.g., see Figure~\ref{fig:figure_label}). 
-Figures which are included in the report should be as compact as possible due to the page limit.
-Result of each experiment should be described in text. When describing performance of some method or some figure - do not write what is obvious, but rather try to find reasons for such behaviour.
+\subsection{Main components}
+The implementation is split into clear modules:
+\begin{itemize}
+    \item Worker orchestration and crawl loop: \texttt{scheduler.py}, \texttt{run\_crawler.py}.
+    \item Frontier and page persistence: \texttt{frontier\_store.py}, \texttt{page\_store.py}.
+    \item Downloader and renderer: \texttt{downloader.py}, \texttt{renderer.py}.
+    \item Parsing links and images: \texttt{parser.py}.
+    \item Canonicalization and dedup utils: \texttt{url\_canonicalizer.py}, \texttt{dedup.py}.
+    \item Robots and politeness: \texttt{robots.py}, \texttt{politeness.py}.
+\end{itemize}
 
-Example: 
-{\it In Figure~\ref{fig:figure_label} (bottom-right) if a field of optical flow, which is small near the center and large at the edges of the image.}
-This is a bad description of the result since it is obvious from the image that the arrows around the center are short and long at the edges.
-A better description could be:
-{\it The optical flow field in Figure~\ref{fig:figure_label} (bottom-right) is small near the center and large at the edges of the image since pixels near the edges move much more than center pixels during rotation.}
+\subsection{Frontier queue semantics}
+The URL frontier is implemented directly in \texttt{crawldb.page}: each queued URL is stored as a row with \texttt{page\_type\_code = FRONTIER}.
+We store \emph{only canonicalized absolute URLs}.
 
-An important part of the report is analysis of the failure cases. 
-Show failure cases, discuss the reasons for them and try to say how would you improve the performance in these cases.
+Enqueue is concurrency-safe and relies on a uniqueness constraint on urls: if a URL already exists in \texttt{crawldb.page},
+it is not enqueued again.
 
-\begin{figure}[h]
+If a fetch fails, the frontier item is rescheduled by pushing \texttt{frontier\_next\_fetch\_time} into the future.
+
+\subsection{Division of work}
+\textbf{Implemented in this part of the report draft:}
+\begin{itemize}
+    \item robots.txt support (\texttt{robots.py}),
+    \item per-IP politeness/rate limiting (\texttt{politeness.py}),
+    \item downloader (\texttt{downloader.py}),
+    \item headless renderer (\texttt{renderer.py}),
+    \item content-type classification and CLI test hooks (\texttt{main.py}, \texttt{config.py}).
+\end{itemize}
+
+\textbf{Implemented by teammate (integrated architecture context):}
+\begin{itemize}
+    \item DB-backed frontier and worker loop orchestration,
+    \item parser for links/images and URL normalization,
+    \item relevance scoring and preferential URL ordering,
+    \item exact hash dedup integration in persistence layer.
+\end{itemize}
+
+\section{Preferential crawling strategy}
+The crawler uses a preferential strategy: every discovered URL is assigned a numeric priority (stored as \texttt{frontier\_priority}
+in the frontier row), and workers always claim the currently due URL with the highest priority.
+
+\subsection{Scoring function}
+The current implementation uses a lightweight, configurable heuristic (\texttt{relevance.py}).
+For a discovered URL \texttt{u} with parent URL \texttt{p} at depth \texttt{d}, we compute:
+\begin{itemize}
+    \item \textbf{Same-host boost:} if \texttt{host(u) == host(p)}, add \texttt{same\_host\_boost} (default: 10).
+    \item \textbf{Allowed domain suffix boost (optional):} if the host matches any configured suffix, add \texttt{allowed\_suffix\_boost} (default: 20).
+    \item \textbf{Keyword boosts (optional):} for each configured keyword occurring in the URL path/query, add \texttt{keyword\_boost} (default: 5).
+    \item \textbf{Depth penalty:} subtract \texttt{depth\_penalty} $\cdot d$ (default: 0.2).
+\end{itemize}
+
+With the default configuration, the crawler primarily prefers same-host URLs and mildly prefers shallow depth. Domain-specific focusing is supported via configuration, but must be explicitly set.
+
+\subsection{Worked example with default parameters}
+For a child URL discovered on the same host at depth $d=3$:
+\[
+\text{score} = 10 - 0.2\cdot 3 = 9.4
+\]
+For an off-host URL at the same depth (no same-host boost):
+\[\text{score} = -0.6\]
+Therefore, same-host pages are explored first unless additional boosts are configured.
+
+\section{Robots.txt and politeness}
+The crawler enforces robots and ethics constraints before each fetch:
+\begin{itemize}
+    \item robots fetched per origin and cached,
+    \item \texttt{Allow}/\texttt{Disallow} checked for crawler user-agent,
+    \item \texttt{Crawl-delay} read when present,
+    \item \texttt{Sitemap} URLs collected for optional frontier seeding,
+    \item hard minimum delay of 5 seconds per target IP, even if robots does not define delay.
+\end{itemize}
+
+The implementation uses a thread-safe per-IP limiter. Effective delay is:
+\[
+    \text{effective\_delay} = \max(5s, \text{robots\_crawl\_delay})
+\]
+
+This design allows parallel workers while still respecting per-target pacing.
+
+\textbf{PLACEHOLDER (final report):} insert one short robots compliance example from logs (allowed URL, disallowed URL, applied delay).
+
+\section{Downloader, renderer, and content-type handling}
+\subsection{HTTP downloader}
+The downloader uses \texttt{requests} with crawler user-agent and timeout settings from configuration. It follows redirects and stores status code and final URL.
+
+\subsection{JS rendering}
+For pages where static HTML is not enough, the crawler can render using headless Chrome via Selenium. This mode is optional because it is slower, and we use it when needed for dynamic content.
+
+\subsection{Content-type policy}
+The crawler distinguishes HTML and binary resources:
+\begin{itemize}
+    \item HTML: stored in \texttt{page.html\_content}, \texttt{page\_type = HTML}
+    \item PDF: supported as optional binary download, otherwise metadata-only
+    \item DOC/DOCX/PPT/PPTX: metadata listed in \texttt{page\_data}, no binary payload required
+    \item other non-HTML resources: marked as \texttt{BINARY}
+\end{itemize}
+
+In this assignment crawl HTML content by default, handle PDF where needed, and avoid storing unnecessary binary blobs.
+
+\section{Deduplication}
+\subsection{Exact deduplication}
+The crawler computes a content hash (SHA-256 of the exact HTML source) for HTML pages. The ingestion logic distinguishes:
+\begin{itemize}
+    \item \textbf{Known canonical URL:} if the canonical URL already exists in \texttt{crawldb.page}, the crawler does not insert a new page row and does not treat this as a duplicate; it only records the hyperlink in \texttt{crawldb.link}.
+    \item \textbf{Duplicate content:} if the canonical URL is new but the content hash matches an existing \texttt{HTML} page, a new row is inserted with \texttt{page\_type\_code = DUPLICATE}.
+\end{itemize}
+
+If the content hash already exists:
+\begin{itemize}
+    \item new page is marked \texttt{DUPLICATE},
+    \item \texttt{duplicate\_of} points to the original \texttt{HTML} page,
+    \item duplicate page does not store full HTML content.
+\end{itemize}
+
+%\subsection{Partial deduplication (bonus, planned/not final yet)}
+%Locality-sensitive hashing + Jaccard similarity is planned as a bonus extension for near-duplicate detection. This is \textbf{not claimed as completed} in this draft.
+
+%\textbf{PLACEHOLDER (final report):} if implemented later, describe final LSH parameters and one near-duplicate example.
+
+\section{Parameters and configuration}
+Crawler behavior is controlled by configuration variables. Main parameters include:
+\begin{itemize}
+    \item number of workers,
+    \item crawler user-agent (\texttt{fri-wier-\{GROUP\_NAME\}}),
+    \item minimum delay (must remain $\geq 5$ s),
+    \item robots timeout,
+    \item download timeout,
+    \item rendering timeout,
+    \item optional PDF download flag.
+\end{itemize}
+
+The command-line entry point in \texttt{main.py} was used to test:
+\begin{itemize}
+    \item robots checks and effective delay behavior,
+    \item downloader behavior for HTML/PDF cases,
+    \item renderer output size difference on dynamic pages.
+\end{itemize}
+
+\textbf{PLACEHOLDER (final report):} include final parameter table used for the 5000-page crawl run.
+
+\section{Problems and solutions}
+\subsection{Robots and ethical crawling}
+\textbf{Problem:} parallel workers can violate politeness if delays are not shared.\\
+\textbf{Solution:} server-side per IP locking and queue delagation, the shared queue holds timeouts for the next allowed fetch of each origin, when a worker requests a deque, and the server returns the highest priority URL that is not timed out, and adds it to the timeout list until the next allowed fetch time.
+This design allows multiple workers to operate in parallel while still respecting per-origin crawl delays. The new problem is that workers on different IPs are rate limited by the same delay, but this is a necessary tradeoff for ethical crawling. The other easy solution would just be to just do proxy switching, but this is not ethical.
+
+\subsection{Dynamic content}
+\textbf{Problem:} some links/content are injected by JavaScript.\\
+\textbf{Solution:} optional Selenium rendering path for selected pages.
+
+\subsection{Frontier concurrency}
+\textbf{Problem:} multiple workers may claim the same URL.\\
+\textbf{Solution:} The workers don't connect to the database directly, this is also a security design to allow workers to run on seperate machines without exposing the database to the networ. Instead the frontier is implemented on the server. When a worker is in a \texit{idle} state, the server deques the highest priority URL, and locks it by updating it's status in the database, this removes it from the frontier candidates.
+
+\subsection{Duplicate handling}
+\textbf{Problem:} same content may appear under different URLs.\\
+\textbf{Solution:} exact hash check and \texttt{DUPLICATE} page type with pointer to original.
+
+\subsection{Spider traps and loops}
+\textbf{Problem:} repeated navigation patterns and low-value loops can waste crawl budget.\\
+\textbf{Solution:} canonical URL uniqueness in DB, relevance scoring, and robots compliance constraints.
+
+\section{Results, statistics, and sisualization (Placeholders)}
+This section is intentionally a scaffold for the final submission stage.
+
+\subsection{Crawldb statistics}
+\textbf{PLACEHOLDER:} fill values from SQL queries after final crawl run.
+
+\begin{table}[H]
     \centering
-    \includegraphics[width=1\columnwidth]{figure.png}
-    \caption{Figure caption.}
-    \label{fig:figure_label}
+    \caption{Main crawl statistics (seed domain and full crawldb)}
+    \begin{tabular}{@{}lll@{}}
+        \toprule
+        Metric                       & Seed domain (MedOverNet) & Full crawldb   \\ \midrule
+        Number of sites              & \texttt{[TBD]}           & \texttt{[TBD]} \\
+        Number of HTML pages         & \texttt{[TBD]}           & \texttt{[TBD]} \\
+        Number of duplicates         & \texttt{[TBD]}           & \texttt{[TBD]} \\
+        Number of binary pages       & \texttt{[TBD]}           & \texttt{[TBD]} \\
+        Number of images             & \texttt{[TBD]}           & \texttt{[TBD]} \\
+        Average images per HTML page & \texttt{[TBD]}           & \texttt{[TBD]} \\ \bottomrule
+    \end{tabular}
+\end{table}
+
+\begin{table}[H]
+    \centering
+    \caption{Binary documents by type}
+    \begin{tabular}{@{}ll@{}}
+        \toprule
+        Data type & Count          \\ \midrule
+        PDF       & \texttt{[TBD]} \\
+        DOC       & \texttt{[TBD]} \\
+        DOCX      & \texttt{[TBD]} \\
+        PPT       & \texttt{[TBD]} \\
+        PPTX      & \texttt{[TBD]} \\ \bottomrule
+    \end{tabular}
+\end{table}
+
+\subsection{Link graph visualization}
+\textbf{PLACEHOLDER:} add graph visualization figure generated in Gephi/D3/vis.js.
+
+\begin{figure}[H]
+    \centering
+    \fbox{\parbox{0.95\columnwidth}{\centering PLACEHOLDER: Link graph figure (nodes=pages, edges=links)}}
+    \caption{Crawl link structure (placeholder).}
+    \label{fig:link_graph_placeholder}
 \end{figure}
 
+\subsection{Example pages/images}
+\textbf{PLACEHOLDER:} add 1--2 representative screenshots or extracted image examples.
 
 \section{Conclusion}
-
-A sentence or two to conclude the report. Write when the method works well and what its limitations.
+We prepared a working foundation for a preferential MedOverNet crawler with core requirements: robots compliance, politeness control, HTML/binary handling, optional JS rendering, exact hash dedup support, and a multi-worker DB-backed crawl design.
+The preferential strategy is implemented via a configurable scoring function that prioritizes same-host and shallow URLs by default.
 
 \end{document}

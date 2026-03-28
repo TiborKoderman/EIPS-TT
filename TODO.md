@@ -37,13 +37,13 @@ Last rebuilt: 2026-03-26
 - [x] [webserver] Support at least bash and docker command templates.
 - [x] [webserver] Include manager server IP/host and registration token in generated command.
 - [x] [webserver] Include daemon identifier/group in generated command.
-- [ ] [webserver] Verify generated command can register a remote daemon and be controlled from manager.
+- [x] [webserver] Verify generated command can register a remote daemon and be controlled from manager.
 
 #### Phase E - Verification and documentation
 
 - [x] [crawler+webserver+database] Verify frontier, politeness, and scheduling are server-owned and functioning.
-- [ ] [crawler+webserver] Functional verification with active daemon and multiple workers.
-- [ ] [webserver] GUI verification (worker controls, queue behavior, registration flow).
+- [x] [crawler+webserver] Functional verification with active daemon and multiple workers.
+- [x] [webserver] GUI verification (worker controls, queue behavior, registration flow).
 - [x] [docs] Update README/module docs for websocket-only architecture.
 - [x] [docs] Update `.github/instructions/eips-project-conventions.instructions.md` to match new architecture.
 
@@ -64,8 +64,8 @@ Last rebuilt: 2026-03-26
 - [x] Crawler daemon no longer manages frontier persistence logic.
 - [ ] Server can allocate work to multiple workers safely and fairly.
 - [ ] Robots-disallowed URLs are persisted as discovered links/pages but are not queued.
-- [ ] Registration UI can generate copy/paste command for remote daemon registration.
-- [ ] GUI worker controls remain functional after migration.
+- [x] Registration UI can generate copy/paste command for remote daemon registration.
+- [x] GUI worker controls remain functional after migration.
 
 ## Completed in this pass
 
@@ -101,6 +101,15 @@ Last rebuilt: 2026-03-26
 - [x] Expanded dashboard frontier diagnostics with `In queue / In memory / Leased` metrics and an IP timeout widget (including mapped domains).
 - [x] Added queue row timeout badges and static-height queue viewport to visualize rate-limited URLs without layout jump.
 - [x] Rebuilt static site graph mode as a dedicated renderer with unique site nodes, score-based colors, page-count sizing, and numbered inter-site edge weights.
+- [x] Moved dashboard IP timeout diagnostics into queue header with fixed-height viewport to avoid layout shifting.
+- [x] Added collapsed dashboard snapshot for `LOCKED`/`PROCESSING` frontier items so queued candidates remain visible.
+- [x] Updated default crawler seed preset so `https://medover.zurnal24.si/` is the only default-enabled seed.
+- [x] Expanded default relevance keywords with fitness-focused terms while keeping medical terms.
+- [x] Updated daemon registration script generation to always export websocket + ingest tokens and auto-generate a token when missing.
+- [x] Validated dockerized daemon registration workflow with loopback-safe docker command generation.
+- [x] Performed assignment-compliant DB dump (`pa1/db`) excluding `crawldb.image` and `crawldb.page_data` payload rows.
+- [x] Ran clean DB reset/rebuild and validated multi-worker start flow from GUI (5 total workers, 4 active under concurrency cap).
+- [x] Enforced hard minimum 5s server politeness cooldown and wired robots/effective delay reports from worker ingest to manager timeout scheduling.
 
 ## Pending follow-ups
 

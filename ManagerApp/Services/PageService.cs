@@ -256,6 +256,97 @@ public class PageService : IPageService
         return items;
     }
 
+    public async Task<LockedQueueItemsSnapshotViewModel> GetLockedQueueItemsAsync(int take = 10)
+    {
+        var boundedTake = Math.Clamp(take, 1, 50);
+        var snapshot = new LockedQueueItemsSnapshotViewModel();
+
+        await using var connection = new NpgsqlConnection(_context.Database.GetConnectionString());
+        await connection.OpenAsync();
+
+        const string totalSql = """
+            SELECT COUNT(*)
+            FROM crawldb.frontier_queue
+            WHERE state IN (
+                'LOCKED'::crawldb.frontier_queue_state,
+                'PROCESSING'::crawldb.frontier_queue_state
+            );
+            """;
+
+        await using (var totalCommand = new NpgsqlCommand(totalSql, connection))
+        {
+            var total = await totalCommand.ExecuteScalarAsync();
+            snapshot.TotalCount = total is null ? 0 : Convert.ToInt32(total);
+        }
+
+        if (snapshot.TotalCount == 0)
+        {
+            return snapshot;
+        }
+
+        const string rowsSql = """
+            SELECT
+                url,
+                source_url,
+                priority,
+                depth,
+                discovered_at,
+                state,
+                locked_at,
+                locked_by_worker_id
+            FROM crawldb.frontier_queue
+            WHERE state IN (
+                'LOCKED'::crawldb.frontier_queue_state,
+                'PROCESSING'::crawldb.frontier_queue_state
+            )
+            ORDER BY locked_at DESC NULLS LAST, priority DESC, discovered_at ASC
+            LIMIT @take;
+            """;
+
+        await using (var command = new NpgsqlCommand(rowsSql, connection))
+        {
+            command.Parameters.AddWithValue("take", boundedTake);
+            await using var reader = await command.ExecuteReaderAsync();
+            while (await reader.ReadAsync())
+            {
+                snapshot.Items.Add(new QueueTopItemViewModel
+                {
+                    Url = reader.IsDBNull(0) ? string.Empty : reader.GetString(0),
+                    SourceUrl = reader.IsDBNull(1) ? null : reader.GetString(1),
+                    Priority = reader.IsDBNull(2) ? 0 : reader.GetInt32(2),
+                    Depth = reader.IsDBNull(3) ? 0 : reader.GetInt32(3),
+                    DiscoveredAt = reader.IsDBNull(4) ? DateTime.UtcNow : reader.GetDateTime(4),
+                    State = reader.IsDBNull(5) ? "LOCKED" : reader.GetString(5),
+                    LockedAt = reader.IsDBNull(6) ? null : reader.GetDateTime(6),
+                    LockedByWorkerId = reader.IsDBNull(7) ? null : reader.GetInt32(7),
+                });
+            }
+        }
+
+        if (snapshot.Items.Count == 0)
+        {
+            return snapshot;
+        }
+
+        var policy = await LoadRelevancePolicyAsync();
+        foreach (var row in snapshot.Items)
+        {
+            row.RelevanceScore = ScorePageUrl(
+                row.Url,
+                row.SourceUrl,
+                row.Depth,
+                policy,
+                out var hasKeyword,
+                out var hasAllowedSuffix,
+                out var hasSameHost);
+            row.HasKeywordEvidence = hasKeyword;
+            row.HasAllowedSuffixEvidence = hasAllowedSuffix;
+            row.HasSameHostEvidence = hasSameHost;
+        }
+
+        return snapshot;
+    }
+
     /// <summary>
     /// Get total count of search results for pagination
     /// Uses same filtering logic as SearchPagesAsync
@@ -512,7 +603,8 @@ public class PageService : IPageService
             Keywords =
             [
                 "medicine", "medic", "health", "doctor", "clinic", "hospital", "treatment", "disease",
-                "zdrav", "zdravje", "bolnis", "ambul", "cepl", "preven", "higi"
+                "zdrav", "zdravje", "bolnis", "ambul", "cepl", "preven", "higi",
+                "fitness", "fitnes", "exercise", "training", "workout", "wellness", "nutrition", "prehrana", "vadba"
             ],
             AllowedSuffixes = ["gov.si", "nijz.si", "kclj.si", "zdravljenjenadom.si"],
         };

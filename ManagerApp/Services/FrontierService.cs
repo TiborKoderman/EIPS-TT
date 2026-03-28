@@ -76,6 +76,7 @@ public sealed class FrontierService
     private readonly ConcurrentDictionary<string, (string SiteIpKey, DateTime ExpiresAtUtc)> _resolvedSiteIdentityCache = new(StringComparer.OrdinalIgnoreCase);
     private readonly int _leaseTtlSeconds;
     private readonly int _politenessDelayMilliseconds;
+    private const int MinPolitenessDelayMilliseconds = 5_000;
     private readonly TimeSpan _resolvedSiteIdentityTtl = TimeSpan.FromMinutes(10);
 
     public FrontierService(IConfiguration configuration, ILogger<FrontierService> logger)
@@ -84,7 +85,39 @@ public sealed class FrontierService
         _logger = logger;
         _connectionString = _configuration.GetConnectionString("CrawldbConnection");
         _leaseTtlSeconds = Math.Clamp(_configuration.GetValue("CrawlerApi:FrontierLeaseTtlSeconds", 30), 5, 3600);
-        _politenessDelayMilliseconds = Math.Clamp(_configuration.GetValue("CrawlerApi:FrontierPolitenessDelayMilliseconds", 500), 0, 60000);
+        _politenessDelayMilliseconds = Math.Clamp(
+            _configuration.GetValue("CrawlerApi:FrontierPolitenessDelayMilliseconds", MinPolitenessDelayMilliseconds),
+            MinPolitenessDelayMilliseconds,
+            60000);
+    }
+
+    public async Task ReportObservedDelayAsync(
+        string? daemonId,
+        string? url,
+        double? effectiveDelaySeconds,
+        double? robotsCrawlDelaySeconds,
+        CancellationToken cancellationToken)
+    {
+        var normalizedUrl = NormalizeUrl(url);
+        if (string.IsNullOrWhiteSpace(normalizedUrl))
+        {
+            return;
+        }
+
+        var nowUtc = DateTime.UtcNow;
+        var siteIpKey = await ResolveSiteIpKeyAsync(normalizedUrl, nowUtc, cancellationToken);
+        if (string.IsNullOrWhiteSpace(siteIpKey))
+        {
+            return;
+        }
+
+        var crawlerKey = NormalizeCrawlerKey(daemonId);
+        var delayFromEffective = effectiveDelaySeconds.HasValue ? Math.Max(0.0, effectiveDelaySeconds.Value) : 0.0;
+        var delayFromRobots = robotsCrawlDelaySeconds.HasValue ? Math.Max(0.0, robotsCrawlDelaySeconds.Value) : 0.0;
+        var observedDelayMilliseconds = (int)Math.Ceiling(Math.Max(delayFromEffective, delayFromRobots) * 1000.0);
+        var delayMilliseconds = Math.Max(_politenessDelayMilliseconds, Math.Max(MinPolitenessDelayMilliseconds, observedDelayMilliseconds));
+
+        UpsertCrawlerSiteCooldown(crawlerKey, siteIpKey, nowUtc, delayMilliseconds);
     }
 
     public async Task<bool> EnqueueAsync(string? url, int priority, int depth, string? sourceUrl, CancellationToken cancellationToken)
@@ -614,8 +647,20 @@ public sealed class FrontierService
             return;
         }
 
+        UpsertCrawlerSiteCooldown(crawlerKey, siteIpKey, nowUtc, _politenessDelayMilliseconds);
+    }
+
+    private void UpsertCrawlerSiteCooldown(string crawlerKey, string siteIpKey, DateTime nowUtc, int delayMilliseconds)
+    {
+        var boundedDelayMilliseconds = Math.Max(MinPolitenessDelayMilliseconds, delayMilliseconds);
         var scopedKey = ComposeCrawlerSiteKey(crawlerKey, siteIpKey);
-        _crawlerSiteNextAllowedUtc[scopedKey] = nowUtc.AddMilliseconds(_politenessDelayMilliseconds);
+        var candidateReadyAt = nowUtc.AddMilliseconds(boundedDelayMilliseconds);
+
+        _crawlerSiteNextAllowedUtc.AddOrUpdate(
+            scopedKey,
+            _ => candidateReadyAt,
+            (_, existingReadyAt) => existingReadyAt >= candidateReadyAt ? existingReadyAt : candidateReadyAt);
+
         PruneExpiredPolitenessEntries(nowUtc);
     }
 

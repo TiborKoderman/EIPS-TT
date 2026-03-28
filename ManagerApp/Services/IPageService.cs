@@ -33,6 +33,11 @@ public interface IPageService
     Task<List<QueueTopItemViewModel>> GetTopQueueItemsAsync(int take = 20);
 
     /// <summary>
+    /// Return a collapsed snapshot of currently locked/processing queue URLs.
+    /// </summary>
+    Task<LockedQueueItemsSnapshotViewModel> GetLockedQueueItemsAsync(int take = 10);
+
+    /// <summary>
     /// Return a relevance-focused report over collected pages.
     /// </summary>
     Task<List<RelevanceReportRowDto>> GetRelevanceReportAsync(string? searchTerm, int skip = 0, int take = 100);

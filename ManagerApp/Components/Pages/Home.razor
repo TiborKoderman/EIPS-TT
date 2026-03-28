@@ -138,13 +138,44 @@
             </div>
 
             <div class="card dashboard-queue-card">
-                <div class="card-header-inline mb-sm">
-                    <h2 class="card-title mb-0">Frontier Queue</h2>
-                    <span class="live-pill"><span class="live-dot"></span> Live</span>
-                </div>
                 @{
                     var activeIpTimeouts = GetActiveIpTimeouts();
                 }
+                <div class="dashboard-queue-header mb-sm">
+                    <div class="card-header-inline mb-0">
+                        <h2 class="card-title mb-0">Frontier Queue</h2>
+                        <span class="live-pill"><span class="live-dot"></span> Live</span>
+                    </div>
+                    <div class="dashboard-ip-timeout-widget dashboard-ip-timeout-header">
+                        <div class="text-small font-semibold mb-sm">IP timeouts</div>
+                        <div class="dashboard-ip-timeout-viewport">
+                            @if (activeIpTimeouts.Count > 0)
+                            {
+                                <ul class="list dashboard-ip-timeout-list">
+                                    @foreach (var timeout in activeIpTimeouts)
+                                    {
+                                        <li class="dashboard-ip-timeout-row">
+                                            <div class="flex items-center justify-between gap-sm">
+                                                <span class="text-small font-semibold">@timeout.SiteIpKey</span>
+                                                <span class="badge badge-warning">@FormatTimeoutRemaining(timeout.RemainingMilliseconds)</span>
+                                            </div>
+                                            <div>
+                                                <span class="text-small text-muted">@FormatTimeoutDomains(timeout)</span>
+                                            </div>
+                                        </li>
+                                    }
+                                </ul>
+                            }
+                            else
+                            {
+                                <div class="dashboard-ip-timeout-empty text-small text-muted">
+                                    No active timeouts.
+                                </div>
+                            }
+                        </div>
+                    </div>
+                </div>
+
                 @if (daemonQueueSnapshots.Count == 0)
                 {
                     <p class="text-small text-muted">No daemon queue data yet.</p>
@@ -175,27 +206,6 @@
                                 </div>
                             </div>
                         }
-                    </div>
-                }
-
-                @if (activeIpTimeouts.Count > 0)
-                {
-                    <div class="dashboard-ip-timeout-widget mt-md">
-                        <div class="text-small font-semibold mb-sm">IP timeouts</div>
-                        <ul class="list dashboard-ip-timeout-list">
-                            @foreach (var timeout in activeIpTimeouts)
-                            {
-                                <li class="dashboard-ip-timeout-row">
-                                    <div class="flex items-center justify-between gap-sm">
-                                        <span class="text-small font-semibold">@timeout.SiteIpKey</span>
-                                        <span class="badge badge-warning">@FormatTimeoutRemaining(timeout.RemainingMilliseconds)</span>
-                                    </div>
-                                    <div>
-                                        <span class="text-small text-muted">@FormatTimeoutDomains(timeout)</span>
-                                    </div>
-                                </li>
-                            }
-                        </ul>
                     </div>
                 }
 
@@ -230,6 +240,39 @@
                 else
                 {
                     <p class="text-small text-muted mt-sm">No queued frontier items available.</p>
+                }
+
+                @if (lockedQueueItems.TotalCount > 0)
+                {
+                    <details class="dashboard-queue-collapsed mt-sm">
+                        <summary>
+                            <span class="text-small font-semibold">Locked / processing items</span>
+                            <span class="badge badge-warning">@lockedQueueItems.TotalCount</span>
+                            <span class="text-small text-muted">expand</span>
+                        </summary>
+                        <ul class="list dashboard-queue-locked-list">
+                            @foreach (var item in lockedQueueItems.Items)
+                            {
+                                var lockTooltip = $"state={item.State} | worker={item.LockedByWorkerId?.ToString() ?? "n/a"} | url={item.Url}";
+                                <li class="dashboard-queue-row" title="@lockTooltip" @key="item.Url">
+                                    <div class="flex items-center justify-between gap-sm">
+                                        <div class="flex items-center gap-sm">
+                                            <span class="badge @GetQueueStateBadgeClass(item.State)">@item.State.ToUpperInvariant()</span>
+                                            <span class="text-small text-muted">@BuildLockedWorkerLabel(item.LockedByWorkerId)</span>
+                                        </div>
+                                        <span class="text-small text-muted">@FormatLockAge(item.LockedAt)</span>
+                                    </div>
+                                    <div class="text-small text-muted queue-url">@item.Url</div>
+                                </li>
+                            }
+                        </ul>
+                        @if (lockedQueueItems.TotalCount > lockedQueueItems.Items.Count)
+                        {
+                            <div class="text-small text-muted mt-sm">
+                                Showing @lockedQueueItems.Items.Count of @lockedQueueItems.TotalCount locked/processing items.
+                            </div>
+                        }
+                    </details>
                 }
             </div>
 
@@ -320,6 +363,7 @@
     private FrontierStatusViewModel? frontierStatus;
     private List<DaemonQueueSnapshot> daemonQueueSnapshots = new();
     private List<QueueTopItemViewModel> topQueueItems = new();
+    private LockedQueueItemsSnapshotViewModel lockedQueueItems = new();
     private List<WorkerThroughputPointViewModel> dashboardThroughputSeries = new();
     private List<WorkerLogEntryViewModel> recentLogs = new();
     private string? selectedWorkerStatus;
@@ -399,6 +443,7 @@
             var events = await WorkerService.GetRecentCrawlerEventsAsync(2000);
             daemonQueueSnapshots = BuildDaemonQueueSnapshots(daemonStatus, events, frontierStatus);
             topQueueItems = await PageService.GetTopQueueItemsAsync(20);
+            lockedQueueItems = await PageService.GetLockedQueueItemsAsync(10);
             dashboardThroughputSeries = await WorkerService.GetThroughputSeriesAsync(workerId: null, windowMinutes: 60, bucketSeconds: 30);
             dashboardThroughputUsingFallback = false;
             if (dashboardThroughputSeries.Count == 0)
@@ -683,6 +728,27 @@
         }
 
         return $"{Math.Max(1, (int)Math.Ceiling(remaining.TotalSeconds))}s";
+    }
+
+    private static string BuildLockedWorkerLabel(int? workerId)
+    {
+        return workerId is int id ? $"worker {id}" : "worker n/a";
+    }
+
+    private static string FormatLockAge(DateTime? lockedAt)
+    {
+        if (lockedAt is null)
+        {
+            return "lock time n/a";
+        }
+
+        var delta = DateTime.UtcNow - lockedAt.Value;
+        if (delta.TotalMinutes >= 1)
+        {
+            return $"locked {(int)delta.TotalMinutes}m ago";
+        }
+
+        return $"locked {Math.Max(1, (int)Math.Ceiling(delta.TotalSeconds))}s ago";
     }
 
     private string GetRecentEventSourceLabel()

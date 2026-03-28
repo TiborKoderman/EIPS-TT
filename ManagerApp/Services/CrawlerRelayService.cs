@@ -60,6 +60,13 @@ public sealed class CrawlerRelayService
             throw new InvalidOperationException("rawUrl/finalUrl must be provided.");
         }
 
+        await _frontierService.ReportObservedDelayAsync(
+            request.DaemonId,
+            url,
+            request.DownloadResult?.EffectiveDelaySeconds,
+            request.DownloadResult?.RobotsCrawlDelaySeconds,
+            cancellationToken);
+
         var pageTypeCode = string.IsNullOrWhiteSpace(request.DownloadResult?.PageTypeCode)
             ? "HTML"
             : request.DownloadResult!.PageTypeCode!.Trim().ToUpperInvariant();
@@ -1391,6 +1398,7 @@ public sealed class CrawlerRelayService
 public sealed class CrawlerIngestRequest
 {
     public string? RawUrl { get; set; }
+    public string? DaemonId { get; set; }
     public int? SiteId { get; set; }
     public int? SourcePageId { get; set; }
     public List<string>? DiscoveredUrls { get; set; }

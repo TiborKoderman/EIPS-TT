@@ -124,10 +124,18 @@ public class QueueTopItemViewModel
     public int Priority { get; set; }
     public int Depth { get; set; }
     public DateTime DiscoveredAt { get; set; }
+    public DateTime? LockedAt { get; set; }
+    public int? LockedByWorkerId { get; set; }
     public double RelevanceScore { get; set; }
     public bool HasKeywordEvidence { get; set; }
     public bool HasAllowedSuffixEvidence { get; set; }
     public bool HasSameHostEvidence { get; set; }
+}
+
+public class LockedQueueItemsSnapshotViewModel
+{
+    public int TotalCount { get; set; }
+    public List<QueueTopItemViewModel> Items { get; set; } = new();
 }
 
 public class RelevanceReportRowDto

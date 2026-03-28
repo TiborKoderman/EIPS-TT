@@ -118,7 +118,7 @@ class DaemonWorkerService(WorkerControlService):
                 rate_limit_per_minute=240,
                 queue_mode="server",
                 strategy_mode="balanced",
-                topic_keywords=["medicine", "health", "clinic"],
+                topic_keywords=["medicine", "health", "clinic", "fitness", "exercise", "training"],
                 avoid_duplicate_paths_across_daemons=True,
                 worker_ids=[1],
             ),
@@ -182,7 +182,11 @@ class DaemonWorkerService(WorkerControlService):
         self._url_canonicalizer = DefaultUrlCanonicalizer()
         self._crawler_config = load_crawler_config()
         self._robots_policy_manager = RobotsPolicyManager(user_agent=self._global_config.user_agent)
-        self._ip_rate_limiter = PerIpRateLimiter(min_interval_seconds=0.0)
+        min_ip_delay_seconds = max(
+            5.0,
+            float(_coerce_int(os.getenv("CRAWLER_MIN_IP_DELAY_SECONDS", "5"), 5)),
+        )
+        self._ip_rate_limiter = PerIpRateLimiter(min_interval_seconds=min_ip_delay_seconds)
 
         for worker in self._workers.values():
             self._append_log(worker.id, "Info", f"{worker.name} initialized in {worker.mode} mode.")
@@ -2319,10 +2323,11 @@ class DaemonWorkerService(WorkerControlService):
             return True
 
     def _effective_delay_seconds(self, policy: RobotsPolicy | None, worker_id: int | None = None) -> float:
+        min_ip_delay = max(0.0, float(self._ip_rate_limiter.min_interval_seconds))
         configured_delay = max(0.0, float(self._global_config.crawl_delay_milliseconds) / 1000.0)
         robots_delay = 0.0 if policy is None or policy.crawl_delay_seconds is None else max(0.0, float(policy.crawl_delay_seconds))
         group_rate_limit_delay = 0.0 if worker_id is None else self._group_rate_limit_delay_seconds(worker_id)
-        return max(configured_delay, robots_delay, group_rate_limit_delay)
+        return max(min_ip_delay, configured_delay, robots_delay, group_rate_limit_delay)
 
     def _group_rate_limit_delay_seconds(self, worker_id: int) -> float:
         with self._lock:
@@ -2389,6 +2394,7 @@ class DaemonWorkerService(WorkerControlService):
 
         payload = {
             "rawUrl": raw_url,
+            "daemonId": self._daemon_id,
             "siteId": None,
             "sourcePageId": None,
             "discoveredUrls": discovered_links,

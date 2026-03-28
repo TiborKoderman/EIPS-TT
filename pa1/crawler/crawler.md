@@ -44,6 +44,13 @@ Queue behavior options (daemon-side):
 - `queue_mode=server` keeps manager as frontier owner.
 - Optional local in-memory fallback can be enabled when relay is unavailable.
 
+## Default Crawl Presets
+
+- Default seed preset enables `https://medover.zurnal24.si/` and keeps other starter seeds disabled by default.
+- Default relevance keywords keep medical terms and include additional fitness terms (`fitness`, `fitnes`, `exercise`, `training`, `workout`, `wellness`, `nutrition`, `prehrana`, `vadba`).
+- Manager-generated daemon scripts export both `MANAGER_DAEMON_WS_TOKEN` and `MANAGER_INGEST_API_TOKEN` for consistent authenticated relay.
+- Worker politeness enforces a hard minimum 5s per-IP delay (`max(5s, configured, robots, group-rate)`), and reported robots/effective delay values are relayed to manager ingest.
+
 ## Execution Architecture
 
 ```mermaid

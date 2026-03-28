@@ -99,6 +99,13 @@ This keeps `frontier_queue` aligned with "pending/in-flight queue" semantics ins
 - Expired leases are requeued automatically.
 - Worker stop/pause/reload can release active lease and optionally requeue.
 
+## 5.1 Robots-aware politeness propagation
+
+- Worker fetch flow computes effective delay from robots + configured strategy limits.
+- Daemon ingest reports `robotsCrawlDelaySeconds` and `effectiveDelaySeconds` to manager.
+- Manager frontier cooldown uses a hard floor of 5s and extends per-daemon/per-IP timeout windows when observed robots delay is higher.
+- This keeps server-side claim/dequeue decisions consistent with worker-side robots compliance.
+
 ## 5.5 Worker State Machine
 
 Each worker maintains a discrete state machine that represents its lifecycle:

@@ -446,6 +446,13 @@ textarea:focus {
     min-width: 130px;
 }
 
+.dashboard-queue-header {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) minmax(220px, 280px);
+    gap: var(--spacing-md);
+    align-items: stretch;
+}
+
 .dashboard-queue-widget {
     min-width: 190px;
     border-left: 1px solid var(--color-border-light);
@@ -502,11 +509,32 @@ textarea:focus {
     padding-top: var(--spacing-sm);
 }
 
+.dashboard-ip-timeout-header {
+    border-top: none;
+    padding-top: 0;
+    min-height: 180px;
+}
+
+.dashboard-ip-timeout-viewport {
+    height: 140px;
+}
+
 .dashboard-ip-timeout-list {
-    max-height: 150px;
+    height: 100%;
     overflow: auto;
     border: 1px solid var(--color-border-light);
     border-radius: var(--radius-sm);
+}
+
+.dashboard-ip-timeout-empty {
+    height: 100%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border: 1px solid var(--color-border-light);
+    border-radius: var(--radius-sm);
+    padding: 8px;
+    text-align: center;
 }
 
 .dashboard-ip-timeout-row {
@@ -684,6 +712,54 @@ textarea:focus {
 
 .dashboard-worker-list .list-item {
     border-radius: var(--radius-sm);
+}
+
+.dashboard-queue-collapsed {
+    border: 1px solid var(--color-border-light);
+    border-radius: var(--radius-sm);
+    background: #f9fbfa;
+}
+
+.dashboard-queue-collapsed summary {
+    cursor: pointer;
+    list-style: none;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: var(--spacing-sm);
+    padding: 8px 10px;
+}
+
+.dashboard-queue-collapsed summary::-webkit-details-marker {
+    display: none;
+}
+
+.dashboard-queue-locked-list {
+    max-height: 180px;
+    overflow: auto;
+    border-top: 1px solid var(--color-border-light);
+}
+
+.dashboard-queue-locked-list .dashboard-queue-row {
+    border-bottom: 1px solid var(--color-border-light);
+}
+
+.dashboard-queue-locked-list .dashboard-queue-row:last-child {
+    border-bottom: none;
+}
+
+@media (max-width: 1200px) {
+    .dashboard-queue-header {
+        grid-template-columns: 1fr;
+    }
+
+    .dashboard-ip-timeout-header {
+        min-height: 0;
+    }
+
+    .dashboard-ip-timeout-viewport {
+        height: 120px;
+    }
 }
 
 .worker-row {

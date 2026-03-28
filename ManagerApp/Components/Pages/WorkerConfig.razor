@@ -208,7 +208,7 @@
                     <input type="text" @bind="managerEndpointOverride" placeholder="http://127.0.0.1:5175" />
                 </label>
                 <label>
-                    <span class="text-small text-muted">Channel Token (optional)</span>
+                    <span class="text-small text-muted">Channel Token (auto-generated if empty)</span>
                     <input type="text" @bind="daemonTokenOverride" placeholder="Bearer token configured in manager" />
                 </label>
             </div>
@@ -234,6 +234,7 @@
     private string daemonIdOverride = string.Empty;
     private string managerEndpointOverride = string.Empty;
     private string daemonTokenOverride = string.Empty;
+    private string generatedDaemonToken = string.Empty;
 
     protected override async Task OnInitializedAsync()
     {
@@ -359,10 +360,11 @@
 
         config.SeedEntries = new List<SeedEntryViewModel>
         {
-            new() { Url = "https://www.gov.si/", Enabled = true, Label = "SI Government" },
-            new() { Url = "https://nijz.si/", Enabled = true, Label = "NIJZ Public Health" },
-            new() { Url = "https://www.kclj.si/", Enabled = true, Label = "UKC Ljubljana" },
-            new() { Url = "https://e-uprava.gov.si/", Enabled = true, Label = "eUprava" },
+            new() { Url = "https://medover.zurnal24.si/", Enabled = true, Label = "Med.Over" },
+            new() { Url = "https://www.gov.si/", Enabled = false, Label = "SI Government" },
+            new() { Url = "https://nijz.si/", Enabled = false, Label = "NIJZ Public Health" },
+            new() { Url = "https://www.kclj.si/", Enabled = false, Label = "UKC Ljubljana" },
+            new() { Url = "https://e-uprava.gov.si/", Enabled = false, Label = "eUprava" },
             new() { Url = "https://www.who.int/", Enabled = false, Label = "WHO" },
             new() { Url = "https://www.ema.europa.eu/", Enabled = false, Label = "EMA" },
         };
@@ -392,6 +394,15 @@
             "clinic",
             "hospital",
             "doctor",
+            "fitness",
+            "fitnes",
+            "exercise",
+            "training",
+            "workout",
+            "wellness",
+            "nutrition",
+            "prehrana",
+            "vadba",
         });
         config.RelevanceAllowedDomainSuffixesText = string.Join("\n", new[]
         {
@@ -406,9 +417,10 @@
 
         config.SeedEntries = new List<SeedEntryViewModel>
         {
-            new() { Url = "https://nijz.si/", Enabled = true, Label = "NIJZ" },
-            new() { Url = "https://www.kclj.si/", Enabled = true, Label = "UKC" },
-            new() { Url = "https://www.gov.si/", Enabled = true, Label = "Gov SI" },
+            new() { Url = "https://medover.zurnal24.si/", Enabled = true, Label = "Med.Over" },
+            new() { Url = "https://nijz.si/", Enabled = false, Label = "NIJZ" },
+            new() { Url = "https://www.kclj.si/", Enabled = false, Label = "UKC" },
+            new() { Url = "https://www.gov.si/", Enabled = false, Label = "Gov SI" },
             new() { Url = "https://www.who.int/", Enabled = false, Label = "WHO" },
         };
 
@@ -431,34 +443,43 @@
         var token = daemonTokenOverride.Trim();
         if (string.IsNullOrWhiteSpace(token))
         {
-            token = (Configuration["CrawlerApi:DaemonChannelToken"] ?? string.Empty).Trim();
+            token = ResolveConfiguredManagerToken();
+        }
+        if (string.IsNullOrWhiteSpace(token))
+        {
+            token = EnsureGeneratedDaemonToken();
         }
 
         var endpointHint = managerEndpointOverride.Trim();
         var managerSocketUrl = ResolveManagerSocketUrl(daemonId, endpointHint);
-
-        var tokenLine = string.IsNullOrWhiteSpace(token)
-            ? "# export MANAGER_DAEMON_WS_TOKEN=\"<set-if-configured-on-manager>\""
-            : $"export MANAGER_DAEMON_WS_TOKEN=\"{token}\"";
+        var managerHttpBaseUrl = ResolveManagerHttpBaseUrl(managerSocketUrl);
 
         if (string.Equals(daemonCommandFormat, "docker", StringComparison.OrdinalIgnoreCase))
         {
-            var dockerTokenLine = string.IsNullOrWhiteSpace(token)
-                ? "  # -e MANAGER_DAEMON_WS_TOKEN=\"<set-if-configured-on-manager>\" \\"
-                : $"  -e MANAGER_DAEMON_WS_TOKEN=\"{token}\" \\";
-
-            daemonStartScript = string.Join("\n", new[]
+            var useHostNetwork = OperatingSystem.IsLinux() && IsLoopbackHost(managerSocketUrl);
+            var dockerSocketUrl = useHostNetwork ? managerSocketUrl : RewriteLoopbackHostForDocker(managerSocketUrl);
+            var dockerManagerHttpBase = useHostNetwork ? managerHttpBaseUrl : RewriteLoopbackHostForDocker(managerHttpBaseUrl);
+            const string lineCont = "\\";
+            var dockerLines = new List<string>
             {
-                "docker run --rm \\",
-                $"  --name crawler-daemon-{SanitizeContainerName(daemonId)} \\",
-                $"  -e CRAWLER_DAEMON_ID=\"{daemonId}\" \\",
-                $"  -e MANAGER_DAEMON_WS_URL=\"{managerSocketUrl}\" \\",
-                dockerTokenLine,
-                "  -v \"$(pwd)\":/workspace \\",
-                "  -w /workspace \\",
-                "  python:3.12-slim \\",
+                $"docker run --rm {lineCont}",
+                $"  --name crawler-daemon-{SanitizeContainerName(daemonId)} {lineCont}",
+                $"  -e CRAWLER_DAEMON_ID=\"{daemonId}\" {lineCont}",
+                $"  -e MANAGER_DAEMON_WS_URL=\"{dockerSocketUrl}\" {lineCont}",
+                $"  -e MANAGER_HTTP_BASE_URL=\"{dockerManagerHttpBase}\" {lineCont}",
+                $"  -e MANAGER_DAEMON_WS_TOKEN=\"{token}\" {lineCont}",
+                $"  -e MANAGER_INGEST_API_TOKEN=\"{token}\" {lineCont}",
+                $"  -v \"$(pwd)\":/workspace {lineCont}",
+                $"  -w /workspace {lineCont}",
+                $"  python:3.12-slim {lineCont}",
                 "  bash -lc \"pip install -r requirements.txt && python pa1/crawler/src/main.py\"",
-            });
+            };
+
+            dockerLines.Insert(2, useHostNetwork
+                ? $"  --network host {lineCont}"
+                : $"  --add-host host.docker.internal:host-gateway {lineCont}");
+
+            daemonStartScript = string.Join("\n", dockerLines);
             return;
         }
 
@@ -468,9 +489,79 @@
             "set -euo pipefail",
             $"export CRAWLER_DAEMON_ID=\"{daemonId}\"",
             $"export MANAGER_DAEMON_WS_URL=\"{managerSocketUrl}\"",
-            tokenLine,
+            $"export MANAGER_HTTP_BASE_URL=\"{managerHttpBaseUrl}\"",
+            $"export MANAGER_DAEMON_WS_TOKEN=\"{token}\"",
+            $"export MANAGER_INGEST_API_TOKEN=\"{token}\"",
             "python pa1/crawler/src/main.py",
         });
+    }
+
+    private string ResolveConfiguredManagerToken()
+    {
+        var frontierToken = (Configuration["CrawlerApi:FrontierApiToken"] ?? string.Empty).Trim();
+        if (!string.IsNullOrWhiteSpace(frontierToken))
+        {
+            return frontierToken;
+        }
+
+        return (Configuration["CrawlerApi:DaemonChannelToken"] ?? string.Empty).Trim();
+    }
+
+    private string EnsureGeneratedDaemonToken()
+    {
+        if (!string.IsNullOrWhiteSpace(generatedDaemonToken))
+        {
+            return generatedDaemonToken;
+        }
+
+        var bytes = new byte[16];
+        System.Security.Cryptography.RandomNumberGenerator.Fill(bytes);
+        generatedDaemonToken = Convert.ToHexString(bytes).ToLowerInvariant();
+        return generatedDaemonToken;
+    }
+
+    private static string ResolveManagerHttpBaseUrl(string socketUrl)
+    {
+        if (!Uri.TryCreate(socketUrl, UriKind.Absolute, out var parsed))
+        {
+            return "http://127.0.0.1:5160";
+        }
+
+        var scheme = parsed.Scheme.Equals("wss", StringComparison.OrdinalIgnoreCase) ? "https" : "http";
+        return $"{scheme}://{parsed.Authority}";
+    }
+
+    private static string RewriteLoopbackHostForDocker(string url)
+    {
+        if (!Uri.TryCreate(url, UriKind.Absolute, out var parsed))
+        {
+            return url;
+        }
+
+        if (!string.Equals(parsed.Host, "localhost", StringComparison.OrdinalIgnoreCase)
+            && !string.Equals(parsed.Host, "127.0.0.1", StringComparison.OrdinalIgnoreCase)
+            && !string.Equals(parsed.Host, "::1", StringComparison.OrdinalIgnoreCase))
+        {
+            return url;
+        }
+
+        var builder = new UriBuilder(parsed)
+        {
+            Host = "host.docker.internal",
+        };
+        return builder.Uri.ToString().TrimEnd('/');
+    }
+
+    private static bool IsLoopbackHost(string url)
+    {
+        if (!Uri.TryCreate(url, UriKind.Absolute, out var parsed))
+        {
+            return false;
+        }
+
+        return string.Equals(parsed.Host, "localhost", StringComparison.OrdinalIgnoreCase)
+            || string.Equals(parsed.Host, "127.0.0.1", StringComparison.OrdinalIgnoreCase)
+            || string.Equals(parsed.Host, "::1", StringComparison.OrdinalIgnoreCase);
     }
 
     private static string SanitizeContainerName(string daemonId)
