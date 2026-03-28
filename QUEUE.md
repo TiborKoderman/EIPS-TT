@@ -40,7 +40,7 @@ this should automatically give each worker a valid target
 >The soulution could be to have the workers hold a very small local queue, where all members are guaranteed to be valid at fetch, but that raises the timeout double problem, and aditional complexity
 
 if there is a simple solution that handels this correctly and is a common approach use that one, there may even be an implementation example in the notebooks
-
+the way that the queue looks it seems like the rate limiter it looks like same ips keep getiting hit in a row, it looks like the leasing itself is artificially delayed, make it work by replying with the next page for the worker after recieving the result immediately, again, after dequeuing an item lock that ip, deque only items not belonging to it
 
 
 # visual
@@ -52,3 +52,6 @@ make 2 versions of the force graph one static for the results and one dynamic, w
 the dynamic one should allow "replaying", by just iterating the logs from history
 
 2 view levels, sites, pages of a site (click or zoom level triggered)
+
+the queue items should reappear as soon as they disappear
+

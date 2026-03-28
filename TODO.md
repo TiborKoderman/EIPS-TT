@@ -52,7 +52,7 @@ Last rebuilt: 2026-03-26
 - [x] Queue ordering and claim policy: server-side frontier service.
 - [x] Lease creation/expiry/recovery: server-side frontier service.
 - [x] Queue state transitions (`QUEUED/LOCKED/PROCESSING/COMPLETED/DUPLICATE/FAILED`): server-side frontier service.
-- [ ] Collision/duplicate queue suppression across workers/daemons: server-side frontier service.
+- [x] Collision/duplicate queue suppression across workers/daemons: server-side frontier service.
 - [x] Politeness scheduling (per-IP/per-domain pacing): server-side scheduler/politeness service.
 - [ ] Robots allow/disallow gate for queueing: server-side policy gate for discovered URLs.
 - [ ] Discovered URL ingest and prioritization: server-side enqueue API.
@@ -91,10 +91,13 @@ Last rebuilt: 2026-03-26
 - [x] Added sitemap ingestion hook in manager ingest flow: parse robots sitemap payloads, extract `<loc>` URLs (`urlset`/`sitemapindex`), and enqueue discovered URLs server-side with safety limits.
 - [x] Smoke-tested ingestion dedupe by posting repeated discovered URLs to `/api/crawler/ingest` and verifying single `frontier_queue` rows per URL.
 - [x] Implemented server-side delegate cooldown scheduling keyed by crawler daemon + resolved site IP, with timed skip-and-retry behavior during frontier claim/dequeue.
+- [x] Added ingest race-recovery guards for concurrent `crawldb.page.url` conflicts in `/api/crawler/ingest` and resilient discovered frontier upserts.
+- [x] Optimized discovered URL ingestion path with per-batch site-id cache and batched link insert (`unnest(@target_ids)`), reducing per-link round-trips.
+- [x] Validated concurrent ingest + queue lifecycle end-to-end (12 parallel ingests, dequeue, complete) with DB verification of deduped queue/page counts.
 
 ## Pending follow-ups
 
-- [ ] Run full end-to-end runtime validation with live daemon + manager + DB migration path (`/api/frontier/dequeue`, swap refill behavior, claim/complete lifecycle under load).
+- [x] Run full end-to-end runtime validation with live daemon + manager + DB migration path (`/api/frontier/dequeue`, swap refill behavior, claim/complete lifecycle under load).
 - [ ] Add automated integration tests for frontier collision scenarios and swap refill edge cases.
 - [ ] Decide whether `crawldb.frontier_queue` needs extra FK columns to directly reference `page` / `page_type` / `page_data` records, then add a migration if required.
 

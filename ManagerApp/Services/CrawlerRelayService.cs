@@ -1,4 +1,5 @@
 using System.Security.Cryptography;
+using System.Data;
 using System.Text;
 using System.Text.Json;
 using System.Xml.Linq;
@@ -159,7 +160,40 @@ public sealed class CrawlerRelayService
             }
         }
 
-        await context.SaveChangesAsync(cancellationToken);
+        try
+        {
+            await context.SaveChangesAsync(cancellationToken);
+        }
+        catch (DbUpdateException)
+        {
+            if (targetPage.Id == 0)
+            {
+                var targetEntry = context.Entry(targetPage);
+                if (targetEntry.State != EntityState.Detached)
+                {
+                    targetEntry.State = EntityState.Detached;
+                }
+            }
+
+            var racedPage = await context.Pages
+                .FirstOrDefaultAsync(page => page.Url == url, cancellationToken);
+            if (racedPage is null)
+            {
+                throw;
+            }
+
+            racedPage.SiteId ??= siteId;
+            racedPage.PageTypeCode = pageTypeCode;
+            racedPage.AccessedTime = accessedTime;
+            racedPage.HttpStatusCode = request.DownloadResult?.StatusCode;
+            racedPage.HtmlContent = pageTypeCode == "HTML" ? html : null;
+            racedPage.ContentHash = pageTypeCode == "HTML" ? contentHash : null;
+            racedPage.DuplicateOfPageId = null;
+
+            targetPage = racedPage;
+            status = "updated";
+            await context.SaveChangesAsync(cancellationToken);
+        }
 
         var canonicalTargetPageId = targetPage.DuplicateOfPageId ?? targetPage.Id;
 
@@ -754,22 +788,30 @@ public sealed class CrawlerRelayService
             return new List<string>();
         }
 
+        var filteredUrls = normalizedUrls
+            .Where(discoveredUrl => !string.Equals(discoveredUrl, sourcePage.Url, StringComparison.Ordinal))
+            .ToList();
+        if (filteredUrls.Count == 0)
+        {
+            return new List<string>();
+        }
+
         var knownTargets = await context.Pages
-            .Where(page => page.Url != null && normalizedUrls.Contains(page.Url))
+            .Where(page => page.Url != null && filteredUrls.Contains(page.Url))
             .ToDictionaryAsync(page => page.Url!, cancellationToken);
 
-        var targetPages = new List<Page>();
-        foreach (var discoveredUrl in normalizedUrls)
-        {
-            if (string.Equals(discoveredUrl, sourcePage.Url, StringComparison.Ordinal))
-            {
-                continue;
-            }
+        var missingUrls = filteredUrls
+            .Where(discoveredUrl => !knownTargets.ContainsKey(discoveredUrl))
+            .ToList();
 
-            if (!knownTargets.TryGetValue(discoveredUrl, out var targetPage))
+        if (missingUrls.Count > 0)
+        {
+            var siteIdCache = new Dictionary<string, int?>(StringComparer.OrdinalIgnoreCase);
+            var insertedTargets = new List<Page>(missingUrls.Count);
+            foreach (var discoveredUrl in missingUrls)
             {
-                var siteId = await ResolveSiteIdAsync(context, discoveredUrl, null, cancellationToken);
-                targetPage = new Page
+                var siteId = await ResolveSiteIdAsync(context, discoveredUrl, null, cancellationToken, siteIdCache);
+                insertedTargets.Add(new Page
                 {
                     SiteId = siteId,
                     PageTypeCode = "FRONTIER",
@@ -779,21 +821,75 @@ public sealed class CrawlerRelayService
                     AccessedTime = null,
                     ContentHash = null,
                     DuplicateOfPageId = null,
-                };
-                context.Pages.Add(targetPage);
-                knownTargets[discoveredUrl] = targetPage;
+                });
             }
 
-            targetPages.Add(targetPage);
+            context.Pages.AddRange(insertedTargets);
+            try
+            {
+                await context.SaveChangesAsync(cancellationToken);
+            }
+            catch (DbUpdateException)
+            {
+                // Another ingest worker inserted some of the same URLs concurrently.
+                foreach (var insertedTarget in insertedTargets)
+                {
+                    var entry = context.Entry(insertedTarget);
+                    if (entry.State != EntityState.Detached)
+                    {
+                        entry.State = EntityState.Detached;
+                    }
+                }
+            }
+
+            knownTargets = await context.Pages
+                .Where(page => page.Url != null && filteredUrls.Contains(page.Url))
+                .ToDictionaryAsync(page => page.Url!, cancellationToken);
+
+            var unresolvedUrls = missingUrls
+                .Where(discoveredUrl => !knownTargets.ContainsKey(discoveredUrl))
+                .ToList();
+            if (unresolvedUrls.Count > 0)
+            {
+                throw new InvalidOperationException(
+                    $"Failed to upsert discovered frontier URLs: {string.Join(", ", unresolvedUrls.Take(5))}");
+            }
         }
 
-        await context.SaveChangesAsync(cancellationToken);
+        var targetPages = filteredUrls
+            .Where(knownTargets.ContainsKey)
+            .Select(discoveredUrl => knownTargets[discoveredUrl])
+            .ToList();
 
-        foreach (var targetPage in targetPages)
+        var targetIds = targetPages
+            .Select(targetPage => targetPage.Id)
+            .Where(id => id > 0)
+            .Distinct()
+            .ToArray();
+        if (targetIds.Length > 0)
         {
-            await context.Database.ExecuteSqlInterpolatedAsync(
-                $"INSERT INTO crawldb.link(from_page, to_page) VALUES ({sourcePage.Id}, {targetPage.Id}) ON CONFLICT DO NOTHING",
-                cancellationToken);
+            var connection = context.Database.GetDbConnection() as NpgsqlConnection;
+            if (connection is null)
+            {
+                throw new InvalidOperationException("Expected Npgsql connection for crawldb context.");
+            }
+
+            if (connection.State != ConnectionState.Open)
+            {
+                await connection.OpenAsync(cancellationToken);
+            }
+
+            const string linkSql = """
+                INSERT INTO crawldb.link(from_page, to_page)
+                SELECT @from_page, target_id
+                FROM unnest(@target_ids) AS target_id
+                ON CONFLICT DO NOTHING;
+                """;
+
+            await using var linkCmd = new NpgsqlCommand(linkSql, connection);
+            linkCmd.Parameters.AddWithValue("from_page", sourcePage.Id);
+            linkCmd.Parameters.AddWithValue("target_ids", targetIds);
+            await linkCmd.ExecuteNonQueryAsync(cancellationToken);
         }
 
         return targetPages
@@ -809,7 +905,8 @@ public sealed class CrawlerRelayService
         CrawldbContext context,
         string url,
         int? explicitSiteId,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        Dictionary<string, int?>? siteIdCache = null)
     {
         if (explicitSiteId.HasValue && explicitSiteId.Value > 0)
         {
@@ -822,9 +919,16 @@ public sealed class CrawlerRelayService
         }
 
         var host = uri.Host.ToLowerInvariant();
+
+        if (siteIdCache is not null && siteIdCache.TryGetValue(host, out var cachedSiteId))
+        {
+            return cachedSiteId;
+        }
+
         var site = await context.Sites.FirstOrDefaultAsync(s => s.Domain == host, cancellationToken);
         if (site != null)
         {
+            siteIdCache?[host] = site.Id;
             return site.Id;
         }
 
@@ -835,8 +939,24 @@ public sealed class CrawlerRelayService
             SitemapContent = string.Empty,
         };
         context.Sites.Add(site);
-        await context.SaveChangesAsync(cancellationToken);
-        return site.Id;
+        try
+        {
+            await context.SaveChangesAsync(cancellationToken);
+            siteIdCache?[host] = site.Id;
+            return site.Id;
+        }
+        catch (DbUpdateException)
+        {
+            context.Entry(site).State = EntityState.Detached;
+            site = await context.Sites.FirstOrDefaultAsync(s => s.Domain == host, cancellationToken);
+            if (site != null)
+            {
+                siteIdCache?[host] = site.Id;
+                return site.Id;
+            }
+
+            throw;
+        }
     }
 
     private async Task<List<string>> EnqueueSitemapDiscoveredUrlsAsync(
