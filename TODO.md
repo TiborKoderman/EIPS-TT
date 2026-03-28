@@ -13,10 +13,10 @@ Last rebuilt: 2026-03-26
 
 #### Phase A - Server Frontier Ownership (ManagerApp)
 
-- [ ] [webserver] Add a dedicated frontier service in ManagerApp that owns queue claim/lease/state transitions.
-- [ ] [webserver] Expose server endpoints for daemon frontier operations (`next`, `complete`, `failed`, `duplicate`, `add_discovered`, `stats`).
-- [ ] [webserver] Ensure daemon token-auth on frontier endpoints.
-- [ ] [webserver] Make all state transitions atomic and lease-token validated.
+- [x] [webserver] Add a dedicated frontier service in ManagerApp that owns queue claim/lease/state transitions.
+- [x] [webserver] Expose server endpoints for daemon frontier operations (`next`, `complete`, `failed`, `duplicate`, `add_discovered`, `stats`).
+- [x] [webserver] Ensure daemon token-auth on frontier endpoints.
+- [x] [webserver] Make all state transitions atomic and lease-token validated.
 
 #### Phase B - Daemon Queue Simplification
 
@@ -41,7 +41,7 @@ Last rebuilt: 2026-03-26
 
 #### Phase E - Verification and documentation
 
-- [ ] [crawler+webserver+database] Verify frontier, politeness, and scheduling are server-owned and functioning.
+- [x] [crawler+webserver+database] Verify frontier, politeness, and scheduling are server-owned and functioning.
 - [ ] [crawler+webserver] Functional verification with active daemon and multiple workers.
 - [ ] [webserver] GUI verification (worker controls, queue behavior, registration flow).
 - [x] [docs] Update README/module docs for websocket-only architecture.
@@ -49,9 +49,9 @@ Last rebuilt: 2026-03-26
 
 ### Feature replacement matrix (what is removed from crawler and must remain server-side)
 
-- [ ] Queue ordering and claim policy: server-side frontier service.
-- [ ] Lease creation/expiry/recovery: server-side frontier service.
-- [ ] Queue state transitions (`QUEUED/LOCKED/PROCESSING/COMPLETED/DUPLICATE/FAILED`): server-side frontier service.
+- [x] Queue ordering and claim policy: server-side frontier service.
+- [x] Lease creation/expiry/recovery: server-side frontier service.
+- [x] Queue state transitions (`QUEUED/LOCKED/PROCESSING/COMPLETED/DUPLICATE/FAILED`): server-side frontier service.
 - [ ] Collision/duplicate queue suppression across workers/daemons: server-side frontier service.
 - [ ] Politeness scheduling (per-IP/per-domain pacing): server-side scheduler/politeness service.
 - [ ] Robots allow/disallow gate for queueing: server-side policy gate for discovered URLs.
@@ -83,6 +83,7 @@ Last rebuilt: 2026-03-26
 - [x] Added `/api/frontier/dequeue` endpoint for chunk-style claims scoped by worker IDs.
 - [x] Added manager client method `DequeueFrontierAsync(...)` for the new dequeue API.
 - [x] Improved worker failure telemetry to log fetch/parse stage in status reason and warnings.
+- [x] Smoke-tested `/api/frontier/status`, `/api/frontier/claim`, `/api/frontier/complete`, and `/api/frontier/dequeue` against live manager+daemon runtime (including requeue via `status=queued`).
 
 ## Pending follow-ups
 

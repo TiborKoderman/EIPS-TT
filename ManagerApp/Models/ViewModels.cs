@@ -299,6 +299,7 @@ public class FrontierClaimViewModel
     public string? LeaseToken { get; set; }
     public int LeaseTtlSeconds { get; set; }
     public string? Source { get; set; }
+    public string? SourceUrl { get; set; }
 }
 
 /// <summary>
@@ -322,6 +323,7 @@ public class FrontierDequeueItemViewModel
     public string? LeaseToken { get; set; }
     public int LeaseTtlSeconds { get; set; }
     public string? Source { get; set; }
+    public string? SourceUrl { get; set; }
 }
 
 public class FrontierDequeueBatchViewModel

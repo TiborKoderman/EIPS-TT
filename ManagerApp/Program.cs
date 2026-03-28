@@ -26,6 +26,7 @@ builder.Services.AddScoped<IGraphService, GraphService>();
 builder.Services.AddScoped<IPageService, PageService>();
 builder.Services.AddSingleton<DaemonChannelService>();
 builder.Services.AddSingleton<CrawlerRelayService>();
+builder.Services.AddSingleton<FrontierService>();
 builder.Services.AddHostedService<LocalDaemonHostedService>();
 builder.Services.AddHostedService<CommandDispatchHostedService>();
 builder.Services.AddScoped<IWorkerService, ReverseChannelWorkerService>();
@@ -103,6 +104,164 @@ app.MapGet("/api/crawler/events", (int? limit, CrawlerRelayService relay) =>
             payloadJson = evt.PayloadJson,
         })
     });
+});
+
+app.MapPost("/api/frontier/seed", async (
+    HttpContext context,
+    FrontierSeedRequest request,
+    FrontierService frontier,
+    IConfiguration configuration,
+    CancellationToken cancellationToken) =>
+{
+    if (!IsDaemonRequestAuthorized(context, configuration))
+    {
+        return Results.Unauthorized();
+    }
+
+    if (string.IsNullOrWhiteSpace(request.Url))
+    {
+        return Results.BadRequest(new { ok = false, error = "Payload must include a non-empty 'url'." });
+    }
+
+    var queued = await frontier.EnqueueAsync(
+        request.Url,
+        request.Priority ?? 0,
+        request.Depth ?? 0,
+        request.SourceUrl,
+        cancellationToken);
+
+    return Results.Ok(new
+    {
+        ok = true,
+        data = new
+        {
+            queued,
+            url = request.Url.Trim(),
+        },
+    });
+});
+
+app.MapPost("/api/frontier/claim", async (
+    HttpContext context,
+    FrontierClaimRequest request,
+    FrontierService frontier,
+    IConfiguration configuration,
+    CancellationToken cancellationToken) =>
+{
+    if (!IsDaemonRequestAuthorized(context, configuration))
+    {
+        return Results.Unauthorized();
+    }
+
+    if (request.WorkerId <= 0)
+    {
+        return Results.BadRequest(new { ok = false, error = "Payload must include a positive workerId." });
+    }
+
+    var claim = await frontier.ClaimAsync(request.WorkerId, cancellationToken);
+    return Results.Ok(new { ok = true, data = claim });
+});
+
+app.MapPost("/api/frontier/complete", async (
+    HttpContext context,
+    FrontierCompleteRequest request,
+    FrontierService frontier,
+    IConfiguration configuration,
+    CancellationToken cancellationToken) =>
+{
+    if (!IsDaemonRequestAuthorized(context, configuration))
+    {
+        return Results.Unauthorized();
+    }
+
+    if (request.WorkerId <= 0 || string.IsNullOrWhiteSpace(request.Url))
+    {
+        return Results.BadRequest(new { ok = false, error = "Payload must include workerId and non-empty url." });
+    }
+
+    var completed = await frontier.CompleteAsync(
+        request.WorkerId,
+        request.Url,
+        request.LeaseToken,
+        request.Status,
+        cancellationToken);
+
+    return Results.Ok(new
+    {
+        ok = true,
+        data = new
+        {
+            completed,
+            workerId = request.WorkerId,
+            url = request.Url.Trim(),
+            status = string.IsNullOrWhiteSpace(request.Status) ? "completed" : request.Status.Trim().ToLowerInvariant(),
+        },
+    });
+});
+
+app.MapPost("/api/frontier/prune", async (
+    HttpContext context,
+    FrontierPruneRequest request,
+    FrontierService frontier,
+    IConfiguration configuration,
+    CancellationToken cancellationToken) =>
+{
+    if (!IsDaemonRequestAuthorized(context, configuration))
+    {
+        return Results.Unauthorized();
+    }
+
+    if (request.WorkerId <= 0 || string.IsNullOrWhiteSpace(request.Url))
+    {
+        return Results.BadRequest(new { ok = false, error = "Payload must include workerId and non-empty url." });
+    }
+
+    var pruned = await frontier.PruneAsync(request.WorkerId, request.Url, cancellationToken);
+    return Results.Ok(new
+    {
+        ok = true,
+        data = new
+        {
+            pruned,
+            workerId = request.WorkerId,
+            url = request.Url.Trim(),
+        },
+    });
+});
+
+app.MapGet("/api/frontier/status", async (
+    HttpContext context,
+    FrontierService frontier,
+    IConfiguration configuration,
+    CancellationToken cancellationToken) =>
+{
+    if (!IsDaemonRequestAuthorized(context, configuration))
+    {
+        return Results.Unauthorized();
+    }
+
+    var status = await frontier.GetStatusAsync(cancellationToken);
+    return Results.Ok(new { ok = true, data = status });
+});
+
+app.MapPost("/api/frontier/dequeue", async (
+    HttpContext context,
+    FrontierDequeueRequest request,
+    FrontierService frontier,
+    IConfiguration configuration,
+    CancellationToken cancellationToken) =>
+{
+    if (!IsDaemonRequestAuthorized(context, configuration))
+    {
+        return Results.Unauthorized();
+    }
+
+    var batch = await frontier.DequeueAsync(
+        request.WorkerIds,
+        request.Limit,
+        request.DaemonId,
+        cancellationToken);
+    return Results.Ok(new { ok = true, data = batch });
 });
 
 app.MapGet("/api/pages/{pageId:int}/images/{imageId:int}", async (
@@ -349,4 +508,34 @@ static void ApplyEnvFile(string filePath)
 static int ParsePort(string? rawPort, int fallback)
 {
     return int.TryParse(rawPort, out var parsed) ? parsed : fallback;
+}
+
+static bool IsDaemonRequestAuthorized(HttpContext context, IConfiguration configuration)
+{
+    var requiredToken = (configuration["CrawlerApi:FrontierApiToken"] ?? string.Empty).Trim();
+    if (string.IsNullOrWhiteSpace(requiredToken))
+    {
+        requiredToken = (configuration["CrawlerApi:DaemonChannelToken"] ?? string.Empty).Trim();
+    }
+
+    if (string.IsNullOrWhiteSpace(requiredToken))
+    {
+        return true;
+    }
+
+    var authHeader = context.Request.Headers.Authorization.ToString();
+    if (!string.IsNullOrWhiteSpace(authHeader)
+        && authHeader.StartsWith("Bearer ", StringComparison.OrdinalIgnoreCase)
+        && string.Equals(authHeader[7..].Trim(), requiredToken, StringComparison.Ordinal))
+    {
+        return true;
+    }
+
+    if (context.Request.Query.TryGetValue("token", out var queryToken)
+        && string.Equals(queryToken.ToString().Trim(), requiredToken, StringComparison.Ordinal))
+    {
+        return true;
+    }
+
+    return false;
 }

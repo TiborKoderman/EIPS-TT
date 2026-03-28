@@ -150,12 +150,23 @@ public sealed class LocalDaemonHostedService : IHostedService
             startInfo.Environment["CRAWLER_DAEMON_ID"] = daemonId;
             startInfo.Environment["MANAGER_DAEMON_WS_URL"] = wsUrl;
             var daemonChannelToken = (_configuration["CrawlerApi:DaemonChannelToken"] ?? string.Empty).Trim();
+            var frontierApiToken = (_configuration["CrawlerApi:FrontierApiToken"] ?? daemonChannelToken).Trim();
             if (!string.IsNullOrWhiteSpace(daemonChannelToken))
             {
                 startInfo.Environment["MANAGER_DAEMON_WS_TOKEN"] = daemonChannelToken;
             }
             startInfo.Environment["MANAGER_INGEST_API_URL"] = managerHttpBaseUrl.TrimEnd('/') + "/api/crawler/ingest";
             startInfo.Environment["MANAGER_EVENT_API_URL"] = managerHttpBaseUrl.TrimEnd('/') + "/api/crawler/events";
+            startInfo.Environment["MANAGER_FRONTIER_INGEST_URL"] = managerHttpBaseUrl.TrimEnd('/') + "/api/frontier/seed";
+            startInfo.Environment["MANAGER_FRONTIER_CLAIM_URL"] = managerHttpBaseUrl.TrimEnd('/') + "/api/frontier/claim";
+            startInfo.Environment["MANAGER_FRONTIER_COMPLETE_URL"] = managerHttpBaseUrl.TrimEnd('/') + "/api/frontier/complete";
+            startInfo.Environment["MANAGER_FRONTIER_STATUS_URL"] = managerHttpBaseUrl.TrimEnd('/') + "/api/frontier/status";
+            startInfo.Environment["CRAWLER_DAEMON_ALLOW_LOCAL_FALLBACK"] = "false";
+            if (!string.IsNullOrWhiteSpace(frontierApiToken))
+            {
+                startInfo.Environment["MANAGER_FRONTIER_INGEST_TOKEN"] = frontierApiToken;
+                startInfo.Environment["MANAGER_INGEST_API_TOKEN"] = frontierApiToken;
+            }
             startInfo.Environment["MANAGER_PARENT_PID"] = Environment.ProcessId.ToString();
 
             _process = new Process

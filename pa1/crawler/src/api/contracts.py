@@ -97,7 +97,7 @@ class GlobalWorkerConfig:
     request_timeout_seconds: int = 20
     crawl_delay_milliseconds: int = 300
     respect_robots_txt: bool = True
-    user_agent: str = "EIPS-TT-Crawler/1.0"
+    user_agent: str = "fri-wier-T"
     seed_urls: list[str] = field(default_factory=list)
     seed_entries: list[SeedEntry] = field(default_factory=default_seed_entries)
     queue_mode: str = "both"

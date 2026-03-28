@@ -146,9 +146,26 @@ class DaemonWorkerService(WorkerControlService):
 
         self._frontier_relay_url = os.getenv("MANAGER_FRONTIER_INGEST_URL", "").strip() or None
         self._frontier_relay_token = os.getenv("MANAGER_FRONTIER_INGEST_TOKEN", "").strip() or None
+        self._frontier_claim_url = os.getenv("MANAGER_FRONTIER_CLAIM_URL", "").strip() or None
+        self._frontier_complete_url = os.getenv("MANAGER_FRONTIER_COMPLETE_URL", "").strip() or None
+        self._frontier_status_url = os.getenv("MANAGER_FRONTIER_STATUS_URL", "").strip() or None
         self._manager_ingest_url = os.getenv("MANAGER_INGEST_API_URL", "").strip() or None
         self._manager_event_url = os.getenv("MANAGER_EVENT_API_URL", "").strip() or None
         self._manager_api_token = os.getenv("MANAGER_INGEST_API_TOKEN", "").strip() or None
+        if self._frontier_relay_url is None:
+            self._frontier_relay_url = self._derive_manager_api_url("/api/frontier/seed")
+        if self._frontier_claim_url is None:
+            self._frontier_claim_url = self._derive_manager_api_url("/api/frontier/claim")
+        if self._frontier_complete_url is None:
+            self._frontier_complete_url = self._derive_manager_api_url("/api/frontier/complete")
+        if self._frontier_status_url is None:
+            self._frontier_status_url = self._derive_manager_api_url("/api/frontier/status")
+        if not self._frontier_relay_token:
+            self._frontier_relay_token = (
+                self._manager_api_token
+                or os.getenv("MANAGER_DAEMON_WS_TOKEN", "").strip()
+                or None
+            )
         self._pending_manager_events: deque[dict[str, object | None]] = deque(maxlen=1000)
         self._manager_event_relay_degraded = False
         allow_local_fallback_raw = os.getenv(
@@ -1537,12 +1554,20 @@ class DaemonWorkerService(WorkerControlService):
 
     def _claim_next_frontier_url(self, worker_id: int) -> FrontierLease | None:
         self._purge_expired_frontier_state()
+        queue_mode = self._global_config.queue_mode
 
         active = self._active_claim_by_worker.get(worker_id)
         if active is not None:
             active.expires_at_monotonic = time.monotonic() + self._lease_ttl_seconds
             self._frontier_leases[active.url] = active
             return active
+
+        if queue_mode in {"server", "both"}:
+            server_lease = self._claim_frontier_url_from_manager(worker_id)
+            if server_lease is not None:
+                return server_lease
+            if queue_mode == "server" and not self._allow_daemon_local_fallback:
+                return None
 
         local_lease = self._claim_from_worker_local_queue(worker_id)
         if local_lease is not None:
@@ -1706,6 +1731,15 @@ class DaemonWorkerService(WorkerControlService):
         if lease_token and lease.token != lease_token:
             return False
 
+        completed_on_manager = True
+        if lease.source == "server":
+            completed_on_manager = self._complete_frontier_claim_on_manager(
+                worker_id,
+                url,
+                lease_token,
+                status,
+            )
+
         self._frontier_leases.pop(url, None)
         active = self._active_claim_by_worker.get(worker_id)
         if active is not None and active.url == url:
@@ -1722,10 +1756,12 @@ class DaemonWorkerService(WorkerControlService):
                 "url": url,
                 "workerId": worker_id,
                 "status": status,
+                "source": lease.source,
+                "managerSynced": completed_on_manager,
                 "tombstoneTtlSeconds": self._tombstone_ttl_seconds,
             },
         )
-        return True
+        return completed_on_manager
 
     def _prune_worker_local_url(self, worker_id: int, url: str, reason: str) -> bool:
         queue = self._worker_local_queues.get(worker_id)
@@ -1759,8 +1795,22 @@ class DaemonWorkerService(WorkerControlService):
         if active is None:
             return
 
+        manager_synced = True
+        if active.source == "server":
+            manager_synced = self._complete_frontier_claim_on_manager(
+                worker_id,
+                active.url,
+                active.token,
+                "queued" if requeue else "failed",
+            )
+
         self._frontier_leases.pop(active.url, None)
-        if requeue and not self._is_tombstoned(active.url) and active.url not in self._known_frontier_urls:
+        if (
+            active.source != "server"
+            and requeue
+            and not self._is_tombstoned(active.url)
+            and active.url not in self._known_frontier_urls
+        ):
             self._known_frontier_urls.add(active.url)
             self._frontier_queue.appendleft(active.url)
             self._frontier_metadata[active.url] = FrontierMetadata(
@@ -1780,6 +1830,8 @@ class DaemonWorkerService(WorkerControlService):
                 "workerId": worker_id,
                 "requeued": requeue,
                 "reason": reason,
+                "source": active.source,
+                "managerSynced": manager_synced,
             },
         )
 
@@ -1796,6 +1848,19 @@ class DaemonWorkerService(WorkerControlService):
             active = self._active_claim_by_worker.get(lease.worker_id)
             if active is not None and active.url == url:
                 self._active_claim_by_worker.pop(lease.worker_id, None)
+            if lease.source == "server":
+                self._emit_manager_event(
+                    "frontier-lease-expired",
+                    worker_id=lease.worker_id,
+                    payload={
+                        "url": url,
+                        "workerId": lease.worker_id,
+                        "source": lease.source,
+                        "action": "manager-expiry",
+                    },
+                )
+                continue
+
             if url not in self._known_frontier_urls and not self._is_tombstoned(url):
                 self._known_frontier_urls.add(url)
                 self._frontier_queue.appendleft(url)
@@ -1811,6 +1876,7 @@ class DaemonWorkerService(WorkerControlService):
                     payload={
                         "url": url,
                         "workerId": lease.worker_id,
+                        "source": lease.source,
                         "action": "requeued",
                     },
                 )
@@ -1923,6 +1989,111 @@ class DaemonWorkerService(WorkerControlService):
             self._completed_tombstones.pop(url, None)
             return False
         return True
+
+    def _claim_frontier_url_from_manager(self, worker_id: int) -> FrontierLease | None:
+        if self._frontier_claim_url is None:
+            return None
+
+        response = self._post_manager_json_response(
+            self._frontier_claim_url,
+            {"workerId": worker_id},
+            token_override=self._frontier_relay_token,
+        )
+        data = self._extract_manager_response_data(response)
+        if not isinstance(data, dict):
+            return None
+        if not bool(data.get("claimed")):
+            return None
+
+        raw_url = str(data.get("url") or "").strip()
+        if not raw_url:
+            return None
+        normalized_url = self._normalize_frontier_url(raw_url) or raw_url
+
+        token_raw = data.get("leaseToken")
+        lease_token = str(token_raw).strip() if token_raw is not None else ""
+        if not lease_token:
+            lease_token = secrets.token_hex(12)
+
+        lease_ttl_seconds = max(5, _coerce_int(data.get("leaseTtlSeconds"), self._lease_ttl_seconds))
+        source_url = None
+        source_url_raw = data.get("sourceUrl")
+        if source_url_raw is None:
+            source_url_raw = data.get("source_url")
+        if source_url_raw is not None:
+            source_url_candidate = str(source_url_raw).strip()
+            source_url = self._normalize_frontier_url(source_url_candidate) or None
+        priority = _coerce_int(data.get("priority"), 0)
+        depth = max(0, _coerce_int(data.get("depth"), 0))
+
+        lease = FrontierLease(
+            url=normalized_url,
+            worker_id=worker_id,
+            token=lease_token,
+            expires_at_monotonic=time.monotonic() + lease_ttl_seconds,
+            source="server",
+            depth=depth,
+            priority=priority,
+            source_url=source_url,
+        )
+        self._frontier_leases[normalized_url] = lease
+        self._active_claim_by_worker[worker_id] = lease
+        self._reserve_site_slot(normalized_url)
+        self._emit_manager_event(
+            "frontier-lease",
+            worker_id=worker_id,
+            payload={
+                "url": normalized_url,
+                "workerId": worker_id,
+                "source": "server",
+                "leaseTtlSeconds": lease_ttl_seconds,
+                "priority": priority,
+                "depth": depth,
+            },
+        )
+        self._emit_manager_event(
+            "queue-change",
+            worker_id=worker_id,
+            payload={
+                "action": "claim-server",
+                "url": normalized_url,
+                "workerId": worker_id,
+                "inMemoryQueued": len(self._frontier_queue),
+                "localQueued": sum(len(queue) for queue in self._worker_local_queues.values()),
+                "priority": priority,
+                "depth": depth,
+            },
+        )
+        return lease
+
+    def _complete_frontier_claim_on_manager(
+        self,
+        worker_id: int,
+        url: str,
+        lease_token: str | None,
+        status: str,
+    ) -> bool:
+        if self._frontier_complete_url is None:
+            return False
+
+        response = self._post_manager_json_response(
+            self._frontier_complete_url,
+            {
+                "workerId": worker_id,
+                "url": url,
+                "leaseToken": lease_token,
+                "status": status,
+            },
+            token_override=self._frontier_relay_token,
+        )
+        data = self._extract_manager_response_data(response)
+        if isinstance(data, dict) and "completed" in data:
+            return bool(data.get("completed"))
+        if isinstance(data, bool):
+            return data
+        if isinstance(response, dict):
+            return bool(response.get("ok"))
+        return False
 
     def _relay_frontier_seed(
         self,
@@ -2235,21 +2406,95 @@ class DaemonWorkerService(WorkerControlService):
     def _worker_name(worker_id: int) -> str:
         return f"Worker-{worker_id}"
 
+    def _derive_manager_api_url(self, path: str) -> str | None:
+        normalized_path = path if path.startswith("/") else f"/{path}"
+        candidates = [
+            self._manager_ingest_url,
+            self._manager_event_url,
+            os.getenv("MANAGER_HTTP_BASE_URL", "").strip() or None,
+            os.getenv("MANAGER_SERVER_URL", "").strip() or None,
+            os.getenv("MANAGER_DAEMON_WS_URL", "").strip() or None,
+        ]
+        for candidate in candidates:
+            base = self._normalize_manager_http_base(candidate)
+            if base:
+                return f"{base}{normalized_path}"
+        return None
+
+    @staticmethod
+    def _normalize_manager_http_base(raw_url: str | None) -> str | None:
+        if raw_url is None:
+            return None
+        candidate = raw_url.strip()
+        if not candidate:
+            return None
+
+        parsed = urlparse(candidate)
+        if not parsed.netloc:
+            return None
+
+        if parsed.scheme == "wss":
+            scheme = "https"
+        elif parsed.scheme == "ws":
+            scheme = "http"
+        elif parsed.scheme in {"http", "https"}:
+            scheme = parsed.scheme
+        else:
+            return None
+
+        return f"{scheme}://{parsed.netloc}".rstrip("/")
+
     def _post_manager_json(self, url: str, payload: object) -> bool:
+        return self._post_manager_json_response(url, payload) is not None
+
+    def _post_manager_json_response(
+        self,
+        url: str,
+        payload: object,
+        *,
+        token_override: str | None = None,
+        timeout_seconds: float = 2.5,
+    ) -> dict[str, object] | None:
         data = json.dumps(payload).encode("utf-8")
         headers = {
             "Content-Type": "application/json",
             "Accept": "application/json",
         }
-        if self._manager_api_token:
-            headers["Authorization"] = f"Bearer {self._manager_api_token}"
+        token = token_override if token_override is not None else self._manager_api_token
+        if token:
+            headers["Authorization"] = f"Bearer {token}"
 
         req = request.Request(url, data=data, headers=headers, method="POST")
         try:
-            with request.urlopen(req, timeout=2.5):
-                return True
-        except (error.URLError, TimeoutError, OSError):
-            return False
+            with request.urlopen(req, timeout=timeout_seconds) as resp:
+                raw = resp.read()
+        except (error.HTTPError, error.URLError, TimeoutError, OSError):
+            return None
+
+        if not raw:
+            return {"ok": True}
+
+        try:
+            parsed = json.loads(raw.decode("utf-8"))
+        except (UnicodeDecodeError, json.JSONDecodeError):
+            return {"ok": True}
+
+        if isinstance(parsed, dict):
+            if "ok" not in parsed:
+                parsed["ok"] = True
+            return parsed
+
+        return {"ok": True, "data": parsed}
+
+    @staticmethod
+    def _extract_manager_response_data(response: dict[str, object] | None) -> object | None:
+        if response is None:
+            return None
+
+        if "data" in response:
+            return response.get("data")
+
+        return response
 
     @staticmethod
     def _copy_worker(worker: WorkerRecord | None) -> WorkerRecord:
