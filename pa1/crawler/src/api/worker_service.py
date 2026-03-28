@@ -1359,6 +1359,83 @@ class DaemonWorkerService(WorkerControlService):
 
         return best
 
+    @staticmethod
+    def _build_frontier_metadata(
+        *,
+        priority: int,
+        depth: int,
+        source_url: str | None,
+        discovered_at_monotonic: float | None = None,
+    ) -> FrontierMetadata:
+        return FrontierMetadata(
+            priority=priority,
+            depth=depth,
+            source_url=source_url,
+            discovered_at_monotonic=discovered_at_monotonic or time.monotonic(),
+        )
+
+    @classmethod
+    def _merge_frontier_metadata(
+        cls,
+        existing: FrontierMetadata,
+        *,
+        priority: int,
+        depth: int,
+        source_url: str | None,
+    ) -> FrontierMetadata:
+        return cls._build_frontier_metadata(
+            priority=max(existing.priority, priority),
+            depth=min(existing.depth, depth),
+            source_url=existing.source_url or source_url,
+            discovered_at_monotonic=existing.discovered_at_monotonic,
+        )
+
+    def _resolve_frontier_enqueue_candidate(
+        self,
+        raw_url: str,
+        *,
+        source_url: str | None,
+        depth: int,
+        explicit_priority: int | None,
+        worker_id: int | None = None,
+    ) -> tuple[str, int] | None:
+        candidate = self._normalize_frontier_url(raw_url, base_url=source_url)
+        if not candidate:
+            return None
+
+        self._purge_expired_frontier_state()
+        if self._is_tombstoned(candidate):
+            return None
+
+        robots_allowed, robots_policy = self._robots_policy_allows_enqueue(candidate)
+        if not robots_allowed:
+            payload: dict[str, object | None] = {
+                "url": candidate,
+                "reason": "robots-disallow",
+                "robotsUrl": robots_policy.robots_url if robots_policy else None,
+            }
+            if worker_id is not None:
+                payload["workerId"] = worker_id
+
+            self._emit_manager_event(
+                "frontier-prune",
+                worker_id=worker_id,
+                payload=payload,
+            )
+            return None
+
+        priority_value = explicit_priority
+        if priority_value is None:
+            policy = self._build_relevance_policy()
+            priority_value = int(round(score_url(
+                candidate,
+                parent_url=source_url,
+                depth=depth,
+                policy=policy,
+            )))
+
+        return candidate, priority_value
+
     def _enqueue_frontier_url(
         self,
         raw_url: str,
@@ -1367,44 +1444,26 @@ class DaemonWorkerService(WorkerControlService):
         depth: int = 0,
         explicit_priority: int | None = None,
     ) -> bool:
-        candidate = self._normalize_frontier_url(raw_url, base_url=source_url)
-        if not candidate:
+        resolved = self._resolve_frontier_enqueue_candidate(
+            raw_url,
+            source_url=source_url,
+            depth=depth,
+            explicit_priority=explicit_priority,
+        )
+        if resolved is None:
             return False
-        self._purge_expired_frontier_state()
+
+        candidate, priority_value = resolved
         prevent_collisions = bool(self._global_config.avoid_duplicate_paths_across_daemons)
-        if self._is_tombstoned(candidate):
-            return False
-
-        robots_allowed, robots_policy = self._robots_policy_allows_enqueue(candidate)
-        if not robots_allowed:
-            self._emit_manager_event(
-                "frontier-prune",
-                payload={
-                    "url": candidate,
-                    "reason": "robots-disallow",
-                    "robotsUrl": robots_policy.robots_url if robots_policy else None,
-                },
-            )
-            return False
-
-        policy = self._build_relevance_policy()
-        priority_value = explicit_priority
-        if priority_value is None:
-            priority_value = int(round(score_url(
-                candidate,
-                parent_url=source_url,
-                depth=depth,
-                policy=policy,
-            )))
 
         if prevent_collisions and self._is_url_active_any_queue(candidate):
             existing = self._frontier_metadata.get(candidate)
             if existing is not None:
-                self._frontier_metadata[candidate] = FrontierMetadata(
-                    priority=max(existing.priority, priority_value),
-                    depth=min(existing.depth, depth),
-                    source_url=existing.source_url or source_url,
-                    discovered_at_monotonic=existing.discovered_at_monotonic,
+                self._frontier_metadata[candidate] = self._merge_frontier_metadata(
+                    existing,
+                    priority=priority_value,
+                    depth=depth,
+                    source_url=source_url,
                 )
             self._emit_manager_event(
                 "frontier-prune",
@@ -1442,11 +1501,10 @@ class DaemonWorkerService(WorkerControlService):
 
         if should_enqueue_local:
             self._known_frontier_urls.add(candidate)
-            self._frontier_metadata[candidate] = FrontierMetadata(
+            self._frontier_metadata[candidate] = self._build_frontier_metadata(
                 priority=priority_value,
                 depth=depth,
                 source_url=source_url,
-                discovered_at_monotonic=time.monotonic(),
             )
         if should_enqueue_local:
             self._frontier_queue.append(candidate)
@@ -1475,47 +1533,28 @@ class DaemonWorkerService(WorkerControlService):
         depth: int = 0,
         explicit_priority: int | None = None,
     ) -> bool:
-        candidate = self._normalize_frontier_url(raw_url, base_url=source_url)
-        if not candidate:
+        resolved = self._resolve_frontier_enqueue_candidate(
+            raw_url,
+            source_url=source_url,
+            depth=depth,
+            explicit_priority=explicit_priority,
+            worker_id=worker_id,
+        )
+        if resolved is None:
             return False
-        self._purge_expired_frontier_state()
+
+        candidate, priority_value = resolved
         local_known = self._worker_local_known_urls[worker_id]
         prevent_collisions = self._collision_prevention_enabled_for_worker(worker_id)
-        if self._is_tombstoned(candidate):
-            return False
-
-        robots_allowed, robots_policy = self._robots_policy_allows_enqueue(candidate)
-        if not robots_allowed:
-            self._emit_manager_event(
-                "frontier-prune",
-                worker_id=worker_id,
-                payload={
-                    "url": candidate,
-                    "reason": "robots-disallow",
-                    "workerId": worker_id,
-                    "robotsUrl": robots_policy.robots_url if robots_policy else None,
-                },
-            )
-            return False
-
-        policy = self._build_relevance_policy()
-        priority_value = explicit_priority
-        if priority_value is None:
-            priority_value = int(round(score_url(
-                candidate,
-                parent_url=source_url,
-                depth=depth,
-                policy=policy,
-            )))
 
         if candidate in local_known:
             existing = self._worker_local_metadata[worker_id].get(candidate)
             if existing is not None:
-                self._worker_local_metadata[worker_id][candidate] = FrontierMetadata(
-                    priority=max(existing.priority, priority_value),
-                    depth=min(existing.depth, depth),
-                    source_url=existing.source_url or source_url,
-                    discovered_at_monotonic=existing.discovered_at_monotonic,
+                self._worker_local_metadata[worker_id][candidate] = self._merge_frontier_metadata(
+                    existing,
+                    priority=priority_value,
+                    depth=depth,
+                    source_url=source_url,
                 )
             return False
         if prevent_collisions and self._is_url_active_any_queue(candidate):
@@ -1532,11 +1571,10 @@ class DaemonWorkerService(WorkerControlService):
 
         self._worker_local_queues[worker_id].append(candidate)
         local_known.add(candidate)
-        self._worker_local_metadata[worker_id][candidate] = FrontierMetadata(
+        self._worker_local_metadata[worker_id][candidate] = self._build_frontier_metadata(
             priority=priority_value,
             depth=depth,
             source_url=source_url,
-            discovered_at_monotonic=time.monotonic(),
         )
         self._emit_manager_event(
             "queue-change",
