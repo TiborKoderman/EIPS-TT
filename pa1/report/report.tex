@@ -26,14 +26,12 @@ In this project, we built a standalone preferential crawler for the MedOverNet d
 
 The crawler is designed as a multi-worker system with a database-backed frontier. Each worker takes one URL, checks robots and politeness limits, downloads or renders the page, detects duplicates, stores the result, extracts new links and images, scores discovered URLs, and pushes them back to the frontier.
 
-This report is a first draft foundation. We describe implemented components and design decisions. Where final run outputs are still missing, we mark clear placeholders for later completion.
-
-\section{System Architecture and Implementation}
+\section{System architecture and implementation}
 \subsection{High-level pipeline}
 The crawler processes each URL in the following order:
 \begin{enumerate}
-    \item Claim next URL from the frontier (highest score first).
-    \item Skip re-download if the URL was already processed (only update link metadata).
+    \item Claim next URL from the frontier.
+    \item If the canonical URL already exists in \texttt{crawldb.page} as \texttt{HTML/BINARY/DUPLICATE}, do not re-download; only insert the \texttt{link} record (from the source page to the already-known target).
     \item Check robots rules and enforce politeness delay.
     \item Download content (or render with headless browser when needed).
     \item Detect exact duplicates using content hash.
@@ -53,6 +51,15 @@ The implementation is split into clear modules:
     \item Robots and politeness: \texttt{robots.py}, \texttt{politeness.py}.
 \end{itemize}
 
+\subsection{Frontier queue semantics}
+The URL frontier is implemented directly in \texttt{crawldb.page}: each queued URL is stored as a row with \texttt{page\_type\_code = FRONTIER}.
+We store \emph{only canonicalized absolute URLs}.
+
+Enqueue is concurrency-safe and relies on a uniqueness constraint on urls: if a URL already exists in \texttt{crawldb.page},
+it is not enqueued again.
+
+If a fetch fails, the frontier item is rescheduled by pushing \texttt{frontier\_next\_fetch\_time} into the future.
+
 \subsection{Division of work}
 \textbf{Implemented in this part of the report draft:}
 \begin{itemize}
@@ -71,24 +78,32 @@ The implementation is split into clear modules:
     \item exact hash dedup integration in persistence layer.
 \end{itemize}
 
-\section{Preferential Crawling Strategy}
-The crawler uses a preferential strategy, not simple BFS/DFS. Every discovered URL gets a relevance score, and workers always claim the highest-scored frontier item first.
+\section{Preferential crawling strategy}
+The crawler uses a preferential strategy: every discovered URL is assigned a numeric priority (stored as \texttt{frontier\_priority}
+in the frontier row), and workers always claim the currently due URL with the highest priority.
 
-Scoring is domain-specific. The current policy combines signals such as:
+\subsection{Scoring function}
+The current implementation uses a lightweight, configurable heuristic (\texttt{relevance.py}).
+For a discovered URL \texttt{u} with parent URL \texttt{p} at depth \texttt{d}, we compute:
 \begin{itemize}
-    \item topic or section keywords in URL path,
-    \item same-domain bonus for MedOverNet scope,
-    \item penalties for low-value or off-topic paths,
-    \item depth-related penalties for very deep paths,
-    \item penalties for binary/document-heavy URLs when not relevant.
+    \item \textbf{Same-host boost:} if \texttt{host(u) == host(p)}, add \texttt{same\_host\_boost} (default: 10).
+    \item \textbf{Allowed domain suffix boost (optional):} if the host matches any configured suffix, add \texttt{allowed\_suffix\_boost} (default: 20).
+    \item \textbf{Keyword boosts (optional):} for each configured keyword occurring in the URL path/query, add \texttt{keyword\_boost} (default: 5).
+    \item \textbf{Depth penalty:} subtract \texttt{depth\_penalty} $\cdot d$ (default: 0.2).
 \end{itemize}
 
-\textbf{Example policy behavior (illustrative):}
-a forum or health-topic URL under MedOverNet gets higher priority than a generic file/document URL. Because frontier selection is ordered by score descending, workers crawl likely relevant pages first.
+With the default configuration, the crawler primarily prefers same-host URLs and mildly prefers shallow depth. Domain-specific focusing is supported via configuration, but must be explicitly set.
 
-\textbf{PLACEHOLDER (final report):} add one concrete scored URL example from a real crawl run (input URL, feature contributions, final score).
+\subsection{Worked example with default parameters}
+For a child URL discovered on the same host at depth $d=3$:
+\[
+\text{score} = 10 - 0.2\cdot 3 = 9.4
+\]
+For an off-host URL at the same depth (no same-host boost):
+\[\text{score} = -0.6\]
+Therefore, same-host pages are explored first unless additional boosts are configured.
 
-\section{Robots.txt and Politeness}
+\section{Robots.txt and politeness}
 The crawler enforces robots and ethics constraints before each fetch:
 \begin{itemize}
     \item robots fetched per origin and cached,
@@ -107,7 +122,7 @@ This design allows parallel workers while still respecting per-target pacing.
 
 \textbf{PLACEHOLDER (final report):} insert one short robots compliance example from logs (allowed URL, disallowed URL, applied delay).
 
-\section{Downloader, Renderer, and Content-Type Handling}
+\section{Downloader, renderer, and content-type handling}
 \subsection{HTTP downloader}
 The downloader uses \texttt{requests} with crawler user-agent and timeout settings from configuration. It follows redirects and stores status code and final URL.
 
@@ -123,25 +138,29 @@ The crawler distinguishes HTML and binary resources:
     \item other non-HTML resources: marked as \texttt{BINARY}
 \end{itemize}
 
-This follows assignment constraints: crawl HTML content by default, handle PDF where needed, and avoid storing unnecessary binary blobs.
+In this assignment crawl HTML content by default, handle PDF where needed, and avoid storing unnecessary binary blobs.
 
 \section{Deduplication}
-\subsection{Exact deduplication (implemented)}
-The crawler computes a content hash (SHA-256 style exact hash) for HTML pages. If the hash already exists:
+\subsection{Exact deduplication}
+The crawler computes a content hash (SHA-256 of the exact HTML source) for HTML pages. The ingestion logic distinguishes:
+\begin{itemize}
+    \item \textbf{Known canonical URL:} if the canonical URL already exists in \texttt{crawldb.page}, the crawler does not insert a new page row and does not treat this as a duplicate; it only records the hyperlink in \texttt{crawldb.link}.
+    \item \textbf{Duplicate content:} if the canonical URL is new but the content hash matches an existing \texttt{HTML} page, a new row is inserted with \texttt{page\_type\_code = DUPLICATE}.
+\end{itemize}
+
+If the content hash already exists:
 \begin{itemize}
     \item new page is marked \texttt{DUPLICATE},
-    \item \texttt{duplicate\_of} points to the original page,
+    \item \texttt{duplicate\_of} points to the original \texttt{HTML} page,
     \item duplicate page does not store full HTML content.
 \end{itemize}
 
-The schema includes \texttt{content\_hash} and \texttt{duplicate\_of} support for this flow.
+%\subsection{Partial deduplication (bonus, planned/not final yet)}
+%Locality-sensitive hashing + Jaccard similarity is planned as a bonus extension for near-duplicate detection. This is \textbf{not claimed as completed} in this draft.
 
-\subsection{Partial deduplication (bonus, planned/not final yet)}
-Locality-sensitive hashing + Jaccard similarity is planned as a bonus extension for near-duplicate detection. This is \textbf{not claimed as completed} in this draft.
+%\textbf{PLACEHOLDER (final report):} if implemented later, describe final LSH parameters and one near-duplicate example.
 
-\textbf{PLACEHOLDER (final report):} if implemented later, describe final LSH parameters and one near-duplicate example.
-
-\section{Parameters and Configuration}
+\section{Parameters and configuration}
 Crawler behavior is controlled by configuration variables. Main parameters include:
 \begin{itemize}
     \item number of workers,
@@ -162,7 +181,7 @@ The command-line entry point in \texttt{main.py} was used to test:
 
 \textbf{PLACEHOLDER (final report):} include final parameter table used for the 5000-page crawl run.
 
-\section{Problems and Solutions}
+\section{Problems and solutions}
 \subsection{Robots and ethical crawling}
 \textbf{Problem:} parallel workers can violate politeness if delays are not shared.\\
 \textbf{Solution:} thread-safe per-IP limiter with effective delay max(5s, crawl-delay).
@@ -183,7 +202,7 @@ The command-line entry point in \texttt{main.py} was used to test:
 \textbf{Problem:} repeated navigation patterns and low-value loops can waste crawl budget.\\
 \textbf{Solution:} canonical URL uniqueness in DB, relevance scoring, and robots compliance constraints.
 
-\section{Results, Statistics, and Visualization (Placeholders)}
+\section{Results, statistics, and sisualization (Placeholders)}
 This section is intentionally a scaffold for the final submission stage.
 
 \subsection{Crawldb statistics}
@@ -233,7 +252,6 @@ This section is intentionally a scaffold for the final submission stage.
 
 \section{Conclusion}
 We prepared a working foundation for a preferential MedOverNet crawler with core requirements: robots compliance, politeness control, HTML/binary handling, optional JS rendering, exact hash dedup support, and a multi-worker DB-backed crawl design.
-
-The next step is the final full crawl run, followed by final statistics, link visualization, and optional near-duplicate (LSH + Jaccard) extension if completed. This report draft is ready for those final additions.
+The preferential strategy is implemented via a configurable scoring function that prioritizes same-host and shallow URLs by default.
 
 \end{document}
