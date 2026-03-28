@@ -15,6 +15,7 @@ public sealed class ReverseChannelWorkerService : IWorkerService
     private readonly ILogger<ReverseChannelWorkerService> _logger;
     private readonly DaemonChannelService _daemonChannel;
     private readonly CrawlerRelayService _crawlerRelay;
+    private readonly FrontierService _frontierService;
     private static readonly SemaphoreSlim _daemonStartGate = new(1, 1);
     private static DateTime _lastLocalDaemonLaunchAttemptUtc = DateTime.MinValue;
     private static readonly JsonSerializerOptions JsonOptions = new()
@@ -26,12 +27,14 @@ public sealed class ReverseChannelWorkerService : IWorkerService
         IConfiguration configuration,
         ILogger<ReverseChannelWorkerService> logger,
         DaemonChannelService daemonChannel,
-        CrawlerRelayService crawlerRelay)
+        CrawlerRelayService crawlerRelay,
+        FrontierService frontierService)
     {
         _configuration = configuration;
         _logger = logger;
         _daemonChannel = daemonChannel;
         _crawlerRelay = crawlerRelay;
+        _frontierService = frontierService;
     }
 
     public string? LastError { get; private set; }
@@ -358,6 +361,15 @@ public sealed class ReverseChannelWorkerService : IWorkerService
     public async Task<FrontierStatusViewModel?> GetFrontierStatusAsync()
     {
         LastError = null;
+        try
+        {
+            return await _frontierService.GetStatusAsync(CancellationToken.None);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogDebug(ex, "Falling back to daemon frontier snapshot after manager status query failure.");
+        }
+
         var snapshot = GetSnapshot();
         if (snapshot is not null)
         {

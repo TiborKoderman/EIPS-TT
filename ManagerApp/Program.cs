@@ -158,7 +158,7 @@ app.MapPost("/api/frontier/claim", async (
         return Results.BadRequest(new { ok = false, error = "Payload must include a positive workerId." });
     }
 
-    var claim = await frontier.ClaimAsync(request.WorkerId, cancellationToken);
+    var claim = await frontier.ClaimAsync(request.WorkerId, request.DaemonId, cancellationToken);
     return Results.Ok(new { ok = true, data = claim });
 });
 
@@ -184,6 +184,7 @@ app.MapPost("/api/frontier/complete", async (
         request.Url,
         request.LeaseToken,
         request.Status,
+        request.DaemonId,
         cancellationToken);
 
     return Results.Ok(new

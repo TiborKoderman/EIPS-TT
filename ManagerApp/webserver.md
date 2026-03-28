@@ -78,6 +78,7 @@ All transitions are logged with timestamp and reason.
 - **Live frontier stats:** queued, active lease, and completion/failure counters
 - **Duplicate detection:** Identify and link duplicate URLs
 - **Lease management:** Automatic requeue on worker timeout/failure
+- **Delegate politeness scheduling:** Claim/dequeue skips cooled-down candidates per crawler daemon and resolved site IP, then returns the next valid URL
 - **Priority visualization:** Show high-priority pending URLs to operators
 
 ## Instance Management Rule

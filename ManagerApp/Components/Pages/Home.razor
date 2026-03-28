@@ -127,28 +127,32 @@
                             </div>
                         }
                     </div>
+                }
 
-                    @if (topQueueItems.Count > 0)
-                    {
-                        <div class="dashboard-queue-widget mt-md">
-                            <div class="text-small font-semibold mb-sm">Top queue items (non-claimed)</div>
-                            <div class="dashboard-queue-viewport">
-                                <ul class="list dashboard-queue-list ticker" style="--rows:@topQueueItems.Count;">
-                                    @foreach (var item in topQueueItems)
-                                    {
-                                        var tooltip = $"{item.State} | reason=queued | url={item.Url}";
-                                        <li class="dashboard-queue-row" title="@tooltip">
-                                            <div class="flex items-center justify-between gap-sm">
-                                                <span class="badge @GetQueueStateBadgeClass(item.State)">@item.State.ToUpperInvariant()</span>
-                                                <span class="text-small font-semibold">R @item.RelevanceScore.ToString("0.00")</span>
-                                            </div>
-                                            <div class="text-small text-muted queue-url">@item.Url</div>
-                                        </li>
-                                    }
-                                </ul>
-                            </div>
+                @if (topQueueItems.Count > 0)
+                {
+                    <div class="dashboard-queue-widget mt-md">
+                        <div class="text-small font-semibold mb-sm">Top queue items (non-claimed)</div>
+                        <div class="dashboard-queue-viewport">
+                            <ul class="list dashboard-queue-list ticker" style="--rows:@topQueueItems.Count;">
+                                @foreach (var item in topQueueItems)
+                                {
+                                    var tooltip = $"{item.State} | reason=queued | url={item.Url}";
+                                    <li class="dashboard-queue-row" title="@tooltip">
+                                        <div class="flex items-center justify-between gap-sm">
+                                            <span class="badge @GetQueueStateBadgeClass(item.State)">@item.State.ToUpperInvariant()</span>
+                                            <span class="text-small font-semibold">R @item.RelevanceScore.ToString("0.00")</span>
+                                        </div>
+                                        <div class="text-small text-muted queue-url">@item.Url</div>
+                                    </li>
+                                }
+                            </ul>
                         </div>
-                    }
+                    </div>
+                }
+                else
+                {
+                    <p class="text-small text-muted mt-sm">No queued frontier items available.</p>
                 }
             </div>
 
@@ -280,6 +284,7 @@
     private StatisticsViewModel? stats;
     private Dictionary<string, int>? workerStatusCounts;
     private List<WorkerViewModel> workers = new();
+    private FrontierStatusViewModel? frontierStatus;
     private List<DaemonQueueSnapshot> daemonQueueSnapshots = new();
     private List<QueueTopItemViewModel> topQueueItems = new();
     private List<WorkerThroughputPointViewModel> dashboardThroughputSeries = new();
@@ -357,8 +362,9 @@
             workerStatusCounts = BuildStatusCounts(workers);
 
             var daemonStatus = await WorkerService.GetDaemonStatusAsync();
+            frontierStatus = await WorkerService.GetFrontierStatusAsync();
             var events = await WorkerService.GetRecentCrawlerEventsAsync(2000);
-            daemonQueueSnapshots = BuildDaemonQueueSnapshots(daemonStatus, events);
+            daemonQueueSnapshots = BuildDaemonQueueSnapshots(daemonStatus, events, frontierStatus);
             topQueueItems = await PageService.GetTopQueueItemsAsync(20);
             dashboardThroughputSeries = await WorkerService.GetThroughputSeriesAsync(workerId: null, windowMinutes: 60, bucketSeconds: 30);
             dashboardThroughputUsingFallback = false;
@@ -573,9 +579,23 @@
 
     private static List<DaemonQueueSnapshot> BuildDaemonQueueSnapshots(
         DaemonStatusViewModel? daemonStatus,
-        IReadOnlyList<CrawlerEventViewModel> events)
+        IReadOnlyList<CrawlerEventViewModel> events,
+        FrontierStatusViewModel? frontierStatus)
     {
         var byDaemon = new Dictionary<string, DaemonQueueSnapshot>(StringComparer.OrdinalIgnoreCase);
+
+        if (frontierStatus is not null)
+        {
+            byDaemon["server-frontier"] = new DaemonQueueSnapshot
+            {
+                DaemonId = "server-frontier",
+                InMemoryQueued = frontierStatus.InMemoryQueued,
+                LocalQueued = frontierStatus.LocalQueued,
+                ActiveLeases = frontierStatus.ActiveLeases,
+                KnownUrls = frontierStatus.KnownUrls,
+            };
+            return byDaemon.Values.ToList();
+        }
 
         if (daemonStatus?.Frontier != null)
         {

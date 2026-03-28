@@ -1,6 +1,7 @@
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
+using System.Xml.Linq;
 using ManagerApp.Data;
 using Microsoft.EntityFrameworkCore;
 using Npgsql;
@@ -10,29 +11,41 @@ namespace ManagerApp.Services;
 public sealed class CrawlerRelayService
 {
     private readonly IDbContextFactory<CrawldbContext> _contextFactory;
+    private readonly FrontierService _frontierService;
     private readonly IConfiguration _configuration;
     private readonly ILogger<CrawlerRelayService> _logger;
+    private readonly HttpClient _httpClient = new();
     private readonly object _eventLock = new();
     private readonly LinkedList<CrawlerEventEnvelope> _recentEvents = new();
     private readonly string? _connectionString;
     private readonly int _workerLogRetentionDays;
     private readonly int _workerMetricRetentionDays;
     private readonly TimeSpan _cleanupInterval;
+    private readonly bool _sitemapIngestEnabled;
+    private readonly int _sitemapIngestMaxUrls;
+    private readonly int _sitemapIngestMaxDocuments;
+    private readonly int _sitemapFetchTimeoutSeconds;
     private DateTime _lastCleanupUtc = DateTime.MinValue;
     private const int MaxRecentEvents = 5000;
 
     public CrawlerRelayService(
         IDbContextFactory<CrawldbContext> contextFactory,
+        FrontierService frontierService,
         IConfiguration configuration,
         ILogger<CrawlerRelayService> logger)
     {
         _contextFactory = contextFactory;
+        _frontierService = frontierService;
         _configuration = configuration;
         _logger = logger;
         _connectionString = _configuration.GetConnectionString("CrawldbConnection");
         _workerLogRetentionDays = Math.Clamp(_configuration.GetValue("CrawlerApi:WorkerLogRetentionDays", 14), 1, 365);
         _workerMetricRetentionDays = Math.Clamp(_configuration.GetValue("CrawlerApi:WorkerMetricRetentionDays", 30), 1, 365);
         _cleanupInterval = TimeSpan.FromMinutes(Math.Clamp(_configuration.GetValue("CrawlerApi:ObservabilityCleanupMinutes", 30), 5, 24 * 60));
+        _sitemapIngestEnabled = _configuration.GetValue("CrawlerApi:SitemapIngestEnabled", true);
+        _sitemapIngestMaxUrls = Math.Clamp(_configuration.GetValue("CrawlerApi:SitemapIngestMaxUrls", 1000), 20, 20000);
+        _sitemapIngestMaxDocuments = Math.Clamp(_configuration.GetValue("CrawlerApi:SitemapIngestMaxDocuments", 30), 1, 200);
+        _sitemapFetchTimeoutSeconds = Math.Clamp(_configuration.GetValue("CrawlerApi:SitemapFetchTimeoutSeconds", 10), 2, 60);
     }
 
     public async Task<CrawlerIngestResponse> IngestAsync(CrawlerIngestRequest request, CancellationToken cancellationToken)
@@ -58,10 +71,19 @@ public sealed class CrawlerRelayService
         var existingPage = await context.Pages
             .FirstOrDefaultAsync(page => page.Url == url, cancellationToken);
 
+        var sitemapCandidates = new List<string>();
         var siteId = await ResolveSiteIdAsync(context, url, request.SiteId, cancellationToken);
         if (siteId.HasValue)
         {
-            await UpdateSitePolicyAsync(context, siteId.Value, request.DownloadResult, cancellationToken);
+            sitemapCandidates = await UpdateSitePolicyAsync(context, siteId.Value, request.DownloadResult, cancellationToken);
+        }
+        else if (request.DownloadResult?.RobotsSitemaps is { Count: > 0 })
+        {
+            sitemapCandidates = request.DownloadResult.RobotsSitemaps
+                .Select(NormalizeUrl)
+                .Where(item => !string.IsNullOrWhiteSpace(item))
+                .Distinct(StringComparer.Ordinal)
+                .ToList();
         }
         var status = "inserted";
         Page targetPage;
@@ -169,13 +191,33 @@ public sealed class CrawlerRelayService
             }
         }
 
-        await UpsertDiscoveredLinksAsync(
+        var discoveredQueueCandidates = await UpsertDiscoveredLinksAsync(
             context,
             targetPage.DuplicateOfPageId.HasValue
                 ? await context.Pages.FirstAsync(page => page.Id == targetPage.DuplicateOfPageId.Value, cancellationToken)
                 : targetPage,
             request.DiscoveredUrls,
             cancellationToken);
+
+        if (discoveredQueueCandidates.Count > 0)
+        {
+            var enqueueCandidates = discoveredQueueCandidates
+                .Select(discoveredUrl => new FrontierEnqueueCandidate
+                {
+                    Url = discoveredUrl,
+                    Priority = 0,
+                    Depth = 1,
+                    SourceUrl = url,
+                })
+                .ToList();
+
+            _ = await _frontierService.EnqueueBatchAsync(enqueueCandidates, cancellationToken);
+        }
+
+        if (sitemapCandidates.Count > 0)
+        {
+            _ = await EnqueueSitemapDiscoveredUrlsAsync(sitemapCandidates, url, cancellationToken);
+        }
 
         return new CrawlerIngestResponse
         {
@@ -691,7 +733,7 @@ public sealed class CrawlerRelayService
         return builder.Uri.AbsoluteUri;
     }
 
-    private static async Task UpsertDiscoveredLinksAsync(
+    private static async Task<List<string>> UpsertDiscoveredLinksAsync(
         CrawldbContext context,
         Page sourcePage,
         IReadOnlyCollection<string>? discoveredUrls,
@@ -699,7 +741,7 @@ public sealed class CrawlerRelayService
     {
         if (discoveredUrls is null || discoveredUrls.Count == 0)
         {
-            return;
+            return new List<string>();
         }
 
         var normalizedUrls = discoveredUrls
@@ -709,7 +751,7 @@ public sealed class CrawlerRelayService
             .ToList();
         if (normalizedUrls.Count == 0)
         {
-            return;
+            return new List<string>();
         }
 
         var knownTargets = await context.Pages
@@ -753,6 +795,14 @@ public sealed class CrawlerRelayService
                 $"INSERT INTO crawldb.link(from_page, to_page) VALUES ({sourcePage.Id}, {targetPage.Id}) ON CONFLICT DO NOTHING",
                 cancellationToken);
         }
+
+        return targetPages
+            .Where(targetPage =>
+                string.Equals(targetPage.PageTypeCode, "FRONTIER", StringComparison.OrdinalIgnoreCase)
+                && !string.IsNullOrWhiteSpace(targetPage.Url))
+            .Select(targetPage => targetPage.Url!)
+            .Distinct(StringComparer.Ordinal)
+            .ToList();
     }
 
     private static async Task<int?> ResolveSiteIdAsync(
@@ -789,40 +839,220 @@ public sealed class CrawlerRelayService
         return site.Id;
     }
 
-    private static async Task UpdateSitePolicyAsync(
+    private async Task<List<string>> EnqueueSitemapDiscoveredUrlsAsync(
+        IReadOnlyCollection<string> sitemapUrls,
+        string sourceUrl,
+        CancellationToken cancellationToken)
+    {
+        if (!_sitemapIngestEnabled || sitemapUrls.Count == 0)
+        {
+            return new List<string>();
+        }
+
+        var normalizedSitemaps = sitemapUrls
+            .Select(NormalizeUrl)
+            .Where(url => !string.IsNullOrWhiteSpace(url))
+            .Distinct(StringComparer.Ordinal)
+            .ToList();
+        if (normalizedSitemaps.Count == 0)
+        {
+            return new List<string>();
+        }
+
+        var sourceHost = GetHost(sourceUrl);
+        var visitedSitemaps = new HashSet<string>(StringComparer.Ordinal);
+        var discoveredUrls = new HashSet<string>(StringComparer.Ordinal);
+        var pending = new Queue<string>(normalizedSitemaps);
+
+        while (pending.Count > 0
+               && visitedSitemaps.Count < _sitemapIngestMaxDocuments
+               && discoveredUrls.Count < _sitemapIngestMaxUrls)
+        {
+            var sitemapUrl = pending.Dequeue();
+            if (!visitedSitemaps.Add(sitemapUrl))
+            {
+                continue;
+            }
+
+            var xml = await TryFetchTextAsync(sitemapUrl, cancellationToken);
+            if (string.IsNullOrWhiteSpace(xml))
+            {
+                continue;
+            }
+
+            ParseSitemap(xml, out var childSitemaps, out var pageUrls);
+
+            foreach (var child in childSitemaps)
+            {
+                var normalizedChild = NormalizeUrl(child);
+                if (string.IsNullOrWhiteSpace(normalizedChild)
+                    || visitedSitemaps.Contains(normalizedChild))
+                {
+                    continue;
+                }
+
+                pending.Enqueue(normalizedChild);
+            }
+
+            foreach (var pageUrl in pageUrls)
+            {
+                if (discoveredUrls.Count >= _sitemapIngestMaxUrls)
+                {
+                    break;
+                }
+
+                var normalizedPageUrl = NormalizeUrl(pageUrl);
+                if (string.IsNullOrWhiteSpace(normalizedPageUrl))
+                {
+                    continue;
+                }
+
+                if (!string.IsNullOrWhiteSpace(sourceHost)
+                    && !string.Equals(GetHost(normalizedPageUrl), sourceHost, StringComparison.OrdinalIgnoreCase))
+                {
+                    continue;
+                }
+
+                discoveredUrls.Add(normalizedPageUrl);
+            }
+        }
+
+        if (discoveredUrls.Count == 0)
+        {
+            return new List<string>();
+        }
+
+        var enqueueCandidates = discoveredUrls
+            .Select(url => new FrontierEnqueueCandidate
+            {
+                Url = url,
+                Priority = 0,
+                Depth = 1,
+                SourceUrl = sourceUrl,
+            })
+            .ToList();
+
+        _ = await _frontierService.EnqueueBatchAsync(enqueueCandidates, cancellationToken);
+        return discoveredUrls.ToList();
+    }
+
+    private async Task<string?> TryFetchTextAsync(string url, CancellationToken cancellationToken)
+    {
+        try
+        {
+            using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+            timeoutCts.CancelAfter(TimeSpan.FromSeconds(_sitemapFetchTimeoutSeconds));
+
+            using var request = new HttpRequestMessage(HttpMethod.Get, url);
+            request.Headers.UserAgent.ParseAdd("EIPS-TT-Manager/1.0");
+            using var response = await _httpClient.SendAsync(request, HttpCompletionOption.ResponseContentRead, timeoutCts.Token);
+            if (!response.IsSuccessStatusCode)
+            {
+                return null;
+            }
+
+            return await response.Content.ReadAsStringAsync(timeoutCts.Token);
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
+    private static void ParseSitemap(string xmlContent, out List<string> childSitemaps, out List<string> pageUrls)
+    {
+        childSitemaps = new List<string>();
+        pageUrls = new List<string>();
+
+        try
+        {
+            var document = XDocument.Parse(xmlContent);
+            var rootName = document.Root?.Name.LocalName?.ToLowerInvariant() ?? string.Empty;
+            var locValues = document
+                .Descendants()
+                .Where(node => string.Equals(node.Name.LocalName, "loc", StringComparison.OrdinalIgnoreCase))
+                .Select(node => node.Value?.Trim())
+                .Where(value => !string.IsNullOrWhiteSpace(value))
+                .Cast<string>()
+                .Distinct(StringComparer.Ordinal)
+                .ToList();
+
+            if (rootName == "sitemapindex")
+            {
+                childSitemaps.AddRange(locValues);
+                return;
+            }
+
+            pageUrls.AddRange(locValues);
+        }
+        catch
+        {
+            // Ignore malformed sitemap payload.
+        }
+    }
+
+    private static string? GetHost(string? url)
+    {
+        if (string.IsNullOrWhiteSpace(url))
+        {
+            return null;
+        }
+
+        return Uri.TryCreate(url, UriKind.Absolute, out var uri)
+            ? uri.Host
+            : null;
+    }
+
+    private static async Task<List<string>> UpdateSitePolicyAsync(
         CrawldbContext context,
         int siteId,
         CrawlerDownloadResult? downloadResult,
         CancellationToken cancellationToken)
     {
+        var updatedSitemaps = new List<string>();
         if (downloadResult is null)
         {
-            return;
+            return updatedSitemaps;
         }
 
         var site = await context.Sites.FirstOrDefaultAsync(item => item.Id == siteId, cancellationToken);
         if (site is null)
         {
-            return;
+            return updatedSitemaps;
         }
 
         var changed = false;
         if (!string.IsNullOrWhiteSpace(downloadResult.RobotsContent))
         {
-            site.RobotsContent = downloadResult.RobotsContent;
-            changed = true;
+            if (!string.Equals(site.RobotsContent, downloadResult.RobotsContent, StringComparison.Ordinal))
+            {
+                site.RobotsContent = downloadResult.RobotsContent;
+                changed = true;
+            }
         }
 
         if (downloadResult.RobotsSitemaps is { Count: > 0 })
         {
-            site.SitemapContent = string.Join('\n', downloadResult.RobotsSitemaps.Distinct(StringComparer.Ordinal));
-            changed = true;
+            var normalizedSitemaps = downloadResult.RobotsSitemaps
+                .Select(NormalizeUrl)
+                .Where(url => !string.IsNullOrWhiteSpace(url))
+                .Distinct(StringComparer.Ordinal)
+                .ToList();
+            var sitemapContent = string.Join('\n', normalizedSitemaps);
+            if (!string.Equals(site.SitemapContent, sitemapContent, StringComparison.Ordinal))
+            {
+                site.SitemapContent = sitemapContent;
+                changed = true;
+                updatedSitemaps = normalizedSitemaps;
+            }
         }
 
         if (changed)
         {
             await context.SaveChangesAsync(cancellationToken);
         }
+
+        return updatedSitemaps;
     }
 }
 

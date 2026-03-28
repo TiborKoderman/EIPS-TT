@@ -53,7 +53,7 @@ Last rebuilt: 2026-03-26
 - [x] Lease creation/expiry/recovery: server-side frontier service.
 - [x] Queue state transitions (`QUEUED/LOCKED/PROCESSING/COMPLETED/DUPLICATE/FAILED`): server-side frontier service.
 - [ ] Collision/duplicate queue suppression across workers/daemons: server-side frontier service.
-- [ ] Politeness scheduling (per-IP/per-domain pacing): server-side scheduler/politeness service.
+- [x] Politeness scheduling (per-IP/per-domain pacing): server-side scheduler/politeness service.
 - [ ] Robots allow/disallow gate for queueing: server-side policy gate for discovered URLs.
 - [ ] Discovered URL ingest and prioritization: server-side enqueue API.
 - [ ] Frontier observability counters and diagnostics: server-side telemetry/query endpoints.
@@ -84,6 +84,13 @@ Last rebuilt: 2026-03-26
 - [x] Added manager client method `DequeueFrontierAsync(...)` for the new dequeue API.
 - [x] Improved worker failure telemetry to log fetch/parse stage in status reason and warnings.
 - [x] Smoke-tested `/api/frontier/status`, `/api/frontier/claim`, `/api/frontier/complete`, and `/api/frontier/dequeue` against live manager+daemon runtime (including requeue via `status=queued`).
+- [x] Unified dashboard frontier queue snapshots to use server-owned status as primary source (fallback to daemon snapshot only on manager status failure).
+- [x] Fixed dashboard queue widget visibility so top queued URLs are shown independently from daemon telemetry snapshot availability.
+- [x] Aligned top queue query to enum state redesign by selecting only `QUEUED` rows from `crawldb.frontier_queue`.
+- [x] Added manager-side batch frontier enqueue path for discovered URLs reported through `/api/crawler/ingest` to centralize ingestion-stage dedupe.
+- [x] Added sitemap ingestion hook in manager ingest flow: parse robots sitemap payloads, extract `<loc>` URLs (`urlset`/`sitemapindex`), and enqueue discovered URLs server-side with safety limits.
+- [x] Smoke-tested ingestion dedupe by posting repeated discovered URLs to `/api/crawler/ingest` and verifying single `frontier_queue` rows per URL.
+- [x] Implemented server-side delegate cooldown scheduling keyed by crawler daemon + resolved site IP, with timed skip-and-retry behavior during frontier claim/dequeue.
 
 ## Pending follow-ups
 

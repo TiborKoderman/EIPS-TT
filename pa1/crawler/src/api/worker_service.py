@@ -1996,7 +1996,10 @@ class DaemonWorkerService(WorkerControlService):
 
         response = self._post_manager_json_response(
             self._frontier_claim_url,
-            {"workerId": worker_id},
+            {
+                "workerId": worker_id,
+                "daemonId": self._daemon_id,
+            },
             token_override=self._frontier_relay_token,
         )
         data = self._extract_manager_response_data(response)
@@ -2083,6 +2086,7 @@ class DaemonWorkerService(WorkerControlService):
                 "url": url,
                 "leaseToken": lease_token,
                 "status": status,
+                "daemonId": self._daemon_id,
             },
             token_override=self._frontier_relay_token,
         )

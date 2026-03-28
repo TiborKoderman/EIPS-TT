@@ -209,15 +209,7 @@ public class PageService : IPageService
                 discovered_at,
                 state
             FROM crawldb.frontier_queue
-            WHERE
-                (
-                    state::text IN ('QUEUED', 'queued', 'in_memory')
-                    OR state::text = 'LOCKED'
-                )
-                AND (
-                    locked_by_worker_id IS NULL
-                    OR state::text IN ('QUEUED', 'queued', 'in_memory')
-                )
+            WHERE state = 'QUEUED'::crawldb.frontier_queue_state
             ORDER BY priority DESC, discovered_at ASC
             LIMIT @take;
             """;

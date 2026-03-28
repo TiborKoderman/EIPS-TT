@@ -1,5 +1,6 @@
 using System.Collections.Concurrent;
 using System.Globalization;
+using System.Net;
 using ManagerApp.Models;
 using Npgsql;
 
@@ -7,12 +8,79 @@ namespace ManagerApp.Services;
 
 public sealed class FrontierService
 {
+    private const string EnqueueSql = """
+        INSERT INTO crawldb.frontier_queue (
+            url,
+            priority,
+            source_url,
+            depth,
+            state,
+            discovered_at,
+            memory_cached,
+            locked_at,
+            locked_by_worker_id,
+            finished_at
+        )
+        VALUES (
+            @url,
+            @priority,
+            @source_url,
+            @depth,
+            'QUEUED'::crawldb.frontier_queue_state,
+            NOW(),
+            false,
+            NULL,
+            NULL,
+            NULL
+        )
+        ON CONFLICT (url)
+        DO UPDATE
+           SET priority = GREATEST(crawldb.frontier_queue.priority, EXCLUDED.priority),
+               source_url = COALESCE(crawldb.frontier_queue.source_url, EXCLUDED.source_url),
+               depth = LEAST(crawldb.frontier_queue.depth, EXCLUDED.depth),
+               discovered_at = LEAST(crawldb.frontier_queue.discovered_at, EXCLUDED.discovered_at),
+               state = CASE
+                   WHEN crawldb.frontier_queue.state IN (
+                       'COMPLETED'::crawldb.frontier_queue_state,
+                       'FAILED'::crawldb.frontier_queue_state,
+                       'DUPLICATE'::crawldb.frontier_queue_state
+                   ) THEN 'QUEUED'::crawldb.frontier_queue_state
+                   ELSE crawldb.frontier_queue.state
+               END,
+               finished_at = CASE
+                   WHEN crawldb.frontier_queue.state IN (
+                       'COMPLETED'::crawldb.frontier_queue_state,
+                       'FAILED'::crawldb.frontier_queue_state,
+                       'DUPLICATE'::crawldb.frontier_queue_state
+                   ) THEN NULL
+                   ELSE crawldb.frontier_queue.finished_at
+               END,
+               locked_at = CASE
+                   WHEN crawldb.frontier_queue.state IN (
+                       'COMPLETED'::crawldb.frontier_queue_state,
+                       'FAILED'::crawldb.frontier_queue_state,
+                       'DUPLICATE'::crawldb.frontier_queue_state
+                   ) THEN NULL
+                   ELSE crawldb.frontier_queue.locked_at
+               END,
+               locked_by_worker_id = CASE
+                   WHEN crawldb.frontier_queue.state IN (
+                       'COMPLETED'::crawldb.frontier_queue_state,
+                       'FAILED'::crawldb.frontier_queue_state,
+                       'DUPLICATE'::crawldb.frontier_queue_state
+                   ) THEN NULL
+                   ELSE crawldb.frontier_queue.locked_by_worker_id
+               END;
+        """;
+
     private readonly IConfiguration _configuration;
     private readonly ILogger<FrontierService> _logger;
     private readonly string? _connectionString;
-    private readonly ConcurrentDictionary<string, DateTime> _siteNextAllowedUtc = new(StringComparer.OrdinalIgnoreCase);
+    private readonly ConcurrentDictionary<string, DateTime> _crawlerSiteNextAllowedUtc = new(StringComparer.Ordinal);
+    private readonly ConcurrentDictionary<string, (string SiteIpKey, DateTime ExpiresAtUtc)> _resolvedSiteIdentityCache = new(StringComparer.OrdinalIgnoreCase);
     private readonly int _leaseTtlSeconds;
     private readonly int _politenessDelayMilliseconds;
+    private readonly TimeSpan _resolvedSiteIdentityTtl = TimeSpan.FromMinutes(10);
 
     public FrontierService(IConfiguration configuration, ILogger<FrontierService> logger)
     {
@@ -30,6 +98,7 @@ public sealed class FrontierService
         {
             return false;
         }
+        var normalizedUrl = normalized.Trim();
 
         var normalizedSource = NormalizeUrl(sourceUrl);
 
@@ -38,74 +107,102 @@ public sealed class FrontierService
         {
             return false;
         }
+        return await EnqueueCoreAsync(connection, normalizedUrl, priority, depth, normalizedSource, cancellationToken);
+    }
 
-        const string sql = """
-            INSERT INTO crawldb.frontier_queue (
-                url,
-                priority,
-                source_url,
-                depth,
-                state,
-                discovered_at,
-                memory_cached,
-                locked_at,
-                locked_by_worker_id,
-                finished_at
-            )
-            VALUES (
-                @url,
-                @priority,
-                @source_url,
-                @depth,
-                'QUEUED'::crawldb.frontier_queue_state,
-                NOW(),
-                false,
-                NULL,
-                NULL,
-                NULL
-            )
-            ON CONFLICT (url)
-            DO UPDATE
-               SET priority = GREATEST(crawldb.frontier_queue.priority, EXCLUDED.priority),
-                   source_url = COALESCE(crawldb.frontier_queue.source_url, EXCLUDED.source_url),
-                   depth = LEAST(crawldb.frontier_queue.depth, EXCLUDED.depth),
-                   discovered_at = LEAST(crawldb.frontier_queue.discovered_at, EXCLUDED.discovered_at),
-                   state = CASE
-                       WHEN crawldb.frontier_queue.state IN (
-                           'COMPLETED'::crawldb.frontier_queue_state,
-                           'FAILED'::crawldb.frontier_queue_state,
-                           'DUPLICATE'::crawldb.frontier_queue_state
-                       ) THEN 'QUEUED'::crawldb.frontier_queue_state
-                       ELSE crawldb.frontier_queue.state
-                   END,
-                   finished_at = CASE
-                       WHEN crawldb.frontier_queue.state IN (
-                           'COMPLETED'::crawldb.frontier_queue_state,
-                           'FAILED'::crawldb.frontier_queue_state,
-                           'DUPLICATE'::crawldb.frontier_queue_state
-                       ) THEN NULL
-                       ELSE crawldb.frontier_queue.finished_at
-                   END,
-                   locked_at = CASE
-                       WHEN crawldb.frontier_queue.state IN (
-                           'COMPLETED'::crawldb.frontier_queue_state,
-                           'FAILED'::crawldb.frontier_queue_state,
-                           'DUPLICATE'::crawldb.frontier_queue_state
-                       ) THEN NULL
-                       ELSE crawldb.frontier_queue.locked_at
-                   END,
-                   locked_by_worker_id = CASE
-                       WHEN crawldb.frontier_queue.state IN (
-                           'COMPLETED'::crawldb.frontier_queue_state,
-                           'FAILED'::crawldb.frontier_queue_state,
-                           'DUPLICATE'::crawldb.frontier_queue_state
-                       ) THEN NULL
-                       ELSE crawldb.frontier_queue.locked_by_worker_id
-                   END;
-            """;
+    public async Task<int> EnqueueBatchAsync(
+        IReadOnlyCollection<FrontierEnqueueCandidate>? candidates,
+        CancellationToken cancellationToken)
+    {
+        if (candidates is null || candidates.Count == 0)
+        {
+            return 0;
+        }
 
-        await using var cmd = new NpgsqlCommand(sql, connection);
-        cmd.Parameters.AddWithValue("url", normalized);
+        var mergedByUrl = new Dictionary<string, FrontierEnqueueCandidate>(StringComparer.Ordinal);
+        foreach (var candidate in candidates)
+        {
+            var normalized = NormalizeUrl(candidate.Url);
+            if (string.IsNullOrWhiteSpace(normalized))
+            {
+                continue;
+            }
+
+            var normalizedSource = NormalizeUrl(candidate.SourceUrl);
+            var normalizedDepth = Math.Max(0, candidate.Depth);
+
+            if (mergedByUrl.TryGetValue(normalized, out var existing))
+            {
+                mergedByUrl[normalized] = new FrontierEnqueueCandidate
+                {
+                    Url = normalized,
+                    Priority = Math.Max(existing.Priority, candidate.Priority),
+                    Depth = Math.Min(existing.Depth, normalizedDepth),
+                    SourceUrl = existing.SourceUrl ?? normalizedSource,
+                };
+            }
+            else
+            {
+                mergedByUrl[normalized] = new FrontierEnqueueCandidate
+                {
+                    Url = normalized,
+                    Priority = candidate.Priority,
+                    Depth = normalizedDepth,
+                    SourceUrl = normalizedSource,
+                };
+            }
+        }
+
+        if (mergedByUrl.Count == 0)
+        {
+            return 0;
+        }
+
+        await using var connection = await OpenConnectionAsync(cancellationToken);
+        if (connection is null)
+        {
+            return 0;
+        }
+
+        var inserted = 0;
+        foreach (var candidate in mergedByUrl.Values)
+        {
+            if (string.IsNullOrWhiteSpace(candidate.Url))
+            {
+                continue;
+            }
+
+            var queued = await EnqueueCoreAsync(
+                connection,
+                candidate.Url,
+                candidate.Priority,
+                candidate.Depth,
+                candidate.SourceUrl,
+                cancellationToken);
+            if (queued)
+            {
+                inserted += 1;
+            }
+        }
+
+        return inserted;
+    }
+
+    private static async Task<bool> EnqueueCoreAsync(
+        NpgsqlConnection connection,
+        string? normalizedUrl,
+        int priority,
+        int depth,
+        string? normalizedSource,
+        CancellationToken cancellationToken)
+    {
+        if (string.IsNullOrWhiteSpace(normalizedUrl))
+        {
+            return false;
+        }
+
+        await using var cmd = new NpgsqlCommand(EnqueueSql, connection);
+        cmd.Parameters.AddWithValue("url", normalizedUrl);
         cmd.Parameters.AddWithValue("priority", priority);
         cmd.Parameters.AddWithValue("source_url", (object?)normalizedSource ?? DBNull.Value);
         cmd.Parameters.AddWithValue("depth", Math.Max(0, depth));
@@ -113,12 +210,14 @@ public sealed class FrontierService
         return true;
     }
 
-    public async Task<FrontierClaimViewModel> ClaimAsync(int workerId, CancellationToken cancellationToken)
+    public async Task<FrontierClaimViewModel> ClaimAsync(int workerId, string? daemonId, CancellationToken cancellationToken)
     {
         if (workerId <= 0)
         {
             return new FrontierClaimViewModel { Claimed = false, WorkerId = workerId };
         }
+
+        var crawlerKey = NormalizeCrawlerKey(daemonId);
 
         await using var connection = await OpenConnectionAsync(cancellationToken);
         if (connection is null)
@@ -156,8 +255,17 @@ public sealed class FrontierService
             }
 
             var now = DateTime.UtcNow;
-            var candidate = candidates.FirstOrDefault(item => IsSiteReady(item.Url, now));
-            if (candidate == default)
+            (long Id, string Url, int Priority, string? SourceUrl, int Depth)? selected = null;
+            foreach (var item in candidates)
+            {
+                if (await IsSiteReadyAsync(crawlerKey, item.Url, now, cancellationToken))
+                {
+                    selected = item;
+                    break;
+                }
+            }
+
+            if (selected is null)
             {
                 await tx.CommitAsync(cancellationToken);
                 return new FrontierClaimViewModel
@@ -166,6 +274,8 @@ public sealed class FrontierService
                     WorkerId = workerId,
                 };
             }
+
+            var candidate = selected.Value;
 
             const string lockSql = """
                 UPDATE crawldb.frontier_queue
@@ -188,7 +298,7 @@ public sealed class FrontierService
             }
 
             await tx.CommitAsync(cancellationToken);
-            ReserveSite(candidate.Url, now);
+            await ReserveSiteAsync(crawlerKey, candidate.Url, now, cancellationToken);
 
             return new FrontierClaimViewModel
             {
@@ -213,6 +323,7 @@ public sealed class FrontierService
         string? url,
         string? leaseToken,
         string? status,
+        string? daemonId,
         CancellationToken cancellationToken)
     {
         var normalizedUrl = NormalizeUrl(url);
@@ -266,7 +377,7 @@ public sealed class FrontierService
 
         if (updated > 0)
         {
-            ReserveSite(normalizedUrl, DateTime.UtcNow);
+            await ReserveSiteAsync(NormalizeCrawlerKey(daemonId), normalizedUrl, DateTime.UtcNow, cancellationToken);
             return true;
         }
 
@@ -382,7 +493,7 @@ public sealed class FrontierService
                 break;
             }
 
-            var claim = await ClaimAsync(workerId, cancellationToken);
+            var claim = await ClaimAsync(workerId, batch.DaemonId, cancellationToken);
             if (!claim.Claimed || string.IsNullOrWhiteSpace(claim.Url))
             {
                 continue;
@@ -442,36 +553,152 @@ public sealed class FrontierService
         await cmd.ExecuteNonQueryAsync(cancellationToken);
     }
 
-    private bool IsSiteReady(string url, DateTime nowUtc)
+    private async Task<bool> IsSiteReadyAsync(
+        string crawlerKey,
+        string url,
+        DateTime nowUtc,
+        CancellationToken cancellationToken)
     {
-        var siteKey = ExtractSiteKey(url);
-        if (string.IsNullOrWhiteSpace(siteKey))
+        var siteIpKey = await ResolveSiteIpKeyAsync(url, nowUtc, cancellationToken);
+        if (string.IsNullOrWhiteSpace(siteIpKey))
         {
             return true;
         }
 
-        if (!_siteNextAllowedUtc.TryGetValue(siteKey, out var readyAtUtc))
+        var scopedKey = ComposeCrawlerSiteKey(crawlerKey, siteIpKey);
+        if (!_crawlerSiteNextAllowedUtc.TryGetValue(scopedKey, out var readyAtUtc))
         {
+            return true;
+        }
+
+        if (nowUtc >= readyAtUtc)
+        {
+            _crawlerSiteNextAllowedUtc.TryRemove(scopedKey, out _);
             return true;
         }
 
         return nowUtc >= readyAtUtc;
     }
 
-    private void ReserveSite(string url, DateTime nowUtc)
+    private async Task ReserveSiteAsync(
+        string crawlerKey,
+        string url,
+        DateTime nowUtc,
+        CancellationToken cancellationToken)
     {
         if (_politenessDelayMilliseconds <= 0)
         {
             return;
         }
 
-        var siteKey = ExtractSiteKey(url);
-        if (string.IsNullOrWhiteSpace(siteKey))
+        var siteIpKey = await ResolveSiteIpKeyAsync(url, nowUtc, cancellationToken);
+        if (string.IsNullOrWhiteSpace(siteIpKey))
         {
             return;
         }
 
-        _siteNextAllowedUtc[siteKey] = nowUtc.AddMilliseconds(_politenessDelayMilliseconds);
+        var scopedKey = ComposeCrawlerSiteKey(crawlerKey, siteIpKey);
+        _crawlerSiteNextAllowedUtc[scopedKey] = nowUtc.AddMilliseconds(_politenessDelayMilliseconds);
+        PruneExpiredPolitenessEntries(nowUtc);
+    }
+
+    private void PruneExpiredPolitenessEntries(DateTime nowUtc)
+    {
+        foreach (var entry in _crawlerSiteNextAllowedUtc)
+        {
+            if (entry.Value <= nowUtc)
+            {
+                _crawlerSiteNextAllowedUtc.TryRemove(entry.Key, out _);
+            }
+        }
+
+        foreach (var entry in _resolvedSiteIdentityCache)
+        {
+            if (entry.Value.ExpiresAtUtc <= nowUtc)
+            {
+                _resolvedSiteIdentityCache.TryRemove(entry.Key, out _);
+            }
+        }
+    }
+
+    private async Task<string> ResolveSiteIpKeyAsync(string url, DateTime nowUtc, CancellationToken cancellationToken)
+    {
+        if (cancellationToken.IsCancellationRequested)
+        {
+            return string.Empty;
+        }
+
+        var host = ExtractHost(url);
+        if (string.IsNullOrWhiteSpace(host))
+        {
+            return string.Empty;
+        }
+
+        if (_resolvedSiteIdentityCache.TryGetValue(host, out var cached) && cached.ExpiresAtUtc > nowUtc)
+        {
+            return cached.SiteIpKey;
+        }
+
+        if (IPAddress.TryParse(host, out var parsedIpAddress))
+        {
+            var literalIp = NormalizeIpAddress(parsedIpAddress);
+            _resolvedSiteIdentityCache[host] = (literalIp, nowUtc.Add(_resolvedSiteIdentityTtl));
+            return literalIp;
+        }
+
+        string resolvedSiteKey;
+        try
+        {
+            var addresses = await Dns.GetHostAddressesAsync(host);
+            var resolvedAddress = addresses.FirstOrDefault(address => address.AddressFamily == System.Net.Sockets.AddressFamily.InterNetwork)
+                ?? addresses.FirstOrDefault();
+
+            resolvedSiteKey = resolvedAddress is null
+                ? host.ToLowerInvariant()
+                : NormalizeIpAddress(resolvedAddress);
+        }
+        catch (Exception)
+        {
+            resolvedSiteKey = host.ToLowerInvariant();
+        }
+
+        _resolvedSiteIdentityCache[host] = (resolvedSiteKey, nowUtc.Add(_resolvedSiteIdentityTtl));
+        return resolvedSiteKey;
+    }
+
+    private static string NormalizeCrawlerKey(string? daemonId)
+    {
+        if (string.IsNullOrWhiteSpace(daemonId))
+        {
+            return "local-default";
+        }
+
+        return daemonId.Trim().ToLowerInvariant();
+    }
+
+    private static string ComposeCrawlerSiteKey(string crawlerKey, string siteIpKey)
+    {
+        return $"{crawlerKey}|{siteIpKey}";
+    }
+
+    private static string ExtractHost(string url)
+    {
+        if (!Uri.TryCreate(url, UriKind.Absolute, out var parsed))
+        {
+            return string.Empty;
+        }
+
+        return parsed.Host.Trim().ToLowerInvariant();
+    }
+
+    private static string NormalizeIpAddress(IPAddress address)
+    {
+        if (address.IsIPv4MappedToIPv6)
+        {
+            return address.MapToIPv4().ToString();
+        }
+
+        return address.ToString();
     }
 
     private static string NormalizeTerminalState(string? status)
@@ -506,15 +733,6 @@ public sealed class FrontierService
         return builder.Uri.AbsoluteUri;
     }
 
-    private static string ExtractSiteKey(string url)
-    {
-        if (!Uri.TryCreate(url, UriKind.Absolute, out var parsed))
-        {
-            return string.Empty;
-        }
-
-        return parsed.Host.ToLowerInvariant();
-    }
 }
 
 public sealed class FrontierSeedRequest
@@ -525,9 +743,18 @@ public sealed class FrontierSeedRequest
     public string? SourceUrl { get; set; }
 }
 
+public sealed class FrontierEnqueueCandidate
+{
+    public string Url { get; set; } = string.Empty;
+    public int Priority { get; set; }
+    public int Depth { get; set; }
+    public string? SourceUrl { get; set; }
+}
+
 public sealed class FrontierClaimRequest
 {
     public int WorkerId { get; set; }
+    public string? DaemonId { get; set; }
 }
 
 public sealed class FrontierCompleteRequest
@@ -536,6 +763,7 @@ public sealed class FrontierCompleteRequest
     public string? Url { get; set; }
     public string? LeaseToken { get; set; }
     public string? Status { get; set; }
+    public string? DaemonId { get; set; }
 }
 
 public sealed class FrontierPruneRequest
