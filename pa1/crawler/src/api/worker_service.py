@@ -1169,7 +1169,7 @@ class DaemonWorkerService(WorkerControlService):
                         self._append_log(
                             worker_id,
                             "Info",
-                            f"Fetched {current.current_url} (status={processing['downloadResult'].get('statusCode')}, links={len(processing['discoveredLinks'])}).",
+                            f"Fetched {current.current_url} (status={processing['downloadResult'].get('statusCode')}, links={len(processing['discoveredLinks'])}, images={len(processing.get('discoveredImages', []))}).",
                         )
                     else:
                         failure_stage = str(processing.get("stage") or "fetch")
@@ -1198,6 +1198,7 @@ class DaemonWorkerService(WorkerControlService):
                         lease.url,
                         processing["downloadResult"],
                         processing["discoveredLinks"],
+                        processing.get("discoveredImages", []),
                     )
                     self._emit_manager_event(
                         "worker-metric",
@@ -2203,6 +2204,7 @@ class DaemonWorkerService(WorkerControlService):
                     "effectiveDelaySeconds": effective_delay_seconds,
                 },
                 "discoveredLinks": [],
+                "discoveredImages": [],
             }
 
         self._ip_rate_limiter.wait_for_turn(url, effective_delay_seconds)
@@ -2240,14 +2242,17 @@ class DaemonWorkerService(WorkerControlService):
                     "effectiveDelaySeconds": effective_delay_seconds,
                 },
                 "discoveredLinks": [],
+                "discoveredImages": [],
             }
 
         try:
             discovered_links: list[str] = []
+            discovered_images: list[str] = []
             parser_payload: dict[str, object] | None = None
             if download.html_content:
                 extracted = self._link_extractor.extract(download.html_content, download.final_url)
                 discovered_links = extracted.links[: self._max_extracted_links_per_page]
+                discovered_images = extracted.images[: self._max_extracted_links_per_page]
                 parser_payload = {
                     "links": extracted.links,
                     "jsLinks": extracted.js_links,
@@ -2270,6 +2275,7 @@ class DaemonWorkerService(WorkerControlService):
                     effective_delay_seconds=effective_delay_seconds,
                 ),
                 "discoveredLinks": discovered_links,
+                "discoveredImages": discovered_images,
             }
         except Exception as exc:
             return {
@@ -2292,6 +2298,7 @@ class DaemonWorkerService(WorkerControlService):
                     effective_delay_seconds=effective_delay_seconds,
                 ),
                 "discoveredLinks": [],
+                "discoveredImages": [],
             }
 
     def _resolve_robots_policy(self, url: str) -> RobotsPolicy | None:
@@ -2356,6 +2363,7 @@ class DaemonWorkerService(WorkerControlService):
         raw_url: str | None,
         download_result: dict[str, object | None],
         discovered_links: list[str],
+        discovered_images: list[str],
     ) -> None:
         if self._manager_ingest_url is None or not raw_url:
             return
@@ -2365,6 +2373,7 @@ class DaemonWorkerService(WorkerControlService):
             "siteId": None,
             "sourcePageId": None,
             "discoveredUrls": discovered_links,
+            "discoveredImageUrls": discovered_images,
             "downloadResult": download_result,
         }
 

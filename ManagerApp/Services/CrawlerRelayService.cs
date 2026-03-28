@@ -72,6 +72,18 @@ public sealed class CrawlerRelayService
         var existingPage = await context.Pages
             .FirstOrDefaultAsync(page => page.Url == url, cancellationToken);
 
+        var duplicateOfPageId = string.Equals(pageTypeCode, "HTML", StringComparison.OrdinalIgnoreCase)
+            && !string.IsNullOrWhiteSpace(contentHash)
+            ? await context.Pages
+                .Where(page =>
+                    page.Url != url &&
+                    page.PageTypeCode == "HTML" &&
+                    page.ContentHash == contentHash)
+                .OrderBy(page => page.Id)
+                .Select(page => (int?)page.Id)
+                .FirstOrDefaultAsync(cancellationToken)
+            : null;
+
         var sitemapCandidates = new List<string>();
         var siteId = await ResolveSiteIdAsync(context, url, request.SiteId, cancellationToken);
         if (siteId.HasValue)
@@ -92,28 +104,28 @@ public sealed class CrawlerRelayService
         if (existingPage != null && !string.Equals(existingPage.PageTypeCode, "FRONTIER", StringComparison.OrdinalIgnoreCase))
         {
             existingPage.SiteId ??= siteId;
-            existingPage.PageTypeCode = pageTypeCode;
             existingPage.AccessedTime = accessedTime;
             existingPage.HttpStatusCode = request.DownloadResult?.StatusCode;
-            existingPage.HtmlContent = pageTypeCode == "HTML" ? html : null;
             existingPage.ContentHash = pageTypeCode == "HTML" ? contentHash : null;
-            existingPage.DuplicateOfPageId = null;
+            existingPage.DuplicateOfPageId = duplicateOfPageId;
+
+            if (string.Equals(pageTypeCode, "HTML", StringComparison.OrdinalIgnoreCase) && duplicateOfPageId.HasValue)
+            {
+                existingPage.PageTypeCode = "DUPLICATE";
+                existingPage.HtmlContent = null;
+                status = "updated_duplicate";
+            }
+            else
+            {
+                existingPage.PageTypeCode = pageTypeCode;
+                existingPage.HtmlContent = pageTypeCode == "HTML" ? html : null;
+                status = "updated";
+            }
+
             targetPage = existingPage;
-            status = "updated";
         }
         else
         {
-            var duplicateOfPageId = pageTypeCode == "HTML" && !string.IsNullOrWhiteSpace(contentHash)
-                ? await context.Pages
-                    .Where(page =>
-                        page.Url != url &&
-                        page.PageTypeCode == "HTML" &&
-                        page.ContentHash == contentHash)
-                    .OrderBy(page => page.Id)
-                    .Select(page => (int?)page.Id)
-                    .FirstOrDefaultAsync(cancellationToken)
-                : null;
-
             if (existingPage != null)
             {
                 var existingPageType = existingPage.PageTypeCode;
@@ -183,15 +195,37 @@ public sealed class CrawlerRelayService
             }
 
             racedPage.SiteId ??= siteId;
-            racedPage.PageTypeCode = pageTypeCode;
             racedPage.AccessedTime = accessedTime;
             racedPage.HttpStatusCode = request.DownloadResult?.StatusCode;
-            racedPage.HtmlContent = pageTypeCode == "HTML" ? html : null;
             racedPage.ContentHash = pageTypeCode == "HTML" ? contentHash : null;
-            racedPage.DuplicateOfPageId = null;
+
+            var racedDuplicateOfPageId = string.Equals(pageTypeCode, "HTML", StringComparison.OrdinalIgnoreCase)
+                && !string.IsNullOrWhiteSpace(contentHash)
+                ? await context.Pages
+                    .Where(page =>
+                        page.Url != url &&
+                        page.PageTypeCode == "HTML" &&
+                        page.ContentHash == contentHash)
+                    .OrderBy(page => page.Id)
+                    .Select(page => (int?)page.Id)
+                    .FirstOrDefaultAsync(cancellationToken)
+                : null;
+
+            racedPage.DuplicateOfPageId = racedDuplicateOfPageId;
+            if (string.Equals(pageTypeCode, "HTML", StringComparison.OrdinalIgnoreCase) && racedDuplicateOfPageId.HasValue)
+            {
+                racedPage.PageTypeCode = "DUPLICATE";
+                racedPage.HtmlContent = null;
+                status = "updated_duplicate";
+            }
+            else
+            {
+                racedPage.PageTypeCode = pageTypeCode;
+                racedPage.HtmlContent = pageTypeCode == "HTML" ? html : null;
+                status = "updated";
+            }
 
             targetPage = racedPage;
-            status = "updated";
             await context.SaveChangesAsync(cancellationToken);
         }
 
@@ -223,6 +257,23 @@ public sealed class CrawlerRelayService
                 existingPageData.Data = parsedPayloadBytes;
                 await context.SaveChangesAsync(cancellationToken);
             }
+        }
+
+        var discoveredImageUrls = new List<string>();
+        if (request.DiscoveredImageUrls is { Count: > 0 })
+        {
+            discoveredImageUrls.AddRange(request.DiscoveredImageUrls);
+        }
+        discoveredImageUrls.AddRange(ExtractParsedImageUrls(request.DownloadResult?.ParsedPayload));
+
+        if (discoveredImageUrls.Count > 0)
+        {
+            await UpsertDiscoveredImagesAsync(
+                context,
+                targetPage,
+                discoveredImageUrls,
+                accessedTime,
+                cancellationToken);
         }
 
         var discoveredQueueCandidates = await UpsertDiscoveredLinksAsync(
@@ -767,11 +818,142 @@ public sealed class CrawlerRelayService
         return builder.Uri.AbsoluteUri;
     }
 
+    private static List<string> ExtractParsedImageUrls(JsonElement? parsedPayload)
+    {
+        if (parsedPayload is null)
+        {
+            return new List<string>();
+        }
+
+        var payload = parsedPayload.Value;
+        if (payload.ValueKind != JsonValueKind.Object
+            || !payload.TryGetProperty("images", out var imagesNode)
+            || imagesNode.ValueKind != JsonValueKind.Array)
+        {
+            return new List<string>();
+        }
+
+        var discovered = new List<string>();
+        foreach (var item in imagesNode.EnumerateArray())
+        {
+            if (item.ValueKind != JsonValueKind.String)
+            {
+                continue;
+            }
+
+            var normalized = NormalizeUrl(item.GetString());
+            if (string.IsNullOrWhiteSpace(normalized))
+            {
+                continue;
+            }
+
+            discovered.Add(normalized);
+        }
+
+        return discovered;
+    }
+
+    private static async Task UpsertDiscoveredImagesAsync(
+        CrawldbContext context,
+        Page sourcePage,
+        IReadOnlyCollection<string> discoveredImageUrls,
+        DateTime accessedTime,
+        CancellationToken cancellationToken)
+    {
+        if (discoveredImageUrls.Count == 0)
+        {
+            return;
+        }
+
+        await UpsertDiscoveredLinksAsync(
+            context,
+            sourcePage,
+            discoveredImageUrls,
+            cancellationToken,
+            insertedPageTypeCode: "BINARY",
+            promoteExistingFrontier: true,
+            queueFrontierOnly: false);
+
+        var normalizedImages = discoveredImageUrls
+            .Select(NormalizeUrl)
+            .Where(url => !string.IsNullOrWhiteSpace(url))
+            .Distinct(StringComparer.Ordinal)
+            .ToList();
+        if (normalizedImages.Count == 0)
+        {
+            return;
+        }
+
+        var existingNames = await context.Images
+            .Where(image => image.PageId == sourcePage.Id && image.Filename != null)
+            .Select(image => image.Filename!)
+            .ToHashSetAsync(StringComparer.Ordinal, cancellationToken);
+
+        foreach (var imageUrl in normalizedImages)
+        {
+            var filename = BuildImageRecordName(imageUrl);
+            if (existingNames.Contains(filename))
+            {
+                continue;
+            }
+
+            context.Images.Add(new Image
+            {
+                PageId = sourcePage.Id,
+                Filename = filename,
+                ContentType = GuessImageContentType(imageUrl),
+                Data = null,
+                AccessedTime = accessedTime,
+            });
+            existingNames.Add(filename);
+        }
+
+        await context.SaveChangesAsync(cancellationToken);
+    }
+
+    private static string BuildImageRecordName(string imageUrl)
+    {
+        var normalized = (imageUrl ?? string.Empty).Trim();
+        if (normalized.Length <= 255)
+        {
+            return normalized;
+        }
+
+        var hashSuffix = Sha256Hex(normalized)[..12];
+        return normalized[..Math.Max(0, 255 - hashSuffix.Length - 1)] + "-" + hashSuffix;
+    }
+
+    private static string? GuessImageContentType(string imageUrl)
+    {
+        if (!Uri.TryCreate(imageUrl, UriKind.Absolute, out var uri))
+        {
+            return null;
+        }
+
+        var path = uri.AbsolutePath.ToLowerInvariant();
+        return path switch
+        {
+            var value when value.EndsWith(".png") => "image/png",
+            var value when value.EndsWith(".jpg") || value.EndsWith(".jpeg") => "image/jpeg",
+            var value when value.EndsWith(".gif") => "image/gif",
+            var value when value.EndsWith(".bmp") => "image/bmp",
+            var value when value.EndsWith(".webp") => "image/webp",
+            var value when value.EndsWith(".svg") => "image/svg+xml",
+            var value when value.EndsWith(".ico") => "image/x-icon",
+            var value when value.EndsWith(".tif") || value.EndsWith(".tiff") => "image/tiff",
+            var value when value.EndsWith(".avif") => "image/avif",
+            _ => null,
+        };
+    }
+
     private static async Task<List<string>> UpsertDiscoveredLinksAsync(
         CrawldbContext context,
         Page sourcePage,
         IReadOnlyCollection<string>? discoveredUrls,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        string insertedPageTypeCode = "FRONTIER",
+        bool promoteExistingFrontier = false,
+        bool queueFrontierOnly = true)
     {
         if (discoveredUrls is null || discoveredUrls.Count == 0)
         {
@@ -800,6 +982,31 @@ public sealed class CrawlerRelayService
             .Where(page => page.Url != null && filteredUrls.Contains(page.Url))
             .ToDictionaryAsync(page => page.Url!, cancellationToken);
 
+        if (promoteExistingFrontier
+            && !string.Equals(insertedPageTypeCode, "FRONTIER", StringComparison.OrdinalIgnoreCase)
+            && knownTargets.Count > 0)
+        {
+            var changed = false;
+            foreach (var existing in knownTargets.Values)
+            {
+                if (!string.Equals(existing.PageTypeCode, "FRONTIER", StringComparison.OrdinalIgnoreCase))
+                {
+                    continue;
+                }
+
+                existing.PageTypeCode = insertedPageTypeCode;
+                existing.HtmlContent = null;
+                existing.ContentHash = null;
+                existing.DuplicateOfPageId = null;
+                changed = true;
+            }
+
+            if (changed)
+            {
+                await context.SaveChangesAsync(cancellationToken);
+            }
+        }
+
         var missingUrls = filteredUrls
             .Where(discoveredUrl => !knownTargets.ContainsKey(discoveredUrl))
             .ToList();
@@ -814,7 +1021,7 @@ public sealed class CrawlerRelayService
                 insertedTargets.Add(new Page
                 {
                     SiteId = siteId,
-                    PageTypeCode = "FRONTIER",
+                    PageTypeCode = insertedPageTypeCode,
                     Url = discoveredUrl,
                     HtmlContent = null,
                     HttpStatusCode = null,
@@ -890,6 +1097,11 @@ public sealed class CrawlerRelayService
             linkCmd.Parameters.AddWithValue("from_page", sourcePage.Id);
             linkCmd.Parameters.AddWithValue("target_ids", targetIds);
             await linkCmd.ExecuteNonQueryAsync(cancellationToken);
+        }
+
+        if (!queueFrontierOnly)
+        {
+            return new List<string>();
         }
 
         return targetPages
@@ -1182,6 +1394,7 @@ public sealed class CrawlerIngestRequest
     public int? SiteId { get; set; }
     public int? SourcePageId { get; set; }
     public List<string>? DiscoveredUrls { get; set; }
+    public List<string>? DiscoveredImageUrls { get; set; }
     public CrawlerDownloadResult? DownloadResult { get; set; }
 }
 

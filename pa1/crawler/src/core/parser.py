@@ -2,7 +2,8 @@
 extracting:
   - links from <a href="..."> attributes
   - JS navigation targets from inline JS snippets (onclick, location.href etc.)
-  - image URLs from <img src="..."> attributes
+    - image URLs from media attributes (<img src/srcset>, <source src/srcset>)
+    - image-like anchors are classified as images (not crawl links)
 
 All extracted URLs are normalized to absolute form relative to the page URL.
 """
@@ -12,7 +13,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 import re
 from typing import Iterable
-from urllib.parse import urljoin
+from urllib.parse import urljoin, urlparse
 
 from bs4 import BeautifulSoup
 
@@ -38,6 +39,20 @@ _JS_URL_PATTERNS: tuple[re.Pattern[str], ...] = (
     ),
 )
 
+_IMAGE_EXTENSIONS: tuple[str, ...] = (
+    ".avif",
+    ".bmp",
+    ".gif",
+    ".ico",
+    ".jpeg",
+    ".jpg",
+    ".png",
+    ".svg",
+    ".tif",
+    ".tiff",
+    ".webp",
+)
+
 
 def _is_probably_url(value: str) -> bool:
     if not value:
@@ -48,6 +63,38 @@ def _is_probably_url(value: str) -> bool:
     if value.lower().startswith(("javascript:", "mailto:", "tel:")):
         return False
     return True
+
+
+def _as_attr_str(value: object) -> str | None:
+    if isinstance(value, str):
+        stripped = value.strip()
+        return stripped or None
+    return None
+
+
+def _is_probably_image_url(value: str) -> bool:
+    if not value:
+        return False
+    try:
+        path = urlparse(value).path.lower()
+    except Exception:
+        return False
+    return any(path.endswith(ext) for ext in _IMAGE_EXTENSIONS)
+
+
+def _extract_srcset_candidates(srcset: str) -> list[str]:
+    if not srcset:
+        return []
+    candidates: list[str] = []
+    for part in srcset.split(","):
+        token = part.strip()
+        if not token:
+            continue
+        # srcset entries are `url [descriptor]`.
+        candidate = token.split()[0].strip()
+        if _is_probably_url(candidate):
+            candidates.append(candidate)
+    return candidates
 
 
 def _unique_preserve_order(items: Iterable[str]) -> list[str]:
@@ -93,24 +140,41 @@ def parse_outgoing_urls(
     raw_images: list[str] = []
 
     for a in soup.find_all("a"):
-        href = a.get("href")
+        href = _as_attr_str(a.get("href"))
         if href and _is_probably_url(href):
-            raw_links.append(href.strip())
+            raw_links.append(href)
 
-        onclick = a.get("onclick")
+        onclick = _as_attr_str(a.get("onclick"))
         if onclick:
             raw_links.extend(_extract_js_urls(onclick))
 
     # JS navigation can also appear on other elements (button/div)
     for el in soup.find_all(onclick=True):
-        onclick = el.get("onclick")
+        onclick = _as_attr_str(el.get("onclick"))
         if onclick:
             raw_links.extend(_extract_js_urls(onclick))
 
     for img in soup.find_all("img"):
-        src = img.get("src")
+        src = (
+            _as_attr_str(img.get("src"))
+            or _as_attr_str(img.get("data-src"))
+            or _as_attr_str(img.get("data-original"))
+        )
         if src and _is_probably_url(src):
-            raw_images.append(src.strip())
+            raw_images.append(src)
+
+        srcset = _as_attr_str(img.get("srcset"))
+        if srcset:
+            raw_images.extend(_extract_srcset_candidates(srcset))
+
+    for source in soup.find_all("source"):
+        src = _as_attr_str(source.get("src"))
+        if src and _is_probably_url(src):
+            raw_images.append(src)
+
+        srcset = _as_attr_str(source.get("srcset"))
+        if srcset:
+            raw_images.extend(_extract_srcset_candidates(srcset))
 
     # normalize to absolute + canonical
     abs_links: list[str] = []
@@ -134,8 +198,15 @@ def parse_outgoing_urls(
         except Exception:
             continue
 
+    typed_links: list[str] = []
+    for candidate in abs_links:
+        if _is_probably_image_url(candidate):
+            abs_images.append(candidate)
+            continue
+        typed_links.append(candidate)
+
     return ParseResult(
-        links=_unique_preserve_order(abs_links),
+        links=_unique_preserve_order(typed_links),
         images=_unique_preserve_order(abs_images),
     )
 
