@@ -3,28 +3,47 @@
 @using ManagerApp.Models
 @using ManagerApp.Services
 @inject IGraphService GraphService
+@inject IWorkerService WorkerService
 @inject IJSRuntime Js
 @implements IAsyncDisposable
 
 <div class="page-header">
-    <h1 class="page-title">Node Graph</h1>
-    <p class="page-subtitle">Interactive page-link topology powered by D3</p>
+    <h1 class="page-title">Graph Explorer</h1>
+    <p class="page-subtitle">Static result topology and timeline replay of crawler history</p>
 </div>
 
 <div class="page-body">
     <div class="card mb-lg">
-        <div class="flex items-center gap-md">
-            <label class="text-small text-muted">Visible node limit</label>
-            <select @bind="VisibleNodeLimit">
-                <option value="250">250</option>
-                <option value="500">500</option>
-                <option value="1000">1000</option>
-                <option value="2000">2000</option>
-            </select>
-            <button class="btn btn-primary" @onclick="ReloadGraph">
-                <span class="mdi mdi-refresh"></span> Reload
-            </button>
-            <span class="text-small text-muted">Loaded: @GraphData.Nodes.Count nodes, @GraphData.Links.Count links</span>
+        <div class="graph-mode-toolbar">
+            <div class="graph-mode-toggle" role="tablist" aria-label="Graph mode">
+                <button class="btn graph-mode-btn @(IsStaticMode ? "active" : string.Empty)" @onclick="ShowStaticMode">
+                    <span class="mdi mdi-graph-outline"></span> Static Results
+                </button>
+                <button class="btn graph-mode-btn @(!IsStaticMode ? "active" : string.Empty)" @onclick="ShowReplayMode">
+                    <span class="mdi mdi-play-network-outline"></span> Dynamic Replay
+                </button>
+            </div>
+
+            <div class="graph-mode-controls">
+                <label class="text-small text-muted">Visible node limit</label>
+                <select @bind="VisibleNodeLimit">
+                    <option value="250">250</option>
+                    <option value="500">500</option>
+                    <option value="1000">1000</option>
+                    <option value="2000">2000</option>
+                </select>
+                <button class="btn btn-primary" @onclick="ReloadGraphAsync">
+                    <span class="mdi mdi-refresh"></span> Reload
+                </button>
+            </div>
+
+            <span class="text-small text-muted graph-mode-summary">
+                Snapshot: @StaticGraphData.Nodes.Count nodes, @StaticGraphData.Links.Count links
+                @if (ReplayFrames.Count > 0)
+                {
+                    <span> · replay frames: @ReplayFrames.Count</span>
+                }
+            </span>
         </div>
     </div>
 
@@ -38,55 +57,106 @@
     }
     else
     {
-        <div class="card mb-lg graph-card">
-            <div class="graph-shell">
-                <div class="graph-main">
-                    <div class="graph-toolbar">
-                        <input type="search" placeholder="Search URL/domain..." @bind="SearchTerm" @bind:event="oninput" />
-                        <button class="btn" @onclick="FocusSearch"><span class="mdi mdi-crosshairs-gps"></span> Focus</button>
-                        <button class="btn" @onclick="ExportSvg"><span class="mdi mdi-file-image"></span> Export SVG</button>
+        @if (IsStaticMode)
+        {
+            <div class="card mb-lg graph-card">
+                <div class="graph-shell">
+                    <div class="graph-main">
+                        <div class="graph-toolbar">
+                            <input type="search" placeholder="Search URL/domain..." @bind="StaticSearchTerm" @bind:event="oninput" />
+                            <button class="btn" @onclick="FocusStaticSearch"><span class="mdi mdi-crosshairs-gps"></span> Focus</button>
+                            <button class="btn" @onclick="ExportStaticSvg"><span class="mdi mdi-file-image"></span> Export SVG</button>
+                            <div class="graph-view-switch">
+                                <span class="text-small text-muted">View</span>
+                                <button class="btn graph-view-btn" @onclick='() => SetStaticViewLevelAsync("site")'>Sites</button>
+                                <button class="btn graph-view-btn" @onclick='() => SetStaticViewLevelAsync("page")'>Pages</button>
+                            </div>
+                        </div>
+                        <div id="@StaticGraphHostId" class="graph-canvas" style="height:640px;"></div>
                     </div>
-                    <div id="@GraphHostId" class="graph-canvas" style="height:640px;"></div>
                 </div>
             </div>
-        </div>
-    }
+        }
+        else
+        {
+            <div class="card mb-lg graph-card">
+                <div class="graph-replay-toolbar mb-md">
+                    <button class="btn btn-primary" @onclick="ToggleReplayPlaybackAsync" disabled="@(ReplayFrames.Count <= 1)">
+                        <span class="mdi @(ReplayIsPlaying ? "mdi-pause" : "mdi-play")"></span>
+                        @(ReplayIsPlaying ? "Pause" : "Play")
+                    </button>
+                    <button class="btn" @onclick="ResetReplayAsync" disabled="@(ReplayFrames.Count == 0)">
+                        <span class="mdi mdi-skip-backward"></span> Reset
+                    </button>
+                    <label class="text-small text-muted">Speed</label>
+                    <select @bind="ReplayDelayMs" disabled="@(ReplayFrames.Count <= 1)">
+                        <option value="1200">0.5x</option>
+                        <option value="800">1.0x</option>
+                        <option value="400">2.0x</option>
+                        <option value="220">4.0x</option>
+                    </select>
+                    <div class="graph-view-switch">
+                        <span class="text-small text-muted">View</span>
+                        <button class="btn graph-view-btn" @onclick='() => SetReplayViewLevelAsync("site")'>Sites</button>
+                        <button class="btn graph-view-btn" @onclick='() => SetReplayViewLevelAsync("page")'>Pages</button>
+                    </div>
+                </div>
 
-    <div class="placeholder-note">
-        <div class="placeholder-note-title">
-            <span class="mdi mdi-tools"></span> Pending crawler capabilities for full live graph
-        </div>
-        <ul class="placeholder-note-list">
-            @foreach (var item in GraphPending)
-            {
-                <li>@item</li>
-            }
-        </ul>
-    </div>
+                <div class="graph-replay-scrub mb-md">
+                    <input type="range"
+                           min="0"
+                           max="@Math.Max(0, ReplayFrames.Count - 1)"
+                           value="@ReplayFrameIndex"
+                           @oninput="OnReplaySliderInputAsync"
+                           disabled="@(ReplayFrames.Count <= 1)" />
+                    <div class="text-small text-muted">@GetReplayFrameLabel()</div>
+                </div>
+
+                <div class="graph-shell">
+                    <div class="graph-main">
+                        <div class="graph-toolbar">
+                            <input type="search" placeholder="Search URL/domain..." @bind="ReplaySearchTerm" @bind:event="oninput" />
+                            <button class="btn" @onclick="FocusReplaySearch"><span class="mdi mdi-crosshairs-gps"></span> Focus</button>
+                            <button class="btn" @onclick="ExportReplaySvg"><span class="mdi mdi-file-image"></span> Export SVG</button>
+                        </div>
+                        <div id="@ReplayGraphHostId" class="graph-canvas" style="height:640px;"></div>
+                    </div>
+                </div>
+            </div>
+        }
+    }
 </div>
 
 @code {
-    private GraphDataDto GraphData = new();
+    private GraphDataDto StaticGraphData = new();
+    private GraphDataDto ReplayGraphData = new();
+    private List<ReplayFrame> ReplayFrames = new();
     private int VisibleNodeLimit = 500;
+    private int ReplayEventLimit = 2500;
     private bool IsLoading = true;
     private string? Error;
-    private string? SearchTerm;
-    private readonly string GraphHostId = $"graph_{Guid.NewGuid():N}";
+    private string GraphMode = "static";
+    private string? StaticSearchTerm;
+    private string? ReplaySearchTerm;
+    private int ReplayFrameIndex;
+    private bool ReplayIsPlaying;
+    private int ReplayDelayMs = 800;
+    private readonly string StaticGraphHostId = $"graph_static_{Guid.NewGuid():N}";
+    private readonly string ReplayGraphHostId = $"graph_replay_{Guid.NewGuid():N}";
     private IJSObjectReference? _graphModule;
     private readonly CancellationTokenSource _refreshCts = new();
     private Task? _refreshTask;
+    private CancellationTokenSource? _replayCts;
+    private Task? _replayTask;
 
-    private IReadOnlyList<string> GraphPending =>
-    [
-        "Graph now keeps zoom and simulation state between reloads instead of resetting the camera.",
-        "Zoomed-out view groups island components; zooming in progressively reveals more edges.",
-        "Seeds start centered and spread out, and newly discovered nodes spawn near active worker markers.",
-        "Graph export supports SVG output."
-    ];
+    private bool IsStaticMode => string.Equals(GraphMode, "static", StringComparison.OrdinalIgnoreCase);
+    private ReplayFrame? ActiveReplayFrame => ReplayFrames.Count == 0
+        ? null
+        : ReplayFrames[Math.Clamp(ReplayFrameIndex, 0, ReplayFrames.Count - 1)];
 
     protected override async Task OnInitializedAsync()
     {
-        await ReloadGraph();
+        await ReloadGraphAsync();
         _refreshTask = RunAutoRefreshLoopAsync(_refreshCts.Token);
     }
 
@@ -97,17 +167,42 @@
             _graphModule = await Js.InvokeAsync<IJSObjectReference>("import", "./js/graph.js");
         }
 
-        await TryRenderGraphAsync();
+        await TryRenderVisibleGraphAsync();
     }
 
-    private async Task ReloadGraph()
+    private async Task ReloadGraphAsync()
     {
+        var previousReplayCount = ReplayFrames.Count;
+        var previousReplayIndex = ReplayFrameIndex;
+
         IsLoading = true;
         Error = null;
 
         try
         {
-            GraphData = await GraphService.GetGraphDataAsync(VisibleNodeLimit);
+            StaticGraphData = await GraphService.GetGraphDataAsync(VisibleNodeLimit);
+            var recentEvents = await WorkerService.GetRecentCrawlerEventsAsync(ReplayEventLimit);
+            ReplayFrames = BuildReplayFrames(StaticGraphData, recentEvents);
+
+            if (ReplayFrames.Count == 0)
+            {
+                ReplayFrameIndex = 0;
+                ReplayGraphData = new GraphDataDto();
+            }
+            else if (previousReplayCount > 1)
+            {
+                var previousRatio = previousReplayCount <= 1
+                    ? 0d
+                    : previousReplayIndex / (double)(previousReplayCount - 1);
+                ReplayFrameIndex = (int)Math.Round(previousRatio * (ReplayFrames.Count - 1));
+                ReplayFrameIndex = Math.Clamp(ReplayFrameIndex, 0, ReplayFrames.Count - 1);
+                ApplyReplayFrame();
+            }
+            else
+            {
+                ReplayFrameIndex = 0;
+                ApplyReplayFrame();
+            }
         }
         catch (Exception ex)
         {
@@ -118,7 +213,7 @@
             IsLoading = false;
         }
 
-        await TryRenderGraphAsync();
+        await TryRenderVisibleGraphAsync();
     }
 
     private async Task RunAutoRefreshLoopAsync(CancellationToken cancellationToken)
@@ -140,49 +235,688 @@
 
             await InvokeAsync(async () =>
             {
-                if (!IsLoading)
+                if (!IsLoading && !ReplayIsPlaying)
                 {
-                    await ReloadGraph();
+                    await ReloadGraphAsync();
                     StateHasChanged();
                 }
             });
         }
     }
 
-    private async Task TryRenderGraphAsync()
+    private async Task TryRenderVisibleGraphAsync()
     {
-        if (_graphModule == null || IsLoading || !string.IsNullOrWhiteSpace(Error) || GraphData.Nodes.Count == 0)
+        if (IsStaticMode)
+        {
+            await TryRenderStaticGraphAsync();
+            return;
+        }
+
+        await TryRenderReplayGraphAsync();
+    }
+
+    private async Task TryRenderStaticGraphAsync()
+    {
+        if (_graphModule == null || IsLoading || !string.IsNullOrWhiteSpace(Error) || StaticGraphData.Nodes.Count == 0)
         {
             return;
         }
 
-        var payload = JsonSerializer.Serialize(GraphData);
-        await _graphModule.InvokeVoidAsync("renderGraph", GraphHostId, payload);
+        var payload = JsonSerializer.Serialize(StaticGraphData);
+        await _graphModule.InvokeVoidAsync("renderGraph", StaticGraphHostId, payload);
     }
 
-    private async Task FocusSearch()
+    private async Task TryRenderReplayGraphAsync()
     {
-        if (_graphModule == null || string.IsNullOrWhiteSpace(SearchTerm))
+        if (_graphModule == null || IsLoading || !string.IsNullOrWhiteSpace(Error) || ReplayGraphData.Nodes.Count == 0)
         {
             return;
         }
 
-        await _graphModule.InvokeVoidAsync("focusNode", GraphHostId, SearchTerm.Trim());
+        var payload = JsonSerializer.Serialize(ReplayGraphData);
+        await _graphModule.InvokeVoidAsync("renderGraph", ReplayGraphHostId, payload);
     }
 
-    private async Task ExportSvg()
+    private async Task ShowStaticMode()
+    {
+        GraphMode = "static";
+        await TryRenderVisibleGraphAsync();
+    }
+
+    private async Task ShowReplayMode()
+    {
+        GraphMode = "replay";
+        if (ReplayFrames.Count > 0 && ReplayGraphData.Nodes.Count == 0)
+        {
+            ApplyReplayFrame();
+        }
+
+        await TryRenderVisibleGraphAsync();
+    }
+
+    private async Task FocusStaticSearch()
+    {
+        if (_graphModule == null || string.IsNullOrWhiteSpace(StaticSearchTerm))
+        {
+            return;
+        }
+
+        await _graphModule.InvokeVoidAsync("focusNode", StaticGraphHostId, StaticSearchTerm.Trim());
+    }
+
+    private async Task FocusReplaySearch()
+    {
+        if (_graphModule == null || string.IsNullOrWhiteSpace(ReplaySearchTerm))
+        {
+            return;
+        }
+
+        await _graphModule.InvokeVoidAsync("focusNode", ReplayGraphHostId, ReplaySearchTerm.Trim());
+    }
+
+    private async Task ExportStaticSvg()
     {
         if (_graphModule == null)
         {
             return;
         }
 
-        await _graphModule.InvokeVoidAsync("exportSvg", GraphHostId, $"crawler-graph-{DateTime.UtcNow:yyyyMMdd-HHmmss}.svg");
+        await _graphModule.InvokeVoidAsync("exportSvg", StaticGraphHostId, $"crawler-graph-static-{DateTime.UtcNow:yyyyMMdd-HHmmss}.svg");
+    }
+
+    private async Task ExportReplaySvg()
+    {
+        if (_graphModule == null)
+        {
+            return;
+        }
+
+        await _graphModule.InvokeVoidAsync("exportSvg", ReplayGraphHostId, $"crawler-graph-replay-{DateTime.UtcNow:yyyyMMdd-HHmmss}.svg");
+    }
+
+    private async Task SetStaticViewLevelAsync(string level)
+    {
+        if (_graphModule == null)
+        {
+            return;
+        }
+
+        await _graphModule.InvokeVoidAsync("setViewLevel", StaticGraphHostId, level);
+    }
+
+    private async Task SetReplayViewLevelAsync(string level)
+    {
+        if (_graphModule == null)
+        {
+            return;
+        }
+
+        await _graphModule.InvokeVoidAsync("setViewLevel", ReplayGraphHostId, level);
+    }
+
+    private async Task ToggleReplayPlaybackAsync()
+    {
+        if (ReplayFrames.Count <= 1)
+        {
+            return;
+        }
+
+        if (ReplayIsPlaying)
+        {
+            await StopReplayAsync();
+            return;
+        }
+
+        if (ReplayFrameIndex >= ReplayFrames.Count - 1)
+        {
+            ReplayFrameIndex = 0;
+            ApplyReplayFrame();
+            await TryRenderReplayGraphAsync();
+        }
+
+        ReplayIsPlaying = true;
+        _replayCts = new CancellationTokenSource();
+        _replayTask = Task.Run(() => RunReplayLoopAsync(_replayCts.Token));
+    }
+
+    private async Task RunReplayLoopAsync(CancellationToken cancellationToken)
+    {
+        try
+        {
+            while (!cancellationToken.IsCancellationRequested)
+            {
+                if (!ReplayIsPlaying)
+                {
+                    break;
+                }
+
+                var delay = Math.Clamp(ReplayDelayMs, 160, 3000);
+                await Task.Delay(delay, cancellationToken);
+
+                if (!ReplayIsPlaying)
+                {
+                    break;
+                }
+
+                var reachedEnd = false;
+
+                await InvokeAsync(async () =>
+                {
+                    if (!ReplayIsPlaying || ReplayFrames.Count <= 1)
+                    {
+                        return;
+                    }
+
+                    if (ReplayFrameIndex >= ReplayFrames.Count - 1)
+                    {
+                        ReplayIsPlaying = false;
+                        reachedEnd = true;
+                        StateHasChanged();
+                        return;
+                    }
+
+                    ReplayFrameIndex++;
+                    ApplyReplayFrame();
+                    await TryRenderReplayGraphAsync();
+                    StateHasChanged();
+                });
+
+                if (reachedEnd)
+                {
+                    break;
+                }
+            }
+        }
+        catch (OperationCanceledException)
+        {
+            // Expected when replay is paused/stopped.
+        }
+        finally
+        {
+            await InvokeAsync(() =>
+            {
+                if (_replayCts is not null && _replayCts.Token == cancellationToken)
+                {
+                    _replayCts.Dispose();
+                    _replayCts = null;
+                    _replayTask = null;
+                }
+            });
+        }
+    }
+
+    private async Task StopReplayAsync()
+    {
+        ReplayIsPlaying = false;
+
+        if (_replayCts is null)
+        {
+            return;
+        }
+
+        _replayCts.Cancel();
+
+        if (_replayTask is not null)
+        {
+            try
+            {
+                await _replayTask;
+            }
+            catch (OperationCanceledException)
+            {
+                // Expected when cancellation token is triggered.
+            }
+        }
+
+        _replayCts.Dispose();
+        _replayCts = null;
+        _replayTask = null;
+    }
+
+    private async Task ResetReplayAsync()
+    {
+        await StopReplayAsync();
+
+        if (ReplayFrames.Count == 0)
+        {
+            return;
+        }
+
+        ReplayFrameIndex = 0;
+        ApplyReplayFrame();
+        await TryRenderReplayGraphAsync();
+    }
+
+    private async Task OnReplaySliderInputAsync(ChangeEventArgs args)
+    {
+        if (!int.TryParse(Convert.ToString(args.Value), out var requestedIndex))
+        {
+            return;
+        }
+
+        await StopReplayAsync();
+        ReplayFrameIndex = Math.Clamp(requestedIndex, 0, Math.Max(0, ReplayFrames.Count - 1));
+        ApplyReplayFrame();
+        await TryRenderReplayGraphAsync();
+    }
+
+    private string GetReplayFrameLabel()
+    {
+        if (ReplayFrames.Count == 0)
+        {
+            return "Replay timeline unavailable (no URL-mapped events yet).";
+        }
+
+        var frame = ActiveReplayFrame;
+        var ordinal = ReplayFrameIndex + 1;
+        var total = ReplayFrames.Count;
+        var timestamp = frame?.TimestampUtc.ToLocalTime().ToString("HH:mm:ss") ?? "n/a";
+        var label = frame?.Label ?? "event";
+        return $"Frame {ordinal}/{total} · {timestamp} · {label}";
+    }
+
+    private void ApplyReplayFrame()
+    {
+        if (ReplayFrames.Count == 0)
+        {
+            ReplayGraphData = new GraphDataDto();
+            return;
+        }
+
+        var frame = ActiveReplayFrame;
+        if (frame is null)
+        {
+            ReplayGraphData = new GraphDataDto();
+            return;
+        }
+
+        ReplayGraphData = CloneGraphData(frame.Data);
+    }
+
+    private List<ReplayFrame> BuildReplayFrames(
+        GraphDataDto snapshot,
+        IReadOnlyList<CrawlerEventViewModel> events)
+    {
+        var frames = new List<ReplayFrame>();
+        if (snapshot.Nodes.Count == 0)
+        {
+            return frames;
+        }
+
+        var nodeById = snapshot.Nodes.ToDictionary(node => node.Id);
+        var linkByKey = snapshot.Links.ToDictionary(LinkKey, link => link, StringComparer.Ordinal);
+        var linksByNode = BuildLinksByNode(snapshot.Links);
+        var urlNodeIndex = BuildUrlNodeIndex(snapshot.Nodes);
+
+        var shownNodeIds = new HashSet<int>();
+        var shownLinkKeys = new HashSet<string>(StringComparer.Ordinal);
+
+        foreach (var seed in snapshot.Nodes
+                     .OrderByDescending(node => node.Size)
+                     .ThenBy(node => node.Id)
+                     .Take(Math.Min(12, snapshot.Nodes.Count)))
+        {
+            shownNodeIds.Add(seed.Id);
+        }
+
+        AddConnectedLinks(shownNodeIds, shownLinkKeys, linksByNode);
+        frames.Add(CreateReplayFrame(
+            events.Count > 0 ? events.Min(evt => evt.TimestampUtc) : DateTime.UtcNow,
+            "seed snapshot",
+            shownNodeIds,
+            shownLinkKeys,
+            nodeById,
+            linkByKey,
+            snapshot.Workers));
+
+        var orderedEvents = events.OrderBy(evt => evt.TimestampUtc);
+        var maxFrames = 650;
+
+        foreach (var evt in orderedEvents)
+        {
+            if (!TryExtractReplayUrl(evt.PayloadJson, out var replayUrl)
+                || !TryResolveNodeIdForUrl(replayUrl, urlNodeIndex, out var nodeId))
+            {
+                continue;
+            }
+
+            if (!shownNodeIds.Add(nodeId))
+            {
+                continue;
+            }
+
+            AddLinksForNode(nodeId, shownNodeIds, shownLinkKeys, linksByNode);
+            frames.Add(CreateReplayFrame(
+                evt.TimestampUtc,
+                BuildReplayLabel(evt.Type, evt.WorkerId, replayUrl),
+                shownNodeIds,
+                shownLinkKeys,
+                nodeById,
+                linkByKey,
+                snapshot.Workers));
+
+            if (frames.Count >= maxFrames)
+            {
+                break;
+            }
+        }
+
+        if (shownNodeIds.Count < snapshot.Nodes.Count)
+        {
+            frames.Add(new ReplayFrame
+            {
+                TimestampUtc = events.Count > 0 ? events.Max(evt => evt.TimestampUtc) : DateTime.UtcNow,
+                Label = "snapshot sync",
+                Data = CloneGraphData(snapshot),
+            });
+        }
+
+        return frames;
+    }
+
+    private static Dictionary<int, List<GraphLinkDto>> BuildLinksByNode(IEnumerable<GraphLinkDto> links)
+    {
+        var map = new Dictionary<int, List<GraphLinkDto>>();
+        foreach (var link in links)
+        {
+            if (!map.TryGetValue(link.Source, out var sourceLinks))
+            {
+                sourceLinks = new List<GraphLinkDto>();
+                map[link.Source] = sourceLinks;
+            }
+
+            sourceLinks.Add(link);
+
+            if (!map.TryGetValue(link.Target, out var targetLinks))
+            {
+                targetLinks = new List<GraphLinkDto>();
+                map[link.Target] = targetLinks;
+            }
+
+            targetLinks.Add(link);
+        }
+
+        return map;
+    }
+
+    private static Dictionary<string, int> BuildUrlNodeIndex(IEnumerable<GraphNodeDto> nodes)
+    {
+        var map = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+        foreach (var node in nodes)
+        {
+            foreach (var key in ExpandReplayUrlKeys(node.Url))
+            {
+                map.TryAdd(key, node.Id);
+            }
+        }
+
+        return map;
+    }
+
+    private static IEnumerable<string> ExpandReplayUrlKeys(string? rawUrl)
+    {
+        var url = (rawUrl ?? string.Empty).Trim();
+        if (string.IsNullOrWhiteSpace(url))
+        {
+            yield break;
+        }
+
+        yield return url;
+        yield return url.TrimEnd('/');
+
+        if (!Uri.TryCreate(url, UriKind.Absolute, out var uri))
+        {
+            yield break;
+        }
+
+        var canonical = uri.GetComponents(UriComponents.SchemeAndServer | UriComponents.PathAndQuery, UriFormat.Unescaped);
+        yield return canonical;
+        yield return canonical.TrimEnd('/');
+    }
+
+    private static bool TryResolveNodeIdForUrl(string url, IReadOnlyDictionary<string, int> index, out int nodeId)
+    {
+        foreach (var key in ExpandReplayUrlKeys(url))
+        {
+            if (index.TryGetValue(key, out nodeId))
+            {
+                return true;
+            }
+        }
+
+        nodeId = default;
+        return false;
+    }
+
+    private static void AddConnectedLinks(
+        IReadOnlySet<int> shownNodes,
+        ISet<string> shownLinkKeys,
+        IReadOnlyDictionary<int, List<GraphLinkDto>> linksByNode)
+    {
+        foreach (var nodeId in shownNodes)
+        {
+            AddLinksForNode(nodeId, shownNodes, shownLinkKeys, linksByNode);
+        }
+    }
+
+    private static void AddLinksForNode(
+        int nodeId,
+        IReadOnlySet<int> shownNodes,
+        ISet<string> shownLinkKeys,
+        IReadOnlyDictionary<int, List<GraphLinkDto>> linksByNode)
+    {
+        if (!linksByNode.TryGetValue(nodeId, out var links))
+        {
+            return;
+        }
+
+        foreach (var link in links)
+        {
+            if (shownNodes.Contains(link.Source) && shownNodes.Contains(link.Target))
+            {
+                shownLinkKeys.Add(LinkKey(link));
+            }
+        }
+    }
+
+    private static ReplayFrame CreateReplayFrame(
+        DateTime timestampUtc,
+        string label,
+        IReadOnlySet<int> shownNodeIds,
+        IReadOnlyCollection<string> shownLinkKeys,
+        IReadOnlyDictionary<int, GraphNodeDto> nodeById,
+        IReadOnlyDictionary<string, GraphLinkDto> linkByKey,
+        IReadOnlyCollection<GraphWorkerDto> workers)
+    {
+        var nodes = shownNodeIds
+            .Where(nodeById.ContainsKey)
+            .Select(id => CloneNode(nodeById[id]))
+            .OrderBy(node => node.Id)
+            .ToList();
+
+        var links = shownLinkKeys
+            .Where(linkByKey.ContainsKey)
+            .Select(key => CloneLink(linkByKey[key]))
+            .OrderBy(link => link.Source)
+            .ThenBy(link => link.Target)
+            .ToList();
+
+        var visibleNodeSet = shownNodeIds.ToHashSet();
+        var visibleWorkers = workers
+            .Where(worker => worker.CurrentNodeId.HasValue && visibleNodeSet.Contains(worker.CurrentNodeId.Value))
+            .Select(CloneWorker)
+            .ToList();
+
+        return new ReplayFrame
+        {
+            TimestampUtc = timestampUtc,
+            Label = label,
+            Data = new GraphDataDto
+            {
+                Nodes = nodes,
+                Links = links,
+                Workers = visibleWorkers,
+            },
+        };
+    }
+
+    private static bool TryExtractReplayUrl(string payloadJson, out string url)
+    {
+        url = string.Empty;
+        if (string.IsNullOrWhiteSpace(payloadJson))
+        {
+            return false;
+        }
+
+        try
+        {
+            using var document = JsonDocument.Parse(payloadJson);
+            if (document.RootElement.ValueKind != JsonValueKind.Object)
+            {
+                return false;
+            }
+
+            if (TryReadUrlProperty(document.RootElement, out url))
+            {
+                return true;
+            }
+
+            if (document.RootElement.TryGetProperty("message", out var messageNode)
+                && messageNode.ValueKind == JsonValueKind.String)
+            {
+                return TryExtractUrlFromMessage(messageNode.GetString(), out url);
+            }
+
+            if (document.RootElement.TryGetProperty("downloadResult", out var downloadNode)
+                && downloadNode.ValueKind == JsonValueKind.Object
+                && TryReadUrlProperty(downloadNode, out url))
+            {
+                return true;
+            }
+        }
+        catch
+        {
+            return false;
+        }
+
+        return false;
+    }
+
+    private static bool TryReadUrlProperty(JsonElement root, out string url)
+    {
+        url = string.Empty;
+        var keys = new[] { "url", "finalUrl", "requestedUrl", "rawUrl" };
+        foreach (var key in keys)
+        {
+            if (!root.TryGetProperty(key, out var value) || value.ValueKind != JsonValueKind.String)
+            {
+                continue;
+            }
+
+            var candidate = (value.GetString() ?? string.Empty).Trim();
+            if (Uri.TryCreate(candidate, UriKind.Absolute, out _))
+            {
+                url = candidate;
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    private static bool TryExtractUrlFromMessage(string? message, out string url)
+    {
+        url = string.Empty;
+        if (string.IsNullOrWhiteSpace(message))
+        {
+            return false;
+        }
+
+        var marker = "url=";
+        var start = message.IndexOf(marker, StringComparison.OrdinalIgnoreCase);
+        if (start < 0)
+        {
+            return false;
+        }
+
+        start += marker.Length;
+        var end = message.IndexOfAny(new[] { ' ', '|', ',' }, start);
+        var candidate = (end >= 0 ? message[start..end] : message[start..]).Trim();
+        if (!Uri.TryCreate(candidate, UriKind.Absolute, out _))
+        {
+            return false;
+        }
+
+        url = candidate;
+        return true;
+    }
+
+    private static string BuildReplayLabel(string eventType, int? workerId, string url)
+    {
+        var workerLabel = workerId.HasValue ? $"w{workerId.Value}" : "w-";
+        return $"{eventType} · {workerLabel} · {url}";
+    }
+
+    private static string LinkKey(GraphLinkDto link)
+    {
+        return $"{link.Source}->{link.Target}";
+    }
+
+    private static GraphDataDto CloneGraphData(GraphDataDto source)
+    {
+        return new GraphDataDto
+        {
+            Nodes = source.Nodes.Select(CloneNode).ToList(),
+            Links = source.Links.Select(CloneLink).ToList(),
+            Workers = source.Workers.Select(CloneWorker).ToList(),
+        };
+    }
+
+    private static GraphNodeDto CloneNode(GraphNodeDto source)
+    {
+        return new GraphNodeDto
+        {
+            Id = source.Id,
+            Url = source.Url,
+            Domain = source.Domain,
+            PageType = source.PageType,
+            Size = source.Size,
+        };
+    }
+
+    private static GraphLinkDto CloneLink(GraphLinkDto source)
+    {
+        return new GraphLinkDto
+        {
+            Source = source.Source,
+            Target = source.Target,
+        };
+    }
+
+    private static GraphWorkerDto CloneWorker(GraphWorkerDto source)
+    {
+        return new GraphWorkerDto
+        {
+            Id = source.Id,
+            Name = source.Name,
+            Status = source.Status,
+            CurrentUrl = source.CurrentUrl,
+            CurrentNodeId = source.CurrentNodeId,
+        };
+    }
+
+    private sealed class ReplayFrame
+    {
+        public DateTime TimestampUtc { get; init; }
+        public string Label { get; init; } = "event";
+        public GraphDataDto Data { get; init; } = new();
     }
 
     public async ValueTask DisposeAsync()
     {
         _refreshCts.Cancel();
+        await StopReplayAsync();
+
         if (_refreshTask is not null)
         {
             try

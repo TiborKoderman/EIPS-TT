@@ -134,11 +134,11 @@
                     <div class="dashboard-queue-widget mt-md">
                         <div class="text-small font-semibold mb-sm">Top queue items (non-claimed)</div>
                         <div class="dashboard-queue-viewport">
-                            <ul class="list dashboard-queue-list ticker" style="--rows:@topQueueItems.Count;">
+                            <ul class="list dashboard-queue-list">
                                 @foreach (var item in topQueueItems)
                                 {
                                     var tooltip = $"{item.State} | reason=queued | url={item.Url}";
-                                    <li class="dashboard-queue-row" title="@tooltip">
+                                    <li class="dashboard-queue-row" title="@tooltip" @key="item.Url">
                                         <div class="flex items-center justify-between gap-sm">
                                             <span class="badge @GetQueueStateBadgeClass(item.State)">@item.State.ToUpperInvariant()</span>
                                             <span class="text-small font-semibold">R @item.RelevanceScore.ToString("0.00")</span>
@@ -329,7 +329,7 @@
     private void StartWorkerRefreshLoop()
     {
         refreshCts = new CancellationTokenSource();
-        refreshTimer = new PeriodicTimer(TimeSpan.FromSeconds(4));
+        refreshTimer = new PeriodicTimer(TimeSpan.FromSeconds(2));
         _ = PollWorkersAsync(refreshTimer, refreshCts.Token);
     }
 

@@ -331,12 +331,8 @@ function initializeGraph(hostId, host, queueMode) {
 }
 
 function getViewLevel(scale) {
-  if (scale < 0.55) {
+  if (scale < 0.95) {
     return "domain";
-  }
-
-  if (scale < 1.45) {
-    return "subdomain";
   }
 
   return "item";
@@ -1470,4 +1466,27 @@ export function exportSvg(hostId, filename) {
   document.body.removeChild(anchor);
 
   URL.revokeObjectURL(url);
+}
+
+export function setViewLevel(hostId, level) {
+  const graph = state.get(hostId);
+  if (!graph) {
+    return;
+  }
+
+  const normalized = String(level || "").toLowerCase();
+  const targetScale = normalized === "site" ? 0.45 : 2;
+  const current = graph.currentTransform || d3.zoomIdentity;
+  const centerWorldX = (graph.width / 2 - current.x) / current.k;
+  const centerWorldY = (graph.height / 2 - current.y) / current.k;
+
+  const targetTransform = d3.zoomIdentity
+    .translate(graph.width / 2 - centerWorldX * targetScale, graph.height / 2 - centerWorldY * targetScale)
+    .scale(targetScale);
+
+  graph.currentTransform = targetTransform;
+  graph.svg
+    .transition()
+    .duration(280)
+    .call(graph.zoom.transform, targetTransform);
 }

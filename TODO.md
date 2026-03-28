@@ -94,6 +94,9 @@ Last rebuilt: 2026-03-26
 - [x] Added ingest race-recovery guards for concurrent `crawldb.page.url` conflicts in `/api/crawler/ingest` and resilient discovered frontier upserts.
 - [x] Optimized discovered URL ingestion path with per-batch site-id cache and batched link insert (`unnest(@target_ids)`), reducing per-link round-trips.
 - [x] Validated concurrent ingest + queue lifecycle end-to-end (12 parallel ingests, dequeue, complete) with DB verification of deduped queue/page counts.
+- [x] Split graph UI into two force-graph modes: static results snapshot and dynamic replay timeline driven by crawler event history.
+- [x] Added replay controls (play/pause/reset/speed/scrub) and explicit two-level graph focus controls (sites/pages).
+- [x] Updated dashboard queue list rendering/poll cadence so replacement queued URLs reappear immediately after claims.
 
 ## Pending follow-ups
 

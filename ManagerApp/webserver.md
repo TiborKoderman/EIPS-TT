@@ -49,6 +49,9 @@ UI-configurable parameters should cover:
 - Worker count limits and concurrency settings
 - Crawl strategy controls (politeness, robots policy, preferential scoring)
 - Refresh/streaming cadence and dashboard filters
+- Graph exploration mode selection:
+   - Static results graph (database snapshot)
+   - Dynamic replay graph (crawler event history timeline)
 
 ## Daemon Start Script Generation
 
@@ -80,6 +83,14 @@ All transitions are logged with timestamp and reason.
 - **Lease management:** Automatic requeue on worker timeout/failure
 - **Delegate politeness scheduling:** Claim/dequeue skips cooled-down candidates per crawler daemon and resolved site IP, then returns the next valid URL
 - **Priority visualization:** Show high-priority pending URLs to operators
+- **Queue list continuity:** Dashboard queue view refreshes frequently and immediately shows replacement queued URLs after claims
+
+## Graph Visualization Features
+
+- **Static graph:** Current page/link topology snapshot for results inspection
+- **Dynamic replay:** Timeline playback that replays crawler event history over graph growth
+- **Replay controls:** Play/pause, reset, speed control, and scrub slider
+- **Two-level interaction:** Site-level and page-level exploration via zoom/click or explicit level controls
 
 ## Instance Management Rule
 
