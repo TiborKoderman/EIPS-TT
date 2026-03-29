@@ -1,0 +1,64 @@
+/* GitLab-inspired light theme with green primary accents */
+:root {
+    /* Primary colors */
+    --color-primary: #2e7d5b;
+    --color-primary-hover: #266b4d;
+    --color-primary-light: #e8f3ed;
+
+    /* Neutral colors */
+    --color-bg-base: #ffffff;
+    --color-bg-alt: #f4f6f5;
+    --color-bg-hover: #edf1ef;
+    --color-border: #d4ddd8;
+    --color-border-light: #e5ebe8;
+
+    /* Text colors */
+    --color-text-primary: #1f2d26;
+    --color-text-secondary: #44554d;
+    --color-text-tertiary: #6e7f76;
+
+    /* Status colors */
+    --color-success: #217645;
+    --color-success-light: #e9f5ed;
+    --color-warning: #b07a19;
+    --color-warning-light: #fbf4e5;
+    --color-error: #bf3020;
+    --color-error-light: #fbefed;
+    --color-info: #2f6db2;
+    --color-info-light: #eaf1fb;
+
+    /* Component colors */
+    --color-sidebar-bg: #ffffff;
+    --color-sidebar-text: #2f3a34;
+    --color-sidebar-hover: #f0f5f2;
+    --color-sidebar-active: #e3f0e9;
+
+    /* Spacing */
+    --spacing-xs: 4px;
+    --spacing-sm: 8px;
+    --spacing-md: 16px;
+    --spacing-lg: 24px;
+    --spacing-xl: 32px;
+
+    /* Border radius */
+    --radius-sm: 4px;
+    --radius-md: 6px;
+    --radius-lg: 8px;
+
+    /* Shadows */
+    --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.05);
+    --shadow-md: 0 2px 4px rgba(0, 0, 0, 0.1);
+    --shadow-lg: 0 4px 8px rgba(0, 0, 0, 0.15);
+
+    /* Transitions */
+    --transition-fast: 150ms ease;
+    --transition-normal: 250ms ease;
+
+    /* Font */
+    --font-family: "IBM Plex Sans", "Source Sans 3", "Noto Sans", sans-serif;
+    --font-size-base: 14px;
+    --font-size-sm: 12px;
+    --font-size-lg: 16px;
+    --font-size-xl: 18px;
+    --font-size-xxl: 24px;
+}

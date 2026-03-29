@@ -1,0 +1,591 @@
+@page "/workers/strategy"
+@using System.Text.Json
+@using ManagerApp.Models
+@using ManagerApp.Services
+@implements IAsyncDisposable
+@inject IWorkerService WorkerService
+
+<div class="page-header">
+    <div class="page-header-main">
+        <div>
+            <h1 class="page-title">Worker Strategy</h1>
+            <p class="page-subtitle">Server-first queue orchestration, seed rebalancing, and daemon strategy health</p>
+        </div>
+        <a class="btn" href="/workers/config">
+            <span class="mdi mdi-cog-outline"></span>
+            Global Config
+        </a>
+    </div>
+</div>
+
+<div class="page-body">
+    @if (isLoading)
+    {
+        <div class="card"><p>Loading strategy data...</p></div>
+    }
+    else if (globalConfig == null)
+    {
+        <div class="card"><p class="text-muted">Unable to load strategy configuration.</p></div>
+    }
+    else
+    {
+        <div class="card mb-lg">
+            <h2 class="card-title">Strategy Controls</h2>
+            <div class="workers-config-grid mb-sm">
+                <label>
+                    <span class="text-small text-muted">Score Function</span>
+                    <select @bind="scoreFunction">
+                        <option value="rendezvous">Rendezvous Hash</option>
+                        <option value="round_robin">Round Robin</option>
+                        <option value="weighted">Weighted Runtime</option>
+                    </select>
+                </label>
+                <label>
+                    <span class="text-small text-muted">Weight: Pages</span>
+                    <input type="number" step="0.1" @bind="scoreWeightPages" />
+                </label>
+                <label>
+                    <span class="text-small text-muted">Weight: Errors</span>
+                    <input type="number" step="0.1" @bind="scoreWeightErrors" />
+                </label>
+            </div>
+            <div class="flex items-center gap-sm" style="flex-wrap: wrap;">
+                <button class="btn" @onclick="SaveScoreFunction">
+                    <span class="mdi mdi-content-save"></span>
+                    Save Score Function
+                </button>
+                <button class="btn btn-primary" @onclick="EnforceServerQueueOnly">
+                    <span class="mdi mdi-server-network"></span>
+                    Enforce Server-Only Queue
+                </button>
+                <button class="btn" @onclick="RebalanceSeedsAcrossWorkers">
+                    <span class="mdi mdi-transit-connection-variant"></span>
+                    Rebalance Seeds Across Workers
+                </button>
+                <button class="btn" @onclick="RefreshAll">
+                    <span class="mdi mdi-refresh"></span>
+                    Refresh
+                </button>
+            </div>
+            @if (!string.IsNullOrWhiteSpace(statusMessage))
+            {
+                <p class="text-small text-muted mt-sm">@statusMessage</p>
+            }
+        </div>
+
+        <div class="grid grid-cols-4 mb-lg">
+            <StatCard Label="Queue Mode" Value="@globalConfig.QueueMode.ToUpperInvariant()" Footnote="Preferred default" />
+            <StatCard Label="Enabled Seeds" Value="@enabledSeeds.Count.ToString()" Footnote="From global config" />
+            <StatCard Label="Workers" Value="@workers.Count.ToString()" Footnote="Available for balancing" />
+            <StatCard Label="Daemons" Value="@groups.Count.ToString()" Footnote="Strategy segments" />
+        </div>
+
+        @if (frontierStatus != null)
+        {
+            <div class="grid grid-cols-4 mb-lg">
+                <StatCard Label="Global Queue" Value="@frontierStatus.InMemoryQueued.ToString()" Footnote="Daemon in-memory" />
+                <StatCard Label="Local Queues" Value="@frontierStatus.LocalQueued.ToString()" Footnote="Worker-local queued" />
+                <StatCard Label="Active Leases" Value="@frontierStatus.ActiveLeases.ToString()" Footnote="Claim ownership" />
+                <StatCard Label="Tombstones" Value="@frontierStatus.Tombstones.ToString()" Footnote="Recent completions" />
+            </div>
+        }
+
+        <div class="card mb-lg">
+            <h2 class="card-title">Planned Seed Distribution</h2>
+            @if (plannedAssignments.Count == 0)
+            {
+                <p class="text-small text-muted">No assignment possible. Ensure you have enabled seeds and available workers.</p>
+            }
+            else
+            {
+                <ul class="list">
+                    @foreach (var assignment in plannedAssignments)
+                    {
+                        <li class="list-item">
+                            <div class="flex items-center justify-between gap-sm">
+                                <strong>@assignment.SeedUrl</strong>
+                                <span class="badge badge-info">Worker @assignment.WorkerId</span>
+                            </div>
+                            <div class="text-small text-muted">@assignment.WorkerName</div>
+                        </li>
+                    }
+                </ul>
+            }
+        </div>
+
+        <div class="card mb-lg">
+            <h2 class="card-title">Daemon Strategy View</h2>
+            <ul class="list">
+                @foreach (var group in groups.OrderBy(g => g.Name))
+                {
+                    var assigned = workers.Count(w => group.WorkerIds.Contains(w.Id));
+                    <li class="list-item">
+                        <div class="flex items-center justify-between gap-sm">
+                            <strong>@group.Name</strong>
+                            <span class="badge @(group.Enabled ? "badge-success" : "badge-warning")">@(group.Enabled ? "Enabled" : "Disabled")</span>
+                        </div>
+                        <div class="text-small text-muted">
+                            Queue: @(string.IsNullOrWhiteSpace(group.QueueMode) ? "global" : group.QueueMode)
+                            | Strategy: @(string.IsNullOrWhiteSpace(group.StrategyMode) ? "global" : group.StrategyMode)
+                            | Workers: @assigned
+                        </div>
+                    </li>
+                }
+            </ul>
+        </div>
+
+        @if (lastRunResults.Count > 0)
+        {
+            <div class="card mb-lg">
+                <h2 class="card-title">Last Arbitration Run</h2>
+                <div class="text-small text-muted mb-sm">Completed: @lastRunCompleted | Conflicts: @lastRunConflicts | Pending: @lastRunPending</div>
+                <ul class="list">
+                    @foreach (var result in lastRunResults)
+                    {
+                        <li class="list-item">
+                            <div class="flex items-center justify-between gap-sm">
+                                <strong>@result.SeedUrl</strong>
+                                <span class="badge @(result.Outcome == "completed" ? "badge-success" : result.Outcome == "conflict" ? "badge-warning" : "badge-info")">@result.Outcome</span>
+                            </div>
+                            <div class="text-small text-muted">Worker @result.WorkerId (@result.WorkerName) · @(string.IsNullOrWhiteSpace(result.Note) ? "-" : result.Note)</div>
+                        </li>
+                    }
+                </ul>
+            </div>
+        }
+
+        <div class="card mb-lg">
+            <h2 class="card-title">Live Arbitration Events</h2>
+            @if (liveArbitrationEvents.Count == 0)
+            {
+                <p class="text-small text-muted">No recent frontier events yet.</p>
+            }
+            else
+            {
+                <div class="workers-log-table-wrap">
+                    <table class="workers-log-table">
+                        <thead>
+                            <tr>
+                                <th>TS</th>
+                                <th>Type</th>
+                                <th>Scope</th>
+                                <th>Message</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            @foreach (var evt in liveArbitrationEvents)
+                            {
+                                <tr>
+                                    <td class="workers-log-ts">@evt.TimestampUtc.ToLocalTime().ToString("HH:mm:ss")</td>
+                                    <td><span class="badge badge-info">@evt.Type</span></td>
+                                    <td class="text-small text-muted">@((evt.DaemonId ?? "local-default") + " / w" + (evt.WorkerId?.ToString() ?? "-"))</td>
+                                    <td>@FormatArbitrationEventMessage(evt)</td>
+                                </tr>
+                            }
+                        </tbody>
+                    </table>
+                </div>
+            }
+        </div>
+    }
+</div>
+
+@code {
+    private WorkerGlobalConfigViewModel? globalConfig;
+    private List<WorkerGroupSettingsViewModel> groups = new();
+    private List<WorkerViewModel> workers = new();
+    private List<SeedEntryViewModel> enabledSeeds = new();
+    private List<SeedAssignment> plannedAssignments = new();
+    private FrontierStatusViewModel? frontierStatus;
+    private List<ArbitrationResult> lastRunResults = new();
+    private List<CrawlerEventViewModel> liveArbitrationEvents = new();
+    private int lastRunCompleted;
+    private int lastRunConflicts;
+    private int lastRunPending;
+    private bool isLoading = true;
+    private string? statusMessage;
+    private string scoreFunction = "rendezvous";
+    private double scoreWeightPages = 1.0;
+    private double scoreWeightErrors = 1.0;
+    private PeriodicTimer? _refreshTimer;
+    private CancellationTokenSource? _refreshCts;
+
+    protected override async Task OnInitializedAsync()
+    {
+        await RefreshAll();
+
+        _refreshCts = new CancellationTokenSource();
+        _refreshTimer = new PeriodicTimer(TimeSpan.FromSeconds(3));
+        _ = Task.Run(async () =>
+        {
+            while (_refreshTimer is not null && await _refreshTimer.WaitForNextTickAsync(_refreshCts.Token))
+            {
+                await InvokeAsync(async () =>
+                {
+                    await RefreshLiveEventsAsync();
+                    frontierStatus = await WorkerService.GetFrontierStatusAsync();
+                    StateHasChanged();
+                });
+            }
+        }, _refreshCts.Token);
+    }
+
+    private async Task RefreshAll()
+    {
+        isLoading = true;
+        statusMessage = null;
+
+        globalConfig = await WorkerService.GetGlobalConfigAsync();
+        groups = await WorkerService.GetWorkerGroupsAsync();
+        workers = await WorkerService.GetAllWorkersAsync();
+        frontierStatus = await WorkerService.GetFrontierStatusAsync();
+        await RefreshLiveEventsAsync();
+
+        enabledSeeds = (globalConfig?.SeedEntries ?? new List<SeedEntryViewModel>())
+            .Where(seed => seed.Enabled && !string.IsNullOrWhiteSpace(seed.Url))
+            .Select(seed => new SeedEntryViewModel
+            {
+                Url = seed.Url.Trim(),
+                Label = seed.Label,
+                Enabled = true,
+            })
+            .ToList();
+
+        if (globalConfig != null)
+        {
+            scoreFunction = globalConfig.ScoreFunction;
+            scoreWeightPages = globalConfig.ScoreWeightPages;
+            scoreWeightErrors = globalConfig.ScoreWeightErrors;
+        }
+
+        BuildAssignments();
+        isLoading = false;
+    }
+
+    private void BuildAssignments()
+    {
+        plannedAssignments = new List<SeedAssignment>();
+        if (enabledSeeds.Count == 0)
+        {
+            return;
+        }
+
+        var candidateWorkers = workers
+            .Where(worker => !string.Equals(worker.Status, "Stopped", StringComparison.OrdinalIgnoreCase))
+            .OrderBy(worker => worker.Id)
+            .ToList();
+
+        if (candidateWorkers.Count == 0)
+        {
+            return;
+        }
+
+        foreach (var seed in enabledSeeds)
+        {
+            var targetWorker = candidateWorkers
+                .OrderByDescending(worker => ComputeAssignmentScore(seed.Url, worker, candidateWorkers))
+                .ThenBy(worker => worker.Id)
+                .First();
+            plannedAssignments.Add(new SeedAssignment
+            {
+                SeedUrl = seed.Url,
+                WorkerId = targetWorker.Id,
+                WorkerName = targetWorker.Name,
+            });
+        }
+    }
+
+    private static long RendezvousScore(string seedUrl, int workerId)
+    {
+        var input = $"{seedUrl}|{workerId}";
+        const long offsetBasis = unchecked((long)1469598103934665603);
+        const long prime = 1099511628211;
+
+        long hash = offsetBasis;
+        foreach (var ch in input)
+        {
+            hash ^= ch;
+            hash *= prime;
+        }
+
+        return hash;
+    }
+
+    private double ComputeAssignmentScore(string seedUrl, WorkerViewModel worker, IReadOnlyList<WorkerViewModel> candidateWorkers)
+    {
+        return scoreFunction switch
+        {
+            "round_robin" => RoundRobinScore(seedUrl, worker.Id, candidateWorkers),
+            "weighted" => WeightedRuntimeScore(worker),
+            _ => RendezvousScore(seedUrl, worker.Id),
+        };
+    }
+
+    private static double RoundRobinScore(string seedUrl, int workerId, IReadOnlyList<WorkerViewModel> candidateWorkers)
+    {
+        if (candidateWorkers.Count == 0)
+        {
+            return 0;
+        }
+
+        var slot = (int)(StableSeedHash(seedUrl) % (ulong)candidateWorkers.Count);
+        var designatedWorkerId = candidateWorkers[slot].Id;
+        return workerId == designatedWorkerId ? 1_000_000 : 0;
+    }
+
+    private static ulong StableSeedHash(string input)
+    {
+        const ulong offsetBasis = 14695981039346656037UL;
+        const ulong prime = 1099511628211UL;
+
+        ulong hash = offsetBasis;
+        foreach (var ch in input)
+        {
+            hash ^= ch;
+            hash *= prime;
+        }
+
+        return hash;
+    }
+
+    private double WeightedRuntimeScore(WorkerViewModel worker)
+    {
+        return (scoreWeightPages * worker.PagesProcessed) - (scoreWeightErrors * worker.ErrorCount);
+    }
+
+    private async Task SaveScoreFunction()
+    {
+        if (globalConfig == null)
+        {
+            return;
+        }
+
+        globalConfig.ScoreFunction = scoreFunction;
+        globalConfig.ScoreWeightPages = scoreWeightPages;
+        globalConfig.ScoreWeightErrors = scoreWeightErrors;
+        await WorkerService.SaveGlobalConfigAsync(globalConfig);
+        statusMessage = WorkerService.LastError == null
+            ? "Score function saved."
+            : $"Unable to save score function: {WorkerService.LastError}";
+        await RefreshAll();
+    }
+
+    private async Task EnforceServerQueueOnly()
+    {
+        if (globalConfig == null)
+        {
+            return;
+        }
+
+        globalConfig.QueueMode = "server";
+        await WorkerService.SaveGlobalConfigAsync(globalConfig);
+        statusMessage = WorkerService.LastError == null
+            ? "Global queue mode set to server."
+            : $"Unable to save queue mode: {WorkerService.LastError}";
+        await RefreshAll();
+    }
+
+    private async Task RebalanceSeedsAcrossWorkers()
+    {
+        if (plannedAssignments.Count == 0)
+        {
+            statusMessage = "No assignments available for rebalance.";
+            return;
+        }
+
+        var queued = 0;
+        var completed = 0;
+        var conflicts = 0;
+        var pending = 0;
+        var runResults = new List<ArbitrationResult>();
+
+        foreach (var assignment in plannedAssignments)
+        {
+            var queuedOk = await WorkerService.AddSeedAsync(assignment.SeedUrl, assignment.WorkerId);
+            if (!queuedOk)
+            {
+                runResults.Add(new ArbitrationResult
+                {
+                    SeedUrl = assignment.SeedUrl,
+                    WorkerId = assignment.WorkerId,
+                    WorkerName = assignment.WorkerName,
+                    Outcome = "pending",
+                    Note = WorkerService.LastError,
+                });
+                pending++;
+                continue;
+            }
+
+            queued++;
+            var claim = await WorkerService.ClaimFrontierUrlAsync(assignment.WorkerId);
+            if (claim?.Claimed != true || string.IsNullOrWhiteSpace(claim.Url))
+            {
+                runResults.Add(new ArbitrationResult
+                {
+                    SeedUrl = assignment.SeedUrl,
+                    WorkerId = assignment.WorkerId,
+                    WorkerName = assignment.WorkerName,
+                    Outcome = "pending",
+                    Note = "No claim returned yet.",
+                });
+                pending++;
+                continue;
+            }
+
+            if (string.Equals(claim.Url, assignment.SeedUrl, StringComparison.OrdinalIgnoreCase))
+            {
+                var completedOk = await WorkerService.CompleteFrontierUrlAsync(
+                    assignment.WorkerId,
+                    claim.Url,
+                    claim.LeaseToken,
+                    "completed");
+
+                if (completedOk)
+                {
+                    completed++;
+                    runResults.Add(new ArbitrationResult
+                    {
+                        SeedUrl = assignment.SeedUrl,
+                        WorkerId = assignment.WorkerId,
+                        WorkerName = assignment.WorkerName,
+                        Outcome = "completed",
+                        Note = $"Claimed from {claim.Source ?? "unknown"}.",
+                    });
+                }
+                else
+                {
+                    pending++;
+                    runResults.Add(new ArbitrationResult
+                    {
+                        SeedUrl = assignment.SeedUrl,
+                        WorkerId = assignment.WorkerId,
+                        WorkerName = assignment.WorkerName,
+                        Outcome = "pending",
+                        Note = WorkerService.LastError,
+                    });
+                }
+
+                continue;
+            }
+
+            conflicts++;
+            await WorkerService.PruneFrontierUrlAsync(assignment.WorkerId, assignment.SeedUrl, "claim-mismatch");
+            runResults.Add(new ArbitrationResult
+            {
+                SeedUrl = assignment.SeedUrl,
+                WorkerId = assignment.WorkerId,
+                WorkerName = assignment.WorkerName,
+                Outcome = "conflict",
+                Note = $"Claimed {claim.Url} instead; local queue pruned for assigned seed.",
+            });
+        }
+
+        frontierStatus = await WorkerService.GetFrontierStatusAsync();
+        lastRunResults = runResults;
+        lastRunCompleted = completed;
+        lastRunConflicts = conflicts;
+        lastRunPending = pending;
+
+        statusMessage = $"Arbitration run complete. Queued {queued}/{plannedAssignments.Count}, completed {completed}, conflicts {conflicts}, pending {pending}.";
+    }
+
+    private async Task RefreshLiveEventsAsync()
+    {
+        var events = await WorkerService.GetRecentCrawlerEventsAsync(80);
+        liveArbitrationEvents = events
+            .Where(evt =>
+                evt.Type.StartsWith("frontier", StringComparison.OrdinalIgnoreCase)
+                || string.Equals(evt.Type, "queue-change", StringComparison.OrdinalIgnoreCase))
+            .OrderByDescending(evt => evt.TimestampUtc)
+            .Take(20)
+            .ToList();
+    }
+
+    private static string FormatArbitrationEventMessage(CrawlerEventViewModel evt)
+    {
+        if (string.IsNullOrWhiteSpace(evt.PayloadJson))
+        {
+            return "-";
+        }
+
+        try
+        {
+            using var document = JsonDocument.Parse(evt.PayloadJson);
+            if (document.RootElement.ValueKind != JsonValueKind.Object)
+            {
+                return evt.PayloadJson;
+            }
+
+            var parts = new List<string>();
+            AppendPayloadPart(parts, document.RootElement, "action");
+            AppendPayloadPart(parts, document.RootElement, "url");
+            AppendPayloadPart(parts, document.RootElement, "source");
+            AppendPayloadPart(parts, document.RootElement, "status");
+            AppendPayloadPart(parts, document.RootElement, "reason");
+            AppendPayloadPart(parts, document.RootElement, "inMemoryQueued");
+            AppendPayloadPart(parts, document.RootElement, "localQueued");
+            AppendPayloadPart(parts, document.RootElement, "activeLeases");
+            AppendPayloadPart(parts, document.RootElement, "knownUrls");
+
+            return parts.Count > 0 ? string.Join(" | ", parts) : evt.PayloadJson;
+        }
+        catch
+        {
+            return evt.PayloadJson;
+        }
+    }
+
+    private static void AppendPayloadPart(List<string> parts, JsonElement root, string key)
+    {
+        if (!root.TryGetProperty(key, out var value))
+        {
+            return;
+        }
+
+        var text = value.ValueKind switch
+        {
+            JsonValueKind.String => value.GetString(),
+            JsonValueKind.Number => value.GetRawText(),
+            JsonValueKind.True => "true",
+            JsonValueKind.False => "false",
+            _ => null,
+        };
+
+        if (!string.IsNullOrWhiteSpace(text))
+        {
+            parts.Add($"{key}={text}");
+        }
+    }
+
+    public ValueTask DisposeAsync()
+    {
+        try
+        {
+            _refreshCts?.Cancel();
+        }
+        catch
+        {
+            // ignore cancellation race on page disposal
+        }
+
+        _refreshTimer?.Dispose();
+        _refreshCts?.Dispose();
+        return ValueTask.CompletedTask;
+    }
+
+    private sealed class SeedAssignment
+    {
+        public required string SeedUrl { get; init; }
+        public required int WorkerId { get; init; }
+        public required string WorkerName { get; init; }
+    }
+
+    private sealed class ArbitrationResult
+    {
+        public required string SeedUrl { get; init; }
+        public required int WorkerId { get; init; }
+        public required string WorkerName { get; init; }
+        public required string Outcome { get; init; }
+        public string? Note { get; init; }
+    }
+}

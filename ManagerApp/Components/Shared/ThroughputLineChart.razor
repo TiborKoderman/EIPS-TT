@@ -1,0 +1,93 @@
+@using ManagerApp.Models
+
+@if (Points.Count == 0)
+{
+    <p class="text-small text-muted">No throughput points available yet.</p>
+}
+else
+{
+    <svg viewBox="0 0 560 180" class="throughput-chart" role="img" aria-label="@AriaLabel">
+        <text x="538" y="18" class="throughput-unit-label" text-anchor="end">@ThroughputUnitLabel</text>
+        <text x="6" y="16" class="throughput-axis-label">@FormatAxisValue(MaxValue)</text>
+        <text x="6" y="84" class="throughput-axis-label">@FormatAxisValue(MaxValue / 2)</text>
+        <text x="6" y="156" class="throughput-axis-label">0</text>
+        <line x1="36" y1="12" x2="36" y2="152" class="throughput-axis"></line>
+        <line x1="36" y1="152" x2="540" y2="152" class="throughput-axis"></line>
+        <polyline points="@PolylinePoints" class="throughput-line" fill="none"></polyline>
+        @foreach (var point in RenderPoints)
+        {
+            <circle cx="@point.X" cy="@point.Y" r="2.6" class="throughput-point">
+                <title>@($"{point.Timestamp:HH:mm:ss} -> {point.Value:0.##} {ThroughputUnitLabel}")</title>
+            </circle>
+        }
+        <text x="36" y="170" class="throughput-axis-label">@StartTimeLabel</text>
+        <text x="540" y="170" class="throughput-axis-label" text-anchor="end">@EndTimeLabel</text>
+    </svg>
+}
+
+@code {
+    [Parameter] public IReadOnlyList<WorkerThroughputPointViewModel> Points { get; set; } = [];
+    [Parameter] public int BucketSeconds { get; set; } = 30;
+
+    private int EffectiveBucketSeconds => Math.Clamp(BucketSeconds, 1, 3600);
+
+    private string ThroughputUnitLabel => $"pages/{EffectiveBucketSeconds}s";
+
+    private string AriaLabel => $"Throughput line chart in {ThroughputUnitLabel}.";
+
+    private double MaxValue => Points.Count == 0
+        ? 1.0
+        : Math.Max(1.0, Points.Max(item => item.Value));
+
+    private string StartTimeLabel => Points.Count == 0
+        ? string.Empty
+        : Points.Min(item => item.TimestampUtc).ToLocalTime().ToString("HH:mm");
+
+    private string EndTimeLabel => Points.Count == 0
+        ? string.Empty
+        : Points.Max(item => item.TimestampUtc).ToLocalTime().ToString("HH:mm");
+
+    private List<RenderPoint> RenderPoints
+    {
+        get
+        {
+            if (Points.Count == 0)
+            {
+                return [];
+            }
+
+            var ordered = Points.OrderBy(item => item.TimestampUtc).ToList();
+            var minTs = ordered.First().TimestampUtc;
+            var maxTs = ordered.Last().TimestampUtc;
+            var spanSeconds = Math.Max(1.0, (maxTs - minTs).TotalSeconds);
+            var maxValue = MaxValue;
+
+            return ordered
+                .Select(item => new RenderPoint
+                {
+                    Timestamp = item.TimestampUtc,
+                    Value = item.Value,
+                    X = 36 + ((item.TimestampUtc - minTs).TotalSeconds / spanSeconds) * 504,
+                    Y = 152 - ((item.Value / maxValue) * 128),
+                })
+                .ToList();
+        }
+    }
+
+    private static string FormatAxisValue(double value)
+    {
+        return value >= 100
+            ? Math.Round(value, 0).ToString("0")
+            : Math.Round(value, 1).ToString("0.#");
+    }
+
+    private string PolylinePoints => string.Join(" ", RenderPoints.Select(point => $"{point.X:F1},{point.Y:F1}"));
+
+    private sealed class RenderPoint
+    {
+        public DateTime Timestamp { get; set; }
+        public double Value { get; set; }
+        public double X { get; set; }
+        public double Y { get; set; }
+    }
+}

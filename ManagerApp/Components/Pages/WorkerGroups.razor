@@ -1,0 +1,267 @@
+@page "/workers/groups"
+@page "/workers/daemons"
+@using ManagerApp.Components.Shared
+@using ManagerApp.Models
+@using ManagerApp.Services
+@inject IWorkerService WorkerService
+
+<div class="page-header">
+    <div class="page-header-main">
+        <div>
+            <h1 class="page-title">Daemons</h1>
+            <p class="page-subtitle">Each daemon is one crawler process that owns one or more workers</p>
+        </div>
+        <a class="btn" href="/workers/config">
+            <span class="mdi mdi-tune"></span>
+            Global Config
+        </a>
+    </div>
+</div>
+
+<div class="page-body">
+    @if (isLoading)
+    {
+        <div class="card"><p>Loading daemons...</p></div>
+    }
+    else if (groups.Count == 0)
+    {
+        <div class="card"><p class="text-muted">No daemons defined yet.</p></div>
+    }
+    else
+    {
+        <div class="placeholder-note mb-lg">
+            <div class="placeholder-note-title">
+                <span class="mdi mdi-information-outline"></span> Runtime model
+            </div>
+            <ul class="placeholder-note-list">
+                <li>Daemon = one crawler API server instance.</li>
+                <li>Workers are managed under a daemon (not separate worker APIs).</li>
+                <li>Default setup uses one local daemon with one worker.</li>
+            </ul>
+        </div>
+
+        <div class="grid grid-cols-4 mb-lg">
+            <StatCard Label="Daemons" Value="@groups.Count.ToString()" Footnote="Total registered" />
+            <StatCard Label="Running" Value="@groups.Count(g => g.Enabled).ToString()" Footnote="Active daemons" />
+            <StatCard Label="Assigned Workers" Value="@DistinctAssignedWorkers.ToString()" Footnote="Unique worker IDs" />
+            <StatCard Label="Avg Rate Limit" Value="@GetAverageRateLimit()" Footnote="req/min per daemon" />
+        </div>
+
+        <div class="grid grid-cols-2 mb-lg">
+            <div class="card">
+                <h2 class="card-title">Daemon Registry</h2>
+                <ul class="list">
+                    @foreach (var group in groups)
+                    {
+                        <li class="list-item worker-group-row @(IsSelectedGroup(group) ? "selected" : "")"
+                            @onclick="() => SelectGroup(group.DaemonId, group.Id)">
+                            <div class="flex items-center justify-between gap-sm">
+                                <strong>@group.Name</strong>
+                                <span class="badge @(group.Enabled ? "badge-success" : "badge-warning")">
+                                    @(group.Enabled ? "Enabled" : "Disabled")
+                                </span>
+                            </div>
+                            <div class="text-small text-muted">@group.Description</div>
+                            <div class="text-small text-muted">Daemon: @NormalizeDaemonId(group.DaemonId)</div>
+                            <div class="text-small">Workers: @group.WorkerIds.Count</div>
+                        </li>
+                    }
+                </ul>
+            </div>
+
+            <div class="card">
+                @if (selectedGroup == null)
+                {
+                    <p class="text-muted">Select a daemon to edit settings.</p>
+                }
+                else
+                {
+                    <h2 class="card-title">@selectedGroup.Name Settings</h2>
+
+                    <div class="workers-config-grid">
+                        <label>
+                            <span class="text-small text-muted">Name</span>
+                            <input type="text" @bind="selectedGroup.Name" />
+                        </label>
+                        <label>
+                            <span class="text-small text-muted">Description</span>
+                            <input type="text" @bind="selectedGroup.Description" />
+                        </label>
+                        <label>
+                            <span class="text-small text-muted">Max Pages / Worker</span>
+                            <input type="number" min="0" @bind="selectedGroup.MaxPagesPerWorker" />
+                        </label>
+                        <label>
+                            <span class="text-small text-muted">Rate Limit / Minute</span>
+                            <input type="number" min="0" @bind="selectedGroup.RateLimitPerMinute" />
+                        </label>
+                        <label>
+                            <span class="text-small text-muted">Queue Mode Override</span>
+                            <select @bind="selectedGroup.QueueMode">
+                                <option value="">Use Global</option>
+                                <option value="local">Local</option>
+                                <option value="server">Server</option>
+                                <option value="both">Both</option>
+                            </select>
+                        </label>
+                        <label>
+                            <span class="text-small text-muted">Strategy Override</span>
+                            <select @bind="selectedGroup.StrategyMode">
+                                <option value="">Use Global</option>
+                                <option value="balanced">Balanced</option>
+                                <option value="coverage">Coverage</option>
+                                <option value="focused">Focused</option>
+                                <option value="freshness">Freshness</option>
+                            </select>
+                        </label>
+                    </div>
+
+                    <label class="mt-md flex items-center gap-sm">
+                        <input type="checkbox" @bind="selectedGroup.Enabled" style="width:auto;" />
+                        <span>Daemon enabled</span>
+                    </label>
+
+                    <label class="mt-md flex items-center gap-sm">
+                        <input type="checkbox" @bind="SelectedGroupAvoidDuplicates" style="width:auto;" />
+                        <span>Avoid duplicate paths across daemons (override)</span>
+                    </label>
+
+                    <label class="mt-md">
+                        <span class="text-small text-muted">Topic Keywords Override (one per line)</span>
+                        <textarea rows="4" @bind="selectedGroup.TopicKeywordsText"></textarea>
+                    </label>
+
+                    <label class="mt-md">
+                        <span class="text-small text-muted">Worker IDs (comma-separated)</span>
+                        <input type="text" @bind="workerIdsInput" />
+                    </label>
+
+                    <div class="mt-md flex gap-sm">
+                        <button class="btn btn-primary" @onclick="SaveSelectedGroup">
+                            <span class="mdi mdi-content-save"></span>
+                            Save Daemon
+                        </button>
+                        @if (!string.IsNullOrWhiteSpace(statusMessage))
+                        {
+                            <span class="text-small text-muted">@statusMessage</span>
+                        }
+                    </div>
+                }
+            </div>
+        </div>
+    }
+</div>
+
+@code {
+    [SupplyParameterFromQuery(Name = "daemonId")]
+    public string? SelectedDaemonId { get; set; }
+
+    [SupplyParameterFromQuery(Name = "groupId")]
+    public int? SelectedGroupId { get; set; }
+
+    private List<WorkerGroupSettingsViewModel> groups = new();
+    private WorkerGroupSettingsViewModel? selectedGroup;
+    private string workerIdsInput = "";
+    private string? statusMessage;
+    private bool isLoading = true;
+
+    private int DistinctAssignedWorkers => groups
+        .SelectMany(g => g.WorkerIds)
+        .Distinct()
+        .Count();
+
+    protected override async Task OnInitializedAsync()
+    {
+        groups = await WorkerService.GetWorkerGroupsAsync();
+        foreach (var group in groups)
+        {
+            if (string.IsNullOrWhiteSpace(group.TopicKeywordsText) && group.TopicKeywords.Count > 0)
+            {
+                group.TopicKeywordsText = string.Join("\n", group.TopicKeywords);
+            }
+        }
+        selectedGroup = groups.FirstOrDefault(group =>
+                group.Id == SelectedGroupId.GetValueOrDefault(-1)
+                && string.Equals(NormalizeDaemonId(group.DaemonId), NormalizeDaemonId(SelectedDaemonId), StringComparison.OrdinalIgnoreCase))
+            ?? groups.FirstOrDefault();
+        workerIdsInput = selectedGroup == null ? "" : string.Join(",", selectedGroup.WorkerIds);
+        isLoading = false;
+    }
+
+    private void SelectGroup(string? daemonId, int id)
+    {
+        selectedGroup = groups.FirstOrDefault(group =>
+            group.Id == id
+            && string.Equals(NormalizeDaemonId(group.DaemonId), NormalizeDaemonId(daemonId), StringComparison.OrdinalIgnoreCase));
+        workerIdsInput = selectedGroup == null ? "" : string.Join(",", selectedGroup.WorkerIds);
+        if (selectedGroup != null && string.IsNullOrWhiteSpace(selectedGroup.TopicKeywordsText) && selectedGroup.TopicKeywords.Count > 0)
+        {
+            selectedGroup.TopicKeywordsText = string.Join("\n", selectedGroup.TopicKeywords);
+        }
+        statusMessage = null;
+    }
+
+    private bool IsSelectedGroup(WorkerGroupSettingsViewModel group)
+    {
+        return selectedGroup != null
+            && selectedGroup.Id == group.Id
+            && string.Equals(NormalizeDaemonId(selectedGroup.DaemonId), NormalizeDaemonId(group.DaemonId), StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static string NormalizeDaemonId(string? daemonId)
+    {
+        return string.IsNullOrWhiteSpace(daemonId) ? "local-default" : daemonId.Trim();
+    }
+
+    private async Task SaveSelectedGroup()
+    {
+        if (selectedGroup == null)
+        {
+            return;
+        }
+
+        selectedGroup.TopicKeywords = selectedGroup.TopicKeywordsText
+            .Split(new[] { '\r', '\n' }, StringSplitOptions.RemoveEmptyEntries)
+            .Select(v => v.Trim())
+            .Where(v => !string.IsNullOrWhiteSpace(v))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToList();
+
+        selectedGroup.WorkerIds = workerIdsInput
+            .Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+            .Select(v => int.TryParse(v, out var parsed) ? parsed : -1)
+            .Where(v => v > 0)
+            .Distinct()
+            .ToList();
+
+        var saved = await WorkerService.SaveWorkerGroupAsync(selectedGroup);
+        statusMessage = saved ? "Saved" : "Unable to save daemon";
+    }
+
+    private string GetAverageRateLimit()
+    {
+        var rates = groups
+            .Where(g => g.RateLimitPerMinute.HasValue)
+            .Select(g => g.RateLimitPerMinute!.Value)
+            .ToList();
+
+        if (rates.Count == 0)
+        {
+            return "N/A";
+        }
+
+        return Math.Round(rates.Average(), 1).ToString();
+    }
+
+    private bool SelectedGroupAvoidDuplicates
+    {
+        get => selectedGroup?.AvoidDuplicatePathsAcrossDaemons ?? true;
+        set
+        {
+            if (selectedGroup != null)
+            {
+                selectedGroup.AvoidDuplicatePathsAcrossDaemons = value;
+            }
+        }
+    }
+}

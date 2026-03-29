@@ -1,0 +1,37 @@
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "name": "ManagerApp: Launch (dev 5175)",
+      "type": "coreclr",
+      "request": "launch",
+      "preLaunchTask": "manager: build",
+      "program": "${workspaceFolder}/ManagerApp/bin/Debug/net10.0/ManagerApp.dll",
+      "cwd": "${workspaceFolder}/ManagerApp",
+      "env": {
+        "ASPNETCORE_ENVIRONMENT": "Development",
+        "ASPNETCORE_URLS": "http://localhost:5175",
+        "CrawlerApi__ManagerBaseUrl": "http://localhost:5175"
+      },
+      "serverReadyAction": {
+        "action": "openExternally",
+        "pattern": "Now listening on:\\s+(https?://\\S+)"
+      },
+      "hotReloadEnabled": true
+    },
+    {
+      "name": "ManagerApp: Attach",
+      "type": "coreclr",
+      "request": "attach",
+      "processId": "${command:pickProcess}"
+    },
+    {
+      "name": "ManagerApp: Reuse Watch Task (attach)",
+      "type": "coreclr",
+      "request": "attach",
+      "preLaunchTask": "manager: watch (hot reload 5175)",
+      "processName": "dotnet",
+      "justMyCode": true
+    }
+  ]
+}

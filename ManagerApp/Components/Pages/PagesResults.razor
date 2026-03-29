@@ -1,0 +1,859 @@
+@page "/pages"
+@using ManagerApp.Data
+@using ManagerApp.Models
+@using ManagerApp.Services
+@inject IPageService PageService
+@inject IStatisticsService StatisticsService
+@inject IJSRuntime JS
+@implements IAsyncDisposable
+
+<div class="page-header">
+    <h1 class="page-title">Collected Pages</h1>
+    <p class="page-subtitle">Search indexed pages and inspect crawl metadata</p>
+    <div class="mt-sm">
+        <a class="btn" href="/relevance">
+            <span class="mdi mdi-chart-bell-curve-cumulative"></span>
+            Relevance Report
+        </a>
+    </div>
+</div>
+
+<div class="page-body">
+    <div class="card mb-lg">
+        <h2 class="card-title">Collected Binary Files</h2>
+        <div class="grid grid-cols-4">
+            @foreach (var type in BinaryTypeOrder)
+            {
+                var count = BinaryFileCounts.GetValueOrDefault(type, 0);
+                <div>
+                    <div class="text-small text-muted">@type</div>
+                    <div style="font-size: 20px; font-weight: 600;">@count</div>
+                </div>
+            }
+        </div>
+    </div>
+
+    <div class="card mb-lg">
+        <h2 class="card-title">Collected Image Files</h2>
+        <div class="grid grid-cols-4">
+            @foreach (var type in ImageTypeOrder)
+            {
+                var count = ImageFileCounts.GetValueOrDefault(type, 0);
+                <div>
+                    <div class="text-small text-muted">@type</div>
+                    <div style="font-size: 20px; font-weight: 600;">@count</div>
+                </div>
+            }
+        </div>
+    </div>
+
+    <div class="card mb-lg pages-toolbar-card">
+        <div class="pages-toolbar-row">
+            <div class="pages-search-shell">
+                <span class="mdi mdi-magnify pages-search-icon" aria-hidden="true"></span>
+                <input
+                    class="pages-search-input"
+                    type="search"
+                    placeholder="Search URL or page content..."
+                    value="@SearchTerm"
+                    @oninput="OnSearchInput" />
+            </div>
+
+            <div class="pages-filter-dropdown">
+                <button type="button"
+                        class="btn pages-filter-toggle"
+                        @onclick="ToggleFilterDropdown"
+                        aria-haspopup="menu"
+                        aria-expanded="@ShowFilterDropdown">
+                    <span class="mdi mdi-filter-variant" aria-hidden="true"></span>
+                    <span>@GetFilterLabel(PageTypeFilter)</span>
+                    <span class="mdi @(ShowFilterDropdown ? "mdi-chevron-up" : "mdi-chevron-down")" aria-hidden="true"></span>
+                </button>
+
+                @if (ShowFilterDropdown)
+                {
+                    <div class="pages-filter-menu" role="menu">
+                        @foreach (var option in FilterOptions)
+                        {
+                            <button type="button"
+                                    class="pages-filter-option @(string.Equals(PageTypeFilter, option.Value, StringComparison.OrdinalIgnoreCase) ? "active" : "")"
+                                    @onclick='() => SelectFilterOption(option.Value)'>
+                                <span class="mdi @(string.Equals(PageTypeFilter, option.Value, StringComparison.OrdinalIgnoreCase) ? "mdi-radiobox-marked" : "mdi-radiobox-blank")"></span>
+                                <span>@option.Label</span>
+                            </button>
+                        }
+                    </div>
+                }
+            </div>
+
+            <select class="pages-order-select" @bind="OrderBy" @bind:after="OnOrderChangedAsync">
+                <option value="latest">Order by latest</option>
+                <option value="best_score">Order by best score</option>
+            </select>
+
+            <button class="btn btn-primary pages-search-button" @onclick="() => ReloadAsync(keepSelection: true)">
+                <span class="mdi mdi-magnify"></span>
+                <span>Search</span>
+            </button>
+
+            <span class="live-pill"><span class="live-dot"></span> Live</span>
+            <span class="text-small text-muted">updated @GetSinceUpdateText()</span>
+        </div>
+    </div>
+
+    <div class="grid grid-cols-2">
+        <div class="card">
+            <h2 class="card-title">Results (@Total)</h2>
+            @if (Rows.Count == 0)
+            {
+                <p class="text-muted">No pages found for current query.</p>
+            }
+            else
+            {
+                <div class="page-results-table-wrap">
+                    <table class="workers-log-table page-results-table">
+                        <thead>
+                            <tr>
+                                <th>TS</th>
+                                <th>Type</th>
+                                <th>HTTP</th>
+                                <th>Score</th>
+                                <th>URL</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            @foreach (var row in Rows)
+                            {
+                                <tr class="page-row @(SelectedPage?.Id == row.Id ? "selected" : "")"
+                                    @onclick="() => SelectPage(row.Id)">
+                                    <td class="workers-log-ts">@(row.AccessedTime.HasValue ? row.AccessedTime.Value.ToLocalTime().ToString("HH:mm:ss") : "-")</td>
+                                    <td>
+                                        <span class="badge badge-info">@row.PageType</span>
+                                        @if (row.IsDuplicate)
+                                        {
+                                            <span class="badge badge-warning">Dup</span>
+                                        }
+                                    </td>
+                                    <td>@(row.HttpStatus?.ToString() ?? "-")</td>
+                                    <td>@row.RelevanceScore.ToString("0.00")</td>
+                                    <td>
+                                        <div class="page-url-row">
+                                            <button type="button"
+                                                    class="page-url-text-btn"
+                                                    title="Click to copy full URL"
+                                                    @onclick="() => CopyUrlAsync(row.Url)"
+                                                    @onclick:stopPropagation="true">
+                                                @CompactUrl(row.Url)
+                                            </button>
+                                            @if (!string.IsNullOrWhiteSpace(row.Url))
+                                            {
+                                                <a class="btn btn-icon page-url-open-btn"
+                                                   href="@row.Url"
+                                                   target="_blank"
+                                                   rel="noopener noreferrer"
+                                                   title="Open page URL"
+                                                   aria-label="Open page URL"
+                                                   @onclick:stopPropagation="true">
+                                                    <span class="mdi mdi-open-in-new"></span>
+                                                </a>
+                                            }
+                                        </div>
+                                        @if (IsCopiedUrl(row.Url))
+                                        {
+                                            <div class="text-small copied-pill">Copied full URL</div>
+                                        }
+                                        <div class="text-small text-muted">@(string.IsNullOrWhiteSpace(row.SiteDomain) ? "-" : row.SiteDomain)</div>
+                                    </td>
+                                </tr>
+                            }
+                        </tbody>
+                    </table>
+                </div>
+            }
+        </div>
+
+        <div class="card">
+            <h2 class="card-title">Details</h2>
+            @if (SelectedPage == null)
+            {
+                <p class="text-muted">Select a result to show page metadata.</p>
+            }
+            else
+            {
+                <div class="flex flex-col gap-sm">
+                    <div>
+                        <strong>URL:</strong>
+                        <button type="button" class="page-url-detail-btn" @onclick="() => CopyUrlAsync(SelectedPage.Url)">
+                            @SelectedPage.Url
+                        </button>
+                    </div>
+                    <div><strong>Type:</strong> @SelectedPage.PageTypeCode</div>
+                    <div><strong>HTTP:</strong> @SelectedPage.HttpStatusCode</div>
+                    <div><strong>Accessed:</strong> @SelectedPage.AccessedTime</div>
+                    <div>
+                        <strong>Site:</strong>
+                        @if (!string.IsNullOrWhiteSpace(SelectedPage.Site?.Domain))
+                        {
+                            <a href="@BuildSiteExternalUrl(SelectedPage.Site.Domain)" target="_blank" rel="noopener noreferrer">@SelectedPage.Site.Domain</a>
+                            <span class="text-small text-muted"> · </span>
+                            <a href="@($"/sites?search={Uri.EscapeDataString(SelectedPage.Site.Domain)}")">site details</a>
+                        }
+                        else
+                        {
+                            <span>-</span>
+                        }
+                    </div>
+                    @if (SelectedPage.Site is not null)
+                    {
+                        <div class="policy-block">
+                            <div><strong>Robots policy (this page):</strong> @DescribeSelectedPageRobotsPolicy()</div>
+                            @if (string.IsNullOrWhiteSpace(SelectedPage.Site.RobotsContent))
+                            {
+                                <div class="text-small text-muted">No robots.txt content captured for this site yet.</div>
+                            }
+                            else
+                            {
+                                var robotsPreview = BuildPreviewText(SelectedPage.Site.RobotsContent, maxLines: 14, maxChars: 2200);
+                                <pre class="policy-pre">@(ShowPageRobotsFull ? SelectedPage.Site.RobotsContent : robotsPreview.Text)</pre>
+                                @if (robotsPreview.Truncated)
+                                {
+                                    <button type="button" class="btn btn-sm" @onclick="TogglePageRobotsFull">
+                                        @(ShowPageRobotsFull ? "Show less" : "Show full")
+                                    </button>
+                                }
+                            }
+                        </div>
+
+                        <div class="policy-block">
+                            <div><strong>Sitemap handling:</strong> @DescribeSitemapStatus(SelectedPage.Site.SitemapContent)</div>
+                            @if (ExtractSitemapUrls(SelectedPage.Site.SitemapContent).Count > 0)
+                            {
+                                <div class="text-small text-muted">Detected sitemap URLs:</div>
+                                <ul class="policy-url-list">
+                                    @foreach (var sitemapUrl in ExtractSitemapUrls(SelectedPage.Site.SitemapContent).Take(8))
+                                    {
+                                        <li>
+                                            <a href="@sitemapUrl" target="_blank" rel="noopener noreferrer">@sitemapUrl</a>
+                                        </li>
+                                    }
+                                </ul>
+                            }
+
+                            @if (string.IsNullOrWhiteSpace(SelectedPage.Site.SitemapContent))
+                            {
+                                <div class="text-small text-muted">No sitemap content captured for this site yet.</div>
+                            }
+                            else
+                            {
+                                var sitemapPreview = BuildPreviewText(SelectedPage.Site.SitemapContent, maxLines: 14, maxChars: 2200);
+                                <pre class="policy-pre">@(ShowPageSitemapFull ? SelectedPage.Site.SitemapContent : sitemapPreview.Text)</pre>
+                                @if (sitemapPreview.Truncated)
+                                {
+                                    <button type="button" class="btn btn-sm" @onclick="TogglePageSitemapFull">
+                                        @(ShowPageSitemapFull ? "Show less" : "Show full")
+                                    </button>
+                                }
+                            }
+                        </div>
+                    }
+                    @if (SelectedRow is not null)
+                    {
+                        <div><strong>Relevance score:</strong> @SelectedRow.RelevanceScore.ToString("0.00")</div>
+                        <div class="text-small text-muted">
+                            Evidence:
+                            @(SelectedRow.HasKeywordEvidence ? " keyword" : "")
+                            @(SelectedRow.HasAllowedSuffixEvidence ? " allowed-suffix" : "")
+                            @(SelectedRow.HasSameHostEvidence ? " same-host" : "")
+                            @(SelectedRow.FrontierDepth.HasValue ? $" depth={SelectedRow.FrontierDepth.Value}" : string.Empty)
+                        </div>
+                    }
+                    @if (SelectedBacklinkStats is not null)
+                    {
+                        <div>
+                            <strong>Backlink score:</strong>
+                            @SelectedBacklinkStats.BacklinkScore.ToString("0.00")
+                            <span class="text-small text-muted">(inbound: @SelectedBacklinkStats.InboundLinks, outbound: @SelectedBacklinkStats.OutboundLinks)</span>
+                        </div>
+                    }
+                    <div><strong>Images:</strong> @SelectedPage.Images.Count</div>
+                    @if (SelectedPage.Images.Count == 0)
+                    {
+                        <div class="text-small text-muted">No image rows for this page.</div>
+                    }
+                    else
+                    {
+                        <div class="media-list">
+                            @foreach (var image in SelectedPage.Images.OrderBy(item => item.Id))
+                            {
+                                <div class="media-item">
+                                    <div class="media-item-main">
+                                        <div class="media-item-name">@(string.IsNullOrWhiteSpace(image.Filename) ? $"image-{image.Id}" : image.Filename)</div>
+                                        <div class="media-item-meta">@((image.ContentType ?? "application/octet-stream") + " | " + FormatBytes(image.Data?.Length ?? 0))</div>
+                                    </div>
+                                    <div class="media-item-actions">
+                                        @if (image.Data is { Length: > 0 })
+                                        {
+                                            <a class="btn btn-icon"
+                                               href="@GetImagePreviewUrl(SelectedPage.Id, image.Id)"
+                                               target="_blank"
+                                               rel="noopener noreferrer"
+                                               title="Preview image"
+                                               aria-label="Preview image">
+                                                <span class="mdi mdi-eye-outline"></span>
+                                            </a>
+                                            <a class="btn btn-icon"
+                                               href="@GetImageDownloadUrl(SelectedPage.Id, image.Id)"
+                                               title="Download image"
+                                               aria-label="Download image">
+                                                <span class="mdi mdi-download-outline"></span>
+                                            </a>
+                                        }
+                                        else
+                                        {
+                                            <span class="text-small text-muted">No binary data</span>
+                                        }
+                                    </div>
+                                </div>
+                            }
+                        </div>
+                    }
+
+                    <div><strong>Binary blobs:</strong> @SelectedPage.PageData.Count</div>
+                    @if (SelectedPage.PageData.Count == 0)
+                    {
+                        <div class="text-small text-muted">No binary blobs for this page.</div>
+                    }
+                    else
+                    {
+                        <div class="media-list">
+                            @foreach (var blob in SelectedPage.PageData.OrderBy(item => item.Id))
+                            {
+                                var contentType = ResolvePageDataContentType(blob);
+                                <div class="media-item">
+                                    <div class="media-item-main">
+                                        <div class="media-item-name">@($"blob-{blob.Id}")</div>
+                                        <div class="media-item-meta">@((blob.DataTypeCode ?? "BIN") + " | " + contentType + " | " + FormatBytes(blob.Data?.Length ?? 0))</div>
+                                    </div>
+                                    <div class="media-item-actions">
+                                        @if (blob.Data is { Length: > 0 })
+                                        {
+                                            @if (IsPreviewableBlob(contentType))
+                                            {
+                                                <a class="btn btn-icon"
+                                                   href="@GetBlobPreviewUrl(SelectedPage.Id, blob.Id)"
+                                                   target="_blank"
+                                                   rel="noopener noreferrer"
+                                                   title="Preview blob"
+                                                   aria-label="Preview blob">
+                                                    <span class="mdi mdi-eye-outline"></span>
+                                                </a>
+                                            }
+                                            <a class="btn btn-icon"
+                                               href="@GetBlobDownloadUrl(SelectedPage.Id, blob.Id)"
+                                               title="Download blob"
+                                               aria-label="Download blob">
+                                                <span class="mdi mdi-download-outline"></span>
+                                            </a>
+                                        }
+                                        else
+                                        {
+                                            <span class="text-small text-muted">No binary data</span>
+                                        }
+                                    </div>
+                                </div>
+                            }
+                        </div>
+                    }
+
+                    <a class="btn mt-md" href="/graph">
+                        <span class="mdi mdi-graph-outline"></span> Show on Graph
+                    </a>
+                </div>
+            }
+        </div>
+    </div>
+</div>
+
+@code {
+    private string SearchTerm { get; set; } = "";
+    private string PageTypeFilter { get; set; } = "ALL";
+    private string OrderBy { get; set; } = "latest";
+    private int Total;
+    private bool ShowFilterDropdown;
+    private string? _copiedUrl;
+    private DateTime _copiedUrlAtUtc;
+    private bool ShowPageRobotsFull;
+    private bool ShowPageSitemapFull;
+    private Dictionary<string, int> BinaryFileCounts = new(StringComparer.OrdinalIgnoreCase);
+    private Dictionary<string, int> ImageFileCounts = new(StringComparer.OrdinalIgnoreCase);
+
+    private static readonly string[] BinaryTypeOrder = ["PDF", "DOC", "DOCX", "PPT", "PPTX"];
+    private static readonly string[] ImageTypeOrder = ["JPG", "PNG", "WEBP", "GIF", "SVG", "BMP", "TIFF", "ICO", "AVIF", "OTHER"];
+
+    private static readonly IReadOnlyList<(string Value, string Label)> FilterOptions =
+    [
+        ("ALL", "All page types"),
+        ("HTML", "HTML"),
+        ("BINARY", "BINARY"),
+        ("DUPLICATE", "DUPLICATE"),
+        ("FRONTIER", "FRONTIER"),
+    ];
+
+    private List<PageSearchDto> Rows = new();
+    private Page? SelectedPage;
+    private PageBacklinkStatsDto? SelectedBacklinkStats;
+    private PeriodicTimer? _liveTimer;
+    private CancellationTokenSource? _liveCts;
+    private CancellationTokenSource? _searchDebounceCts;
+    private DateTime _lastUpdatedUtc = DateTime.UtcNow;
+    private PageSearchDto? SelectedRow => SelectedPage is null ? null : Rows.FirstOrDefault(row => row.Id == SelectedPage.Id);
+
+    protected override async Task OnInitializedAsync()
+    {
+        await ReloadAsync(keepSelection: false);
+
+        _liveCts = new CancellationTokenSource();
+        _liveTimer = new PeriodicTimer(TimeSpan.FromSeconds(3));
+        _ = Task.Run(async () =>
+        {
+            while (_liveTimer is not null && await _liveTimer.WaitForNextTickAsync(_liveCts.Token))
+            {
+                await InvokeAsync(async () =>
+                {
+                    await ReloadAsync(keepSelection: true);
+                    StateHasChanged();
+                });
+            }
+        }, _liveCts.Token);
+    }
+
+    private async Task OnSearchInput(ChangeEventArgs args)
+    {
+        SearchTerm = args.Value?.ToString() ?? string.Empty;
+
+        _searchDebounceCts?.Cancel();
+        _searchDebounceCts?.Dispose();
+        _searchDebounceCts = new CancellationTokenSource();
+
+        try
+        {
+            await Task.Delay(280, _searchDebounceCts.Token);
+            await ReloadAsync(keepSelection: true);
+        }
+        catch (OperationCanceledException)
+        {
+            // New input arrived before debounce interval finished.
+        }
+    }
+
+    private void ToggleFilterDropdown()
+    {
+        ShowFilterDropdown = !ShowFilterDropdown;
+    }
+
+    private async Task SelectFilterOption(string value)
+    {
+        PageTypeFilter = string.IsNullOrWhiteSpace(value) ? "ALL" : value;
+        ShowFilterDropdown = false;
+        await ReloadAsync(keepSelection: true);
+    }
+
+    private async Task OnOrderChangedAsync()
+    {
+        await ReloadAsync(keepSelection: true);
+    }
+
+    private async Task ReloadAsync(bool keepSelection)
+    {
+        var selectedId = keepSelection ? SelectedPage?.Id : null;
+        Rows = await PageService.SearchPagesAsync(SearchTerm, PageTypeFilter, OrderBy, 0, 120);
+        Total = await PageService.GetSearchResultsCountAsync(SearchTerm, PageTypeFilter);
+        var binaryCountsTask = StatisticsService.GetBinaryFileCountsAsync();
+        var imageCountsTask = StatisticsService.GetImageFileCountsAsync();
+        await Task.WhenAll(binaryCountsTask, imageCountsTask);
+
+        BinaryFileCounts = await binaryCountsTask;
+        ImageFileCounts = await imageCountsTask;
+
+        foreach (var type in BinaryTypeOrder)
+        {
+            BinaryFileCounts.TryAdd(type, 0);
+        }
+
+        foreach (var type in ImageTypeOrder)
+        {
+            ImageFileCounts.TryAdd(type, 0);
+        }
+
+        _lastUpdatedUtc = DateTime.UtcNow;
+
+        if (Rows.Count == 0)
+        {
+            SelectedPage = null;
+            SelectedBacklinkStats = null;
+            return;
+        }
+
+        if (selectedId.HasValue && Rows.Any(row => row.Id == selectedId.Value))
+        {
+            await SelectPage(selectedId.Value);
+        }
+        else
+        {
+            await SelectPage(Rows[0].Id);
+        }
+    }
+
+    private async Task SelectPage(int pageId)
+    {
+        SelectedPage = await PageService.GetPageDetailsAsync(pageId);
+        SelectedBacklinkStats = SelectedPage is null ? null : await PageService.GetPageBacklinkStatsAsync(pageId);
+        ShowPageRobotsFull = false;
+        ShowPageSitemapFull = false;
+    }
+
+    private void TogglePageRobotsFull()
+    {
+        ShowPageRobotsFull = !ShowPageRobotsFull;
+    }
+
+    private void TogglePageSitemapFull()
+    {
+        ShowPageSitemapFull = !ShowPageSitemapFull;
+    }
+
+    private string DescribeSelectedPageRobotsPolicy()
+    {
+        if (SelectedPage is null)
+        {
+            return "Unknown";
+        }
+
+        var evaluation = EvaluateRobotsForUrl(SelectedPage.Site?.RobotsContent, SelectedPage.Url);
+        return evaluation.Allowed switch
+        {
+            true => $"Allowed ({evaluation.Reason})",
+            false => $"Disallowed ({evaluation.Reason})",
+            _ => "Unknown (robots.txt missing or no matching rule)",
+        };
+    }
+
+    private static (bool? Allowed, string Reason) EvaluateRobotsForUrl(string? robotsContent, string? pageUrl)
+    {
+        if (string.IsNullOrWhiteSpace(robotsContent))
+        {
+            return (null, "no robots content");
+        }
+
+        var path = "/";
+        if (!string.IsNullOrWhiteSpace(pageUrl)
+            && Uri.TryCreate(pageUrl, UriKind.Absolute, out var parsed))
+        {
+            path = string.IsNullOrWhiteSpace(parsed.PathAndQuery) ? "/" : parsed.PathAndQuery;
+        }
+
+        var applyRules = false;
+        var sawAnyRule = false;
+        var bestAllowLength = -1;
+        var bestDisallowLength = -1;
+
+        foreach (var rawLine in robotsContent.Split(new[] { "\r\n", "\n" }, StringSplitOptions.None))
+        {
+            var line = StripRobotsComment(rawLine);
+            if (string.IsNullOrWhiteSpace(line))
+            {
+                continue;
+            }
+
+            var separator = line.IndexOf(':');
+            if (separator <= 0)
+            {
+                continue;
+            }
+
+            var key = line[..separator].Trim().ToLowerInvariant();
+            var value = line[(separator + 1)..].Trim();
+            if (key == "user-agent")
+            {
+                applyRules = value == "*";
+                continue;
+            }
+
+            if (!applyRules)
+            {
+                continue;
+            }
+
+            if (key != "allow" && key != "disallow")
+            {
+                continue;
+            }
+
+            sawAnyRule = true;
+            if (string.IsNullOrWhiteSpace(value) || !RobotsRuleMatchesPath(path, value))
+            {
+                continue;
+            }
+
+            var ruleLength = value.Trim().Length;
+            if (key == "allow")
+            {
+                bestAllowLength = Math.Max(bestAllowLength, ruleLength);
+            }
+            else
+            {
+                bestDisallowLength = Math.Max(bestDisallowLength, ruleLength);
+            }
+        }
+
+        if (bestAllowLength < 0 && bestDisallowLength < 0)
+        {
+            return sawAnyRule
+                ? (true, "no matching allow/disallow rule")
+                : (null, "no wildcard user-agent rule");
+        }
+
+        if (bestDisallowLength > bestAllowLength)
+        {
+            return (false, "matched Disallow rule");
+        }
+
+        return (true, "matched Allow/default rule");
+    }
+
+    private static string StripRobotsComment(string line)
+    {
+        var hashIndex = line.IndexOf('#');
+        return hashIndex >= 0 ? line[..hashIndex].Trim() : line.Trim();
+    }
+
+    private static bool RobotsRuleMatchesPath(string path, string rawRule)
+    {
+        var rule = rawRule.Trim();
+        if (string.IsNullOrWhiteSpace(rule))
+        {
+            return false;
+        }
+
+        var exactMatch = rule.EndsWith('$');
+        if (exactMatch)
+        {
+            rule = rule[..^1];
+        }
+
+        rule = rule.Replace("*", string.Empty, StringComparison.Ordinal);
+        if (string.IsNullOrWhiteSpace(rule))
+        {
+            return false;
+        }
+
+        return exactMatch
+            ? string.Equals(path, rule, StringComparison.Ordinal)
+            : path.StartsWith(rule, StringComparison.Ordinal);
+    }
+
+    private static (string Text, bool Truncated) BuildPreviewText(string? content, int maxLines, int maxChars)
+    {
+        if (string.IsNullOrWhiteSpace(content))
+        {
+            return (string.Empty, false);
+        }
+
+        var normalized = content.Replace("\r\n", "\n", StringComparison.Ordinal);
+        var lines = normalized.Split('\n');
+        var truncatedByLines = lines.Length > maxLines;
+        var previewLines = truncatedByLines ? lines.Take(maxLines) : lines;
+        var text = string.Join('\n', previewLines);
+        var truncatedByChars = text.Length > maxChars;
+        if (truncatedByChars)
+        {
+            text = text[..maxChars];
+        }
+
+        var wasTruncated = truncatedByLines || truncatedByChars;
+        if (wasTruncated)
+        {
+            text = text.TrimEnd() + "\n...";
+        }
+
+        return (text, wasTruncated);
+    }
+
+    private static string DescribeSitemapStatus(string? sitemapContent)
+    {
+        if (string.IsNullOrWhiteSpace(sitemapContent))
+        {
+            return "No sitemap captured yet";
+        }
+
+        var detectedUrls = ExtractSitemapUrls(sitemapContent);
+        return detectedUrls.Count > 0
+            ? $"{detectedUrls.Count} sitemap URL(s) captured"
+            : "Sitemap content captured";
+    }
+
+    private static List<string> ExtractSitemapUrls(string? sitemapContent)
+    {
+        if (string.IsNullOrWhiteSpace(sitemapContent))
+        {
+            return new List<string>();
+        }
+
+        var urls = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var token in sitemapContent.Split(new[] { '\r', '\n', '\t', ' ' }, StringSplitOptions.RemoveEmptyEntries))
+        {
+            if (Uri.TryCreate(token.Trim(), UriKind.Absolute, out var parsed)
+                && (parsed.Scheme == Uri.UriSchemeHttp || parsed.Scheme == Uri.UriSchemeHttps))
+            {
+                urls.Add(parsed.AbsoluteUri);
+            }
+        }
+
+        return urls.OrderBy(url => url, StringComparer.OrdinalIgnoreCase).ToList();
+    }
+
+    private static string BuildSiteExternalUrl(string? domain)
+    {
+        if (string.IsNullOrWhiteSpace(domain))
+        {
+            return "#";
+        }
+
+        var normalized = domain.Trim();
+        if (normalized.StartsWith("http://", StringComparison.OrdinalIgnoreCase)
+            || normalized.StartsWith("https://", StringComparison.OrdinalIgnoreCase))
+        {
+            return normalized;
+        }
+
+        return $"https://{normalized}";
+    }
+
+    private string GetSinceUpdateText()
+    {
+        var seconds = Math.Max(0, (int)(DateTime.UtcNow - _lastUpdatedUtc).TotalSeconds);
+        return $"{seconds}s ago";
+    }
+
+    private static string GetFilterLabel(string value)
+    {
+        var match = FilterOptions.FirstOrDefault(option => string.Equals(option.Value, value, StringComparison.OrdinalIgnoreCase));
+        return string.IsNullOrWhiteSpace(match.Value) ? "All page types" : match.Label;
+    }
+
+    private static string CompactUrl(string? rawUrl)
+    {
+        var url = rawUrl?.Trim() ?? string.Empty;
+        if (url.Length <= 128)
+        {
+            return url;
+        }
+
+        const int headLength = 90;
+        const int tailLength = 34;
+        if (url.Length <= headLength + tailLength + 1)
+        {
+            return url;
+        }
+
+        return $"{url[..headLength]}...{url[^tailLength..]}";
+    }
+
+    private async Task CopyUrlAsync(string? url)
+    {
+        if (string.IsNullOrWhiteSpace(url))
+        {
+            return;
+        }
+
+        await JS.InvokeVoidAsync("navigator.clipboard.writeText", url);
+        _copiedUrl = url;
+        _copiedUrlAtUtc = DateTime.UtcNow;
+    }
+
+    private bool IsCopiedUrl(string? url)
+    {
+        if (string.IsNullOrWhiteSpace(url) || !string.Equals(_copiedUrl, url, StringComparison.Ordinal))
+        {
+            return false;
+        }
+
+        return (DateTime.UtcNow - _copiedUrlAtUtc).TotalSeconds <= 3;
+    }
+
+    private static string GetImagePreviewUrl(int pageId, int imageId)
+    {
+        return $"/api/pages/{pageId}/images/{imageId}";
+    }
+
+    private static string GetImageDownloadUrl(int pageId, int imageId)
+    {
+        return $"/api/pages/{pageId}/images/{imageId}?download=true";
+    }
+
+    private static string GetBlobPreviewUrl(int pageId, int pageDataId)
+    {
+        return $"/api/pages/{pageId}/page-data/{pageDataId}";
+    }
+
+    private static string GetBlobDownloadUrl(int pageId, int pageDataId)
+    {
+        return $"/api/pages/{pageId}/page-data/{pageDataId}?download=true";
+    }
+
+    private static bool IsPreviewableBlob(string contentType)
+    {
+        var normalized = contentType.ToLowerInvariant();
+        return normalized.StartsWith("image/")
+            || normalized == "application/pdf"
+            || normalized.StartsWith("text/");
+    }
+
+    private static string ResolvePageDataContentType(PageDatum pageData)
+    {
+        var normalizedType = pageData.DataTypeCode?.Trim().ToUpperInvariant();
+        return normalizedType switch
+        {
+            "PDF" => "application/pdf",
+            "DOC" => "application/msword",
+            "DOCX" => "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+            "PPT" => "application/vnd.ms-powerpoint",
+            "PPTX" => "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+            _ => "application/octet-stream",
+        };
+    }
+
+    private static string FormatBytes(long bytes)
+    {
+        string[] units = ["B", "KB", "MB", "GB"];
+        double value = bytes;
+        var unitIndex = 0;
+
+        while (value >= 1024 && unitIndex < units.Length - 1)
+        {
+            value /= 1024;
+            unitIndex++;
+        }
+
+        return $"{value:0.#} {units[unitIndex]}";
+    }
+
+    public ValueTask DisposeAsync()
+    {
+        _searchDebounceCts?.Cancel();
+        _searchDebounceCts?.Dispose();
+
+        try
+        {
+            _liveCts?.Cancel();
+        }
+        catch
+        {
+            // Ignore shutdown race when cancelling live timer.
+        }
+
+        _liveTimer?.Dispose();
+        _liveCts?.Dispose();
+        return ValueTask.CompletedTask;
+    }
+}
