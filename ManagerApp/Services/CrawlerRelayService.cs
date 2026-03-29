@@ -72,7 +72,9 @@ public sealed class CrawlerRelayService
             : request.DownloadResult!.PageTypeCode!.Trim().ToUpperInvariant();
         var html = request.DownloadResult?.HtmlContent;
         var contentHash = string.IsNullOrWhiteSpace(html) ? null : Sha256Hex(html);
+        var binaryPayloadBytes = DecodeBinaryPayload(request.DownloadResult?.BinaryContentBase64);
         var parsedPayloadBytes = SerializeParsedPayload(request.DownloadResult?.ParsedPayload);
+        var pageDataBytes = binaryPayloadBytes ?? parsedPayloadBytes;
 
         await using var context = await _contextFactory.CreateDbContextAsync(cancellationToken);
 
@@ -255,13 +257,13 @@ public sealed class CrawlerRelayService
                 {
                     PageId = targetPage.Id,
                     DataTypeCode = request.DownloadResult!.DataTypeCode,
-                    Data = parsedPayloadBytes,
+                    Data = pageDataBytes,
                 });
                 await context.SaveChangesAsync(cancellationToken);
             }
-            else if (parsedPayloadBytes is not null)
+            else if (pageDataBytes is not null)
             {
-                existingPageData.Data = parsedPayloadBytes;
+                existingPageData.Data = pageDataBytes;
                 await context.SaveChangesAsync(cancellationToken);
             }
         }
@@ -393,6 +395,23 @@ public sealed class CrawlerRelayService
         try
         {
             return Encoding.UTF8.GetBytes(payload.GetRawText());
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
+    private static byte[]? DecodeBinaryPayload(string? binaryContentBase64)
+    {
+        if (string.IsNullOrWhiteSpace(binaryContentBase64))
+        {
+            return null;
+        }
+
+        try
+        {
+            return Convert.FromBase64String(binaryContentBase64);
         }
         catch
         {
@@ -1413,6 +1432,7 @@ public sealed class CrawlerDownloadResult
     public int? StatusCode { get; set; }
     public string? ContentType { get; set; }
     public string? DataTypeCode { get; set; }
+    public string? BinaryContentBase64 { get; set; }
     public string? PageTypeCode { get; set; }
     public string? HtmlContent { get; set; }
     public bool? UsedRenderer { get; set; }

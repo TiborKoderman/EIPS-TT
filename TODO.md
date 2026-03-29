@@ -120,6 +120,8 @@ Last rebuilt: 2026-03-26
 - [x] Moved collected binary type top bar from Dashboard to Collected Pages tab.
 - [x] Added collected image type breakdown (JPG/PNG/WEBP/GIF/SVG/BMP/TIFF/ICO/AVIF/OTHER) to Collected Pages.
 - [x] Hardened crawler document type detection to include query filename hints and `Content-Disposition` filenames.
+- [x] Added `scripts/backfill-binary-doc-types.py` for no-recrawl binary document type backfill on existing `BINARY` rows.
+- [x] Fixed crawler binary capture path: downloader flags now respect runtime config and manager ingest persists optional document payload bytes from `binaryContentBase64`.
 
 ## Pending follow-ups
 

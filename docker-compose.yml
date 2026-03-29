@@ -35,6 +35,7 @@ services:
       CrawlerApi__ManagerSocketUrl: ws://manager:5175/api/daemon-channel
       CrawlerApi__DaemonChannelToken: ${CRAWLER_API_TOKEN:-}
       CrawlerApi__FrontierApiToken: ${CRAWLER_API_TOKEN:-}
+      CRAWLER_DOWNLOAD_PDF_CONTENT: "true"
     ports:
       - "${MANAGER_HOST_PORT:-5175}:5175"
 
@@ -54,6 +55,7 @@ services:
       MANAGER_EVENT_API_URL: http://manager:5175/api/crawler/events
       MANAGER_INGEST_API_TOKEN: ${CRAWLER_API_TOKEN:-}
       MANAGER_DAEMON_WS_TOKEN: ${CRAWLER_API_TOKEN:-}
+      CRAWLER_DOWNLOAD_PDF_CONTENT: "true"
 
 volumes:
   postgres-data:

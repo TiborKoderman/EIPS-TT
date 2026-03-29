@@ -13,6 +13,7 @@ The crawler module runs a websocket-controlled daemon that executes worker crawl
 - Detect image references from `img[src]`.
 - Classify content handling (`HTML`, binary, duplicate handling).
 - Detect binary document types (PDF/DOC/DOCX/PPT/PPTX) via content-type, URL/query filename hints, and `Content-Disposition` filenames.
+- Optional document payload relay is supported (`CRAWLER_DOWNLOAD_PDF_CONTENT=true`) and forwards base64 bytes for detected document types to manager ingest.
 - Apply preferential relevance scoring to discovered URLs.
 
 ## Entrypoint

@@ -31,6 +31,8 @@ DATA_TYPE_BY_CONTENT_TYPE = {
     "application/vnd.openxmlformats-officedocument.presentationml.presentation": "PPTX",
 }
 
+DOCUMENT_DATA_TYPES = {"PDF", "DOC", "DOCX", "PPT", "PPTX"}
+
 
 @dataclass(frozen=True)
 class DownloadResult:
@@ -107,7 +109,7 @@ class Downloader:
             )
 
         binary_content = None
-        should_download_binary = download_binary_content or (data_type == "PDF" and download_pdf_content)
+        should_download_binary = download_binary_content or (data_type in DOCUMENT_DATA_TYPES and download_pdf_content)
         can_store_large = store_large_binary_content or (content_length is not None and content_length <= large_binary_threshold_bytes)
         if should_download_binary and can_store_large:
             binary_content = response.content

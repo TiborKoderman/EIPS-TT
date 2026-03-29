@@ -219,7 +219,7 @@ This design allows multiple workers to operate in parallel while still respectin
 \textbf{Solution:} canonical URL uniqueness in DB, relevance scoring, and robots compliance constraints.
 
 \subsection{Binary type accounting bug and correction}
-\textbf{Problem:} during validation we found an unnoticed accounting bug in the per-type binary statistics. The dashboard/report path originally relied on \texttt{page\_data.data\_type\_code} and strict file-suffix checks on URL path only. In practice, many collected binary resources had no \texttt{page\_data} row (metadata-only ingest), and some file-type hints appeared in query parameters or response headers rather than the URL path. This made part of the binary corpus look "ignored" in type breakdowns.
+\textbf{Problem:} during validation we identified an unnoticed accounting bug in per-type binary statistics. The original dashboard/report logic relied on \texttt{page\_data.data\_type\_code} and strict file-suffix checks on the URL path only. In practice, many collected binary resources had no \texttt{page\_data} row (metadata-only ingest), while some type hints appeared in query parameters or response headers rather than in the path. As a result, part of the binary corpus was undercounted in type breakdowns.
 
 \textbf{Solution:} we corrected the pipeline in two steps:
 \begin{itemize}

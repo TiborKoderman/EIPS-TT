@@ -87,6 +87,7 @@ All transitions are logged with timestamp and reason.
 - **Live frontier stats:** explicit In queue / In memory / Leased counters with completion/failure context
 - **Binary type visibility:** Collected Pages shows PDF/DOC/DOCX/PPT/PPTX counters (zero-safe) using collected `BINARY` pages and known type metadata
 - **Image type visibility:** Collected Pages shows JPG/PNG/WEBP/GIF/SVG/BMP/TIFF/ICO/AVIF/OTHER counters inferred from collected binary URLs
+- **Document payload persistence:** manager ingest accepts optional `binaryContentBase64` for detected document binaries and stores bytes in `crawldb.page_data` when provided.
 - **Duplicate detection:** Identify and link duplicate URLs
 - **Terminal duplicate handling:** manager-side enqueue upsert keeps `DUPLICATE` rows terminal instead of re-queuing them
 - **Lease management:** Automatic requeue on worker timeout/failure

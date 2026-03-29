@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import base64
 import subprocess
 import sys
 import threading
@@ -2193,9 +2194,10 @@ class DaemonWorkerService(WorkerControlService):
             download = downloader.fetch(
                 url,
                 render_html=False,
-                download_pdf_content=False,
-                download_binary_content=False,
-                store_large_binary_content=False,
+                download_pdf_content=self._crawler_config.download_pdf_content,
+                download_binary_content=self._crawler_config.download_binary_content,
+                store_large_binary_content=self._crawler_config.store_large_binary_content,
+                large_binary_threshold_bytes=self._crawler_config.large_binary_threshold_bytes,
             )
         except Exception as exc:
             return {
@@ -2337,12 +2339,17 @@ class DaemonWorkerService(WorkerControlService):
         robots_allowed: bool = True,
         effective_delay_seconds: float | None = None,
     ) -> dict[str, object | None]:
+        binary_content_base64: str | None = None
+        if download.binary_content and download.data_type_code in {"PDF", "DOC", "DOCX", "PPT", "PPTX"}:
+            binary_content_base64 = base64.b64encode(download.binary_content).decode("ascii")
+
         return {
             "requestedUrl": download.requested_url,
             "finalUrl": download.final_url,
             "statusCode": download.status_code,
             "contentType": download.content_type,
             "dataTypeCode": download.data_type_code,
+            "binaryContentBase64": binary_content_base64,
             "pageTypeCode": download.page_type_code,
             "htmlContent": download.html_content,
             "usedRenderer": download.used_renderer,
