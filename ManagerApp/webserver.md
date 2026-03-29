@@ -21,7 +21,7 @@ The manager serves two critical roles:
 
 ## Assignment-Mapped Responsibilities
 
-- Expose unified crawler (mode-aware) controls and daemon configuration from the UI
+- Expose websocket daemon controls and daemon configuration from the UI
 - Surface crawl statistics, frontier queue state, and worker health metrics
 - Provide an operator-facing workflow to inspect pages, workers, and graph relationships
 - Maintain authenticated WebSocket channels for:
@@ -34,7 +34,7 @@ The manager serves two critical roles:
 On webserver startup:
 
 1. Check if local daemon is already running (connect test)
-2. If not: spawn `pa1/crawler/src/main.py` (or compatibility wrapper `daemon/main.py`)
+2. If not: spawn `pa1/crawler/src/main.py`
 3. Wait for reverse channel connection
 4. Spawn 1 initial worker as a baseline (can add more via UI)
 
@@ -44,7 +44,7 @@ This ensures a working crawl environment without manual daemon startup.
 
 UI-configurable parameters should cover:
 - WebSocket connection/auth parameters for daemon
-- Frontier threshold for queue spillover to DB
+- Frontier queue behavior, lease timing, and scheduling controls
 - Worker lifecycle actions (start/pause/stop/spawn)
 - Worker count limits and concurrency settings
 - Crawl strategy controls (politeness, robots policy, preferential scoring)

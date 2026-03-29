@@ -70,7 +70,6 @@ docker compose --profile server --profile crawler down
 
 ## Notes
 
-- Crawler runtime is websocket-only; standalone mode is removed.
 - Manager default URL is `http://127.0.0.1:5175` in these examples.
 - Use `MANAGER_HOST_PORT=<port>` for host port override in Docker Compose.
 

@@ -4,7 +4,8 @@ This document describes how worker startup and parallelization work in the curre
 
 ## 1. Runtime model
 
-The crawler runs as a single daemon process (`pa1/crawler/src/daemon/main.py`) that can manage multiple workers.
+The crawler runs as a single daemon process (`pa1/crawler/src/main.py`) that can manage multiple workers.
+(`pa1/crawler/src/daemon/main.py` is a compatibility wrapper.)
 
 - Instance level: one daemon instance (`single-daemon`)
 - Worker level: multiple workers (`multi-worker`)
@@ -21,9 +22,7 @@ Manager communication is daemon-initiated over reverse websocket channel.
 When daemon starts:
 
 1. `DaemonWorkerService` is created.
-2. Worker ID counter is bootstrapped from:
-   - in-memory worker IDs
-   - persisted max IDs in DB (`manager.worker`, `manager.worker_log`, `manager.worker_metric`, `manager.seed_url`)
+2. Worker ID counter is initialized from in-memory daemon state.
 3. Reverse channel connects to manager and starts heartbeat/snapshot exchange.
 4. Daemon state becomes available to Manager UI.
 
@@ -83,15 +82,15 @@ URL lifecycle inside daemon frontier:
 
 So yes: after a URL is parsed/processed, it is removed from the active queue.
 
-### 4.2 Database queue behavior (important fix)
+### 4.2 Manager-owned database queue behavior
 
-For `crawldb.frontier_queue`, terminal rows are now removed by default:
+For `crawldb.frontier_queue`, queue state is manager-owned and state-driven.
 
-- when claim completes with terminal state (`done` / `failed`), row is deleted
-- this is controlled by:
-  - `CRAWLER_FRONTIER_REMOVE_TERMINAL_ROWS=true` (default)
+- workers/daemons claim URLs through manager frontier APIs
+- completion updates queue state (for example `COMPLETED`, `FAILED`, `DUPLICATE`)
+- lease metadata (`locked_at`, `locked_by_worker_id`) is used for expiry/requeue safety
 
-This keeps `frontier_queue` aligned with "pending/in-flight queue" semantics instead of accumulating completed history rows.
+The daemon does not directly write frontier rows.
 
 ## 5. Queue correctness notes
 
@@ -177,5 +176,5 @@ This ensures full observability into worker lifecycle changes.
 2. Spawn 2+ workers in `thread` mode.
 3. Start workers and verify at most `maxConcurrentWorkers` run concurrently.
 4. Observe frontier stats: in-memory queued decreases as URLs are claimed.
-5. Verify processed URLs disappear from `crawldb.frontier_queue` (terminal rows removed).
+5. Verify processed URLs leave the active `QUEUED` set and transition to terminal/lease-managed states in `crawldb.frontier_queue`.
 6. Confirm new pages appear live in Collected Pages table.
