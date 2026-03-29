@@ -89,8 +89,8 @@ in-memory per-daemon/per-site cooldowns (minimum 5\,s), not through a \texttt{fr
 \end{itemize}
 
 \section{Preferential crawling strategy}
-The crawler uses a preferential strategy: every discovered URL is assigned a numeric priority (stored as \texttt{frontier\_priority}
-in the frontier row), and workers always claim the currently due URL with the highest priority.
+The crawler uses a preferential strategy: every discovered URL is assigned a numeric priority (stored as \texttt{priority}
+in \texttt{crawldb.frontier_queue}), and workers always claim the currently due URL with the highest priority.
 % NOTE (code sync): Queue column name is \texttt{priority} in \texttt{crawldb.frontier_queue} (not \texttt{frontier_priority}).
 
 \subsection{Scoring function}
@@ -199,7 +199,6 @@ The command-line entry point in \texttt{main.py} was used to test:
 \textbf{Problem:} parallel workers can violate politeness if delays are not shared.\\
 \textbf{Solution:} server-side per IP locking and queue delagation, the shared queue holds timeouts for the next allowed fetch of each origin, when a worker requests a deque, and the server returns the highest priority URL that is not timed out, and adds it to the timeout list until the next allowed fetch time.
 This design allows multiple workers to operate in parallel while still respecting per-origin crawl delays. The new problem is that workers on different IPs are rate limited by the same delay, but this is a necessary tradeoff for ethical crawling. The other easy solution would just be to just do proxy switching, but this is not ethical.
-% NOTE (code sync): Politeness cooldowns are tracked per daemon and per resolved site/IP key (not a single global delay bucket).
 
 \subsection{Dynamic content}
 \textbf{Problem:} some links/content are injected by JavaScript.\\
@@ -231,8 +230,8 @@ This section is intentionally a scaffold for the final submission stage.
     \begin{tabular}{@{}lll@{}}
         \toprule
         Metric                       & Seed domain (MedOverNet) & Full crawldb   \\ \midrule
-        Number of sites              & \texttt{[TBD]}           & \texttt{[TBD]} \\
-        Number of HTML pages         & \texttt{[TBD]}           & \texttt{[TBD]} \\
+        Number of sites              & \texttt{174}           & \texttt{[TBD]} \\
+        Number of HTML pages         & \texttt{1001}           & \texttt{[TBD]} \\
         Number of duplicates         & \texttt{[TBD]}           & \texttt{[TBD]} \\
         Number of binary pages       & \texttt{[TBD]}           & \texttt{[TBD]} \\
         Number of images             & \texttt{[TBD]}           & \texttt{[TBD]} \\

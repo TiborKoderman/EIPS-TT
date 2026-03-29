@@ -719,6 +719,8 @@ public sealed class ReverseChannelWorkerService : IWorkerService
             ? new { workerId }
             : null;
 
+        var isStartWorkerCommand = string.Equals(commandType, "start-worker", StringComparison.OrdinalIgnoreCase);
+
         var action = commandType switch
         {
             "start-daemon" => "start-daemon",
@@ -739,6 +741,32 @@ public sealed class ReverseChannelWorkerService : IWorkerService
             if (!await EnsureDaemonConnectedAsync(targetDaemonId))
             {
                 return false;
+            }
+        }
+
+        if (isStartWorkerCommand)
+        {
+            var daemonStart = await _daemonChannel.SendRequestAsync<JsonElement>(targetDaemonId, "start-daemon", payload: null);
+            if (!daemonStart.Ok)
+            {
+                if (IsTransientRequestFailure(daemonStart.Error))
+                {
+                    await Task.Delay(300);
+                    if (await EnsureDaemonConnectedAsync(targetDaemonId))
+                    {
+                        daemonStart = await _daemonChannel.SendRequestAsync<JsonElement>(targetDaemonId, "start-daemon", payload: null);
+                    }
+                }
+
+                if (!daemonStart.Ok)
+                {
+                    LastError = daemonStart.Error;
+                    _logger.LogDebug(
+                        "Failed to auto-start daemon before start-worker. daemonId={DaemonId} error={Error}",
+                        targetDaemonId,
+                        daemonStart.Error);
+                    return false;
+                }
             }
         }
 
