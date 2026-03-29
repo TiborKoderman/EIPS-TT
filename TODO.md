@@ -114,6 +114,7 @@ Last rebuilt: 2026-03-26
 - [x] Added release-grade Docker packaging assets (`docker-compose.yml`, bundled server+crawler Dockerfile, GHCR publish workflow, local release script) and updated install/deploy docs.
 - [x] Removed compose-based devcontainer mode and updated root setup docs for host workflows plus local Docker build/run without GHCR publishing.
 - [x] Fixed multi-daemon worker routing in manager UI/services (daemon-aware worker actions/groups/detail links), stabilized daemon panel expand behavior, and fixed full-slice dashboard worker pie chart rendering.
+- [x] Removed remaining crawler direct-DB code paths and deleted unused compatibility modules (`src/db/*`, `src/core/crawl_processor.py`, `src/daemon/persistence_router.py`, `src/api_server.py`), keeping Python websocket entrypoint startup intact.
 
 ## Pending follow-ups
 

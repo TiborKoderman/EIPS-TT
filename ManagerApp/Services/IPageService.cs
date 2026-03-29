@@ -23,7 +23,7 @@ public interface IPageService
     Task<int> GetSearchResultsCountAsync(string? searchTerm, string? pageType);
 
     /// <summary>
-    /// Compute a classifier-free relevance evaluation summary over the full collected database.
+    /// Compute a classifier-free relevance evaluation summary over the top scored sample window.
     /// </summary>
     Task<PageEvaluationSummaryDto> GetEvaluationSummaryAsync();
 

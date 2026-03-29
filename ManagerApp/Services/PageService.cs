@@ -384,12 +384,17 @@ public class PageService : IPageService
     {
         var rows = await _context.Pages
             .Where(page => page.Url != null && page.PageTypeCode != "FRONTIER")
-            .Select(page => new { Url = page.Url! })
+            .Select(page => new
+            {
+                Url = page.Url!,
+                page.AccessedTime,
+                page.Id,
+            })
             .ToListAsync();
 
         var summary = new PageEvaluationSummaryDto
         {
-            TotalPages = rows.Count,
+            TotalPages = 0,
         };
 
         if (rows.Count == 0)
@@ -399,7 +404,7 @@ public class PageService : IPageService
 
         var policy = await LoadRelevancePolicyAsync();
         var hints = await LoadFrontierHintsAsync(rows.Select(row => row.Url));
-        var scores = new List<double>(rows.Count);
+        var scoredRows = new List<(double Score, bool HasKeyword, bool HasAllowedSuffix, bool HasSameHost, DateTime? AccessedTime, int Id)>(rows.Count);
 
         foreach (var row in rows)
         {
@@ -413,36 +418,56 @@ public class PageService : IPageService
                 out var hasAllowedSuffix,
                 out var hasSameHost);
 
-            scores.Add(score);
-            if (score > 0)
+            scoredRows.Add((score, hasKeyword, hasAllowedSuffix, hasSameHost, row.AccessedTime, row.Id));
+        }
+
+        var topRows = scoredRows
+            .OrderByDescending(row => row.Score)
+            .ThenByDescending(row => row.AccessedTime)
+            .ThenBy(row => row.Id)
+            .Take(summary.TargetPageCount)
+            .ToList();
+
+        summary.TotalPages = topRows.Count;
+        summary.EvaluatedPages = topRows.Count;
+
+        if (topRows.Count == 0)
+        {
+            return summary;
+        }
+
+        var scores = new List<double>(topRows.Count);
+        foreach (var row in topRows)
+        {
+            scores.Add(row.Score);
+            if (row.Score > 0)
             {
                 summary.PositiveScorePages += 1;
             }
 
-            if (hasKeyword)
+            if (row.HasKeyword)
             {
                 summary.KeywordEvidencePages += 1;
             }
 
-            if (hasAllowedSuffix)
+            if (row.HasAllowedSuffix)
             {
                 summary.AllowedSuffixEvidencePages += 1;
             }
 
-            if (hasSameHost)
+            if (row.HasSameHost)
             {
                 summary.SameHostEvidencePages += 1;
             }
 
             // Classifier-free proxy for likely relevance:
             // explicit topical signals from configured keywords and scope suffixes.
-            if (hasKeyword || hasAllowedSuffix)
+            if (row.HasKeyword || row.HasAllowedSuffix)
             {
                 summary.EstimatedRelevantPages += 1;
             }
         }
 
-        summary.EvaluatedPages = scores.Count;
         if (scores.Count > 0)
         {
             scores.Sort();

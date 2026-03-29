@@ -23,6 +23,7 @@ Programming Assignment 1: Preferential Web Crawler for MedOverNet}
 
 \section{Introduction}
 In this project, we built a standalone preferential crawler for the MedOverNet domain (\url{https://medover.zurnal24.si/}). The goal is to crawl relevant pages first, respect robots rules, avoid duplicate content, and store crawl data in PostgreSQL using the required crawldb schema.
+% NOTE (code sync): Current runtime is websocket daemon mode only (standalone mode is disabled in pa1/crawler/src/main.py).
 
 The crawler is designed as a multi-worker system with a database-backed frontier. Each worker takes one URL, checks robots and politeness limits, downloads or renders the page, detects duplicates, stores the result, extracts new links and images, scores discovered URLs, and pushes them back to the frontier.
 
@@ -50,15 +51,24 @@ The implementation is split into clear modules:
     \item Canonicalization and dedup utils: \texttt{url\_canonicalizer.py}, \texttt{dedup.py}.
     \item Robots and politeness: \texttt{robots.py}, \texttt{politeness.py}.
 \end{itemize}
+% NOTE (code sync): Several file names above are legacy labels (for example scheduler.py, run_crawler.py, frontier_store.py, page_store.py).
+% NOTE (code sync): Current implementation is centered around pa1/crawler/src/api/* (worker_service.py, reverse_channel.py)
+% NOTE (code sync): and pa1/crawler/src/core/* (frontier.py, parser.py, relevance.py, downloader.py, renderer.py, etc.).
 
 \subsection{Frontier queue semantics}
-The URL frontier is implemented directly in \texttt{crawldb.page}: each queued URL is stored as a row with \texttt{page\_type\_code = FRONTIER}.
-We store \emph{only canonicalized absolute URLs}.
+The URL frontier is implemented in a dedicated table, \texttt{crawldb.frontier\_queue}, rather than in \texttt{crawldb.page}.
+Each frontier row stores a canonical absolute \texttt{url}, \texttt{priority}, \texttt{source\_url}, and \texttt{depth}, with a uniqueness constraint on \texttt{url}.
 
-Enqueue is concurrency-safe and relies on a uniqueness constraint on urls: if a URL already exists in \texttt{crawldb.page},
-it is not enqueued again.
+Enqueue uses UPSERT semantics and is concurrency-safe: if the URL already exists, priority is merged with \texttt{GREATEST},
+depth/discovery metadata are kept from the best available values, and previously terminal rows (\texttt{COMPLETED}/\texttt{FAILED}) can be reactivated to \texttt{QUEUED}.
 
-If a fetch fails, the frontier item is rescheduled by pushing \texttt{frontier\_next\_fetch\_time} into the future.
+Workers claim URLs via an atomic transaction: candidates are read in priority order
+(\texttt{ORDER BY priority DESC, discovered\_at ASC}) with \texttt{FOR UPDATE SKIP LOCKED}, then the selected row is moved to \texttt{LOCKED}
+and tagged with lease metadata (\texttt{locked\_at}, \texttt{locked\_by\_worker\_id}). Expired leases are automatically re-queued after a configurable TTL.
+
+Queue state is enum-driven (\texttt{QUEUED}, \texttt{LOCKED}, \texttt{PROCESSING}, \texttt{COMPLETED}, \texttt{DUPLICATE}, \texttt{FAILED}).
+Completion reports map worker outcomes to terminal states, while retry outcomes map back to \texttt{QUEUED}. Politeness timing is enforced server-side through
+in-memory per-daemon/per-site cooldowns (minimum 5\,s), not through a \texttt{frontier\_next\_fetch\_time} column.
 
 \subsection{Division of work}
 \textbf{Implemented in this part of the report draft:}
@@ -81,6 +91,7 @@ If a fetch fails, the frontier item is rescheduled by pushing \texttt{frontier\_
 \section{Preferential crawling strategy}
 The crawler uses a preferential strategy: every discovered URL is assigned a numeric priority (stored as \texttt{frontier\_priority}
 in the frontier row), and workers always claim the currently due URL with the highest priority.
+% NOTE (code sync): Queue column name is \texttt{priority} in \texttt{crawldb.frontier_queue} (not \texttt{frontier_priority}).
 
 \subsection{Scoring function}
 The current implementation uses a lightweight, configurable heuristic (\texttt{relevance.py}).
@@ -93,6 +104,7 @@ For a discovered URL \texttt{u} with parent URL \texttt{p} at depth \texttt{d}, 
 \end{itemize}
 
 With the default configuration, the crawler primarily prefers same-host URLs and mildly prefers shallow depth. Domain-specific focusing is supported via configuration, but must be explicitly set.
+% NOTE (code sync): Current defaults also include non-empty topic keywords (medicine, health, doctor, clinic, hospital, treatment, disease), so keyword boosts are active by default.
 
 \subsection{Worked example with default parameters}
 For a child URL discovered on the same host at depth $d=3$:
@@ -178,6 +190,7 @@ The command-line entry point in \texttt{main.py} was used to test:
     \item downloader behavior for HTML/PDF cases,
     \item renderer output size difference on dynamic pages.
 \end{itemize}
+% NOTE (code sync): Current \texttt{pa1/crawler/src/main.py} is a websocket daemon entrypoint; ad-hoc CLI test hooks should be documented via dedicated scripts/modules if used.
 
 \textbf{PLACEHOLDER (final report):} include final parameter table used for the 5000-page crawl run.
 
@@ -186,6 +199,7 @@ The command-line entry point in \texttt{main.py} was used to test:
 \textbf{Problem:} parallel workers can violate politeness if delays are not shared.\\
 \textbf{Solution:} server-side per IP locking and queue delagation, the shared queue holds timeouts for the next allowed fetch of each origin, when a worker requests a deque, and the server returns the highest priority URL that is not timed out, and adds it to the timeout list until the next allowed fetch time.
 This design allows multiple workers to operate in parallel while still respecting per-origin crawl delays. The new problem is that workers on different IPs are rate limited by the same delay, but this is a necessary tradeoff for ethical crawling. The other easy solution would just be to just do proxy switching, but this is not ethical.
+% NOTE (code sync): Politeness cooldowns are tracked per daemon and per resolved site/IP key (not a single global delay bucket).
 
 \subsection{Dynamic content}
 \textbf{Problem:} some links/content are injected by JavaScript.\\
@@ -194,6 +208,8 @@ This design allows multiple workers to operate in parallel while still respectin
 \subsection{Frontier concurrency}
 \textbf{Problem:} multiple workers may claim the same URL.\\
 \textbf{Solution:} The workers don't connect to the database directly, this is also a security design to allow workers to run on seperate machines without exposing the database to the networ. Instead the frontier is implemented on the server. When a worker is in a \texit{idle} state, the server deques the highest priority URL, and locks it by updating it's status in the database, this removes it from the frontier candidates. To ensure that the queue is fast and responsive, the server maintains an in-memory queue of the urls in the fronntier. The databae table is also indexed by the frontier\_priority and frontier\_next\_fetch\_time, so that the server can quickly find the next available URL to assign to a worker. If a worker fails to fetch a URL, the server can re-enqueue it by updating its status and frontier\_next\_fetch\_time in the database.
+% NOTE (code sync): Current DB claim path uses \texttt{FOR UPDATE SKIP LOCKED} and lease fields (\texttt{locked_at}, \texttt{locked_by_worker_id}) in \texttt{crawldb.frontier_queue}.
+% NOTE (code sync): Current primary queue index is state + priority DESC + discovered_at ASC; \texttt{frontier_next_fetch_time} is not part of the schema.
 
 \subsection{Duplicate handling}
 \textbf{Problem:} same content may appear under different URLs.\\

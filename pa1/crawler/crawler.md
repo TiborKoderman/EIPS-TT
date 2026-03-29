@@ -24,8 +24,7 @@ python pa1/crawler/src/main.py
 
 Compatibility flags accepted by the entrypoint:
 
-- `--mode websocket`
-- `--run-api`
+None.
 
 Standalone mode is removed.
 

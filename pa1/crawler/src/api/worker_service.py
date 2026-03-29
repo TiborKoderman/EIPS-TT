@@ -34,7 +34,6 @@ from core.politeness import PerIpRateLimiter
 from core.relevance import RelevancePolicy, score_url
 from core.robots import RobotsPolicy
 from core.robots import RobotsPolicyManager
-from db.pg_connect import get_connection
 from utils.url_canonicalizer import DefaultUrlCanonicalizer
 
 
@@ -105,8 +104,8 @@ class DaemonWorkerService(WorkerControlService):
                 },
             ),
         }
-        # Bootstrap next_worker_id from both in-memory workers and persisted history
-        self._next_worker_id = self._bootstrap_worker_id_counter()
+        # Worker IDs are runtime-scoped; manager persists history independently.
+        self._next_worker_id = max(self._workers.keys()) + 1
         self._global_config = GlobalWorkerConfig()
         self._groups: dict[int, WorkerGroupSettings] = {
             1: WorkerGroupSettings(
@@ -181,7 +180,7 @@ class DaemonWorkerService(WorkerControlService):
         self._manager_event_relay_degraded = False
         allow_local_fallback_raw = os.getenv(
             "CRAWLER_DAEMON_ALLOW_LOCAL_FALLBACK",
-            os.getenv("CRAWLER_DAEMON_ALLOW_DB_FALLBACK", "true"),
+            "true",
         )
         self._allow_daemon_local_fallback = str(allow_local_fallback_raw).strip().lower() in {"1", "true", "yes", "on"}
         self._max_extracted_links_per_page = max(
@@ -204,40 +203,6 @@ class DaemonWorkerService(WorkerControlService):
 
         self._simulator_thread = threading.Thread(target=self._simulation_loop, daemon=True)
         self._simulator_thread.start()
-
-    def _bootstrap_worker_id_counter(self) -> int:
-        """Calculate next available worker ID, considering both in-memory and persisted workers."""
-        max_memory_id = max(self._workers.keys()) if self._workers else 0
-        max_persisted_id = self._get_max_worker_id_from_db()
-        # Use the higher of the two, then add 1 to avoid conflicts.
-        return max(max_memory_id, max_persisted_id) + 1
-
-    def _get_max_worker_id_from_db(self) -> int:
-        """Query database for maximum external_worker_id ever used."""
-        try:
-            conn = get_connection()
-            if conn is None:
-                return 0
-            try:
-                with conn.cursor() as cur:
-                    # Check all manager tables that persist worker identity.
-                    cur.execute(
-                        """
-                        SELECT GREATEST(
-                            COALESCE((SELECT MAX(external_worker_id) FROM manager.worker), 0),
-                            COALESCE((SELECT MAX(external_worker_id) FROM manager.worker_log), 0),
-                            COALESCE((SELECT MAX(external_worker_id) FROM manager.worker_metric), 0),
-                            COALESCE((SELECT MAX(external_worker_id) FROM manager.seed_url), 0)
-                        );
-                        """
-                    )
-                    result = cur.fetchone()
-                    return int(result[0]) if result and result[0] else 0
-            finally:
-                conn.close()
-        except Exception:
-            # Fall back to in-memory IDs if DB isn't reachable.
-            return 0
 
     def get_daemon_status(self) -> dict[str, object]:
         with self._lock:
