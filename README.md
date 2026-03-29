@@ -77,4 +77,3 @@ docker compose --profile server --profile crawler down
 
 - [ManagerApp/README.md](ManagerApp/README.md)
 - [pa1/crawler/crawler.md](pa1/crawler/crawler.md)
-- [docs/daemon-worker-runtime.md](docs/daemon-worker-runtime.md)
