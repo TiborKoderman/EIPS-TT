@@ -70,8 +70,23 @@ in-memory per-daemon/per-site cooldowns (minimum 5\,s), not through a \texttt{fr
 
 \subsection{Division of work}
 We divided the implementation into three balanced workstreams and integrated all parts jointly in the final branch.
+\noindent\textbf{Parsing/frontier and crawl-strategy stream}
+\begin{itemize}
+    \item parsing-dev branch work for link/image extraction and parser integration,
+    \item frontier queue strategy material and related implementation refinements,
+    \item preferential crawling and frontier documentation/validation updates,
+    \item branch-level fixes and consolidation work merged into the final flow.
+\end{itemize}
 
-\textbf{Tibor Koderman: architecture, database evolution, and manager platform}
+\noindent\textbf{Fetch/render and crawler-runtime stream}
+\begin{itemize}
+    \item downloader and renderer baseline implementation and testing,
+    \item robots/rate-limiting foundations and runtime behavior improvements,
+    \item crawler-side content-type handling and binary metadata handling groundwork,
+    \item report drafting inputs, example collection, and final-text iteration support.
+\end{itemize}
+
+\noindent\textbf{Architecture, database evolution, and manager platform}
 \begin{itemize}
     \item base architecture integration and migration from direct crawler-DB coupling to server-owned queue flow,
     \item crawldb upgrade/migration work and operational scripts,
@@ -80,26 +95,9 @@ We divided the implementation into three balanced workstreams and integrated all
     \item manager-side stats, analysis views, and visualization features.
 \end{itemize}
 
-\textbf{Jerneja Krajcar: parsing/frontier and crawl-strategy stream}
-\begin{itemize}
-    \item parsing-dev branch work for link/image extraction and parser integration,
-    \item frontier queue strategy material and related implementation refinements,
-    \item preferential crawling and frontier documentation/validation updates,
-    \item branch-level fixes and consolidation work merged into the final flow.
-\end{itemize}
-
-\textbf{Dino Džaferagić: fetch/render and crawler-runtime stream}
-\begin{itemize}
-    \item downloader and renderer baseline implementation and testing,
-    \item robots/rate-limiting foundations and runtime behavior improvements,
-    \item crawler-side content-type handling and binary metadata handling groundwork,
-    \item report drafting inputs, example collection, and final-text iteration support.
-\end{itemize}
-
 \section{Preferential crawling strategy}
 The crawler uses a preferential strategy: every discovered URL is assigned a numeric priority (stored as \texttt{priority}
 in \texttt{crawldb.frontier\_queue}), and workers always claim the currently due URL with the highest priority.
-% NOTE (code sync): Queue column name is \texttt{priority} in \texttt{crawldb.frontier_queue} (not \texttt{frontier_priority}).
 
 \subsection{Scoring function}
 The current implementation uses a lightweight, configurable heuristic (\texttt{relevance.py}).
@@ -211,9 +209,12 @@ This design allows parallel workers while preserving ethical pacing for target o
 
 \subsection{Frontier concurrency}
 \textbf{Problem:} multiple workers may claim the same URL.\\
-\textbf{Solution:} workers do not query PostgreSQL directly. They request leases from manager frontier endpoints, while the manager performs atomic claims in \texttt{crawldb.frontier\_queue} using \texttt{FOR UPDATE SKIP LOCKED} and lease columns (\texttt{locked\_at}, \texttt{locked\_by\_worker\_id}).
-On completion/failure, manager updates terminal or retry states via lease token validation.
-% FACT-CHECK: previous text referenced \texttt{frontier_next_fetch_time}/\texttt{frontier_priority}; current schema uses enum state + priority + discovered_at ordering.
+\textbf{Solution:} workers use manager frontier APIs (\texttt{/api/frontier/claim}, \texttt{/api/frontier/complete}, and batch \texttt{/api/frontier/dequeue}) instead of direct DB access.
+On claim, the manager first re-queues expired locks, then performs an atomic selection in \texttt{crawldb.frontier\_queue} with
+\texttt{ORDER BY priority DESC, discovered\_at ASC} and \texttt{FOR UPDATE SKIP LOCKED}, and transitions the selected row to \texttt{LOCKED}
+with lease metadata (\texttt{locked\_at}, \texttt{locked\_by\_worker\_id}, \texttt{dequeued\_at}).
+The claim response returns a lease token (row id) and TTL; completion accepts updates only when
+(url, worker id, lease token) match the currently locked row, then maps outcomes to \texttt{COMPLETED}, \texttt{DUPLICATE}, \texttt{FAILED}, or back to \texttt{QUEUED} for retry.
 
 \subsection{Duplicate handling}
 \textbf{Problem:} same content may appear under different URLs.\\
@@ -234,7 +235,7 @@ On completion/failure, manager updates terminal or retry states via lease token 
 
 We also added a separate image-type breakdown (JPG/PNG/WEBP/GIF/SVG/BMP/TIFF/ICO/AVIF/OTHER), which matches the current crawl profile much better.
 
-\textbf{Recovery without full recrawl:} yes, this can be fixed without crawling from scratch. Existing \texttt{BINARY} URLs already stored in \texttt{crawldb.page} can be reclassified offline with the improved rules (plus optional targeted \texttt{HEAD} checks only for unresolved \texttt{OTHER} entries). A full crawl restart is not required for corrected aggregate statistics.
+\textbf{Recovery without full recrawl:} we fixed this issue without crawling from scratch. Existing \texttt{BINARY} URLs already stored in \texttt{crawldb.page} were reclassified offline with the improved rules (plus optional targeted \texttt{HEAD} checks only for unresolved \texttt{OTHER} entries). A full crawl restart was not required to correct aggregate statistics.
 
 \section{Results, statistics, and visualization}
 This section summarizes the final crawl snapshot and includes screenshots from the manager UI.
@@ -282,8 +283,7 @@ Figure~\ref{fig:dashboard_overview} shows the aggregate crawl status and live wo
 \begin{figure}[H]
     \centering
     \includegraphics[width=\columnwidth]{figures/dashboard.png}
-    \caption{Crawler manager dashboard with final aggregate counters and live frontier status.}
-    \label{fig:dashboard_overview}
+    \caption{Crawler manager dashboard with final aggregate counters and live frontier status.}\label{fig:dashboard_overview}
 \end{figure}
 
 \subsection{Worker runtime snapshot}
@@ -292,8 +292,7 @@ Figure~\ref{fig:workers_runtime} shows active daemon workers, per-worker process
 \begin{figure}[H]
     \centering
     \includegraphics[width=\columnwidth]{figures/workers_view.png}
-    \caption{Workers view during crawl execution (active workers with per-worker progress).}
-    \label{fig:workers_runtime}
+    \caption{Workers view during crawl execution (active workers with per-worker progress).}\label{fig:workers_runtime}
 \end{figure}
 
 \subsection{Collected pages inspection}
@@ -302,8 +301,7 @@ Figure~\ref{fig:collected_pages_view} shows collected page entries and metadata 
 \begin{figure}[H]
     \centering
     \includegraphics[width=\columnwidth]{figures/collected_pages.png}
-    \caption{Collected pages view used to inspect crawl metadata and indexed content.}
-    \label{fig:collected_pages_view}
+    \caption{Collected pages view used to inspect crawl metadata and indexed content.}\label{fig:collected_pages_view}
 \end{figure}
 
 \subsection{Relevance results}
@@ -319,18 +317,16 @@ For the Assignment 1 relevance target sample, the manager report shows:
 \begin{figure}[H]
     \centering
     \includegraphics[width=\columnwidth]{figures/Report.png}
-    \caption{Relevance report summary and top-scored URLs over the 5000-page target sample.}
-    \label{fig:relevance_report}
+    \caption{Relevance report summary and top-scored URLs over the 5000-page target sample.}\label{fig:relevance_report}
 \end{figure}
 
 \subsection{Link graph visualization}
-The cross-domain link graph is shown in Figure~\ref{fig:link_graph}.
+The domain link graph is shown in Figure~\ref{fig:link_graph}. The size of the nodes corresponds to the number of pages collected from that domain, while the edges represent discovered hyperlinks between pages. The graph illustrates the crawl coverage and connectivity of the collected sites. We can see that the preferential strategy successfully focused on the seed domain and closely related sites, while also discovering a broader set of linked domains within the crawl budget.
 
 \begin{figure}[H]
     \centering
     \includegraphics[width=\columnwidth]{figures/sites_graph.png}
-    \caption{Crawl link graph (nodes = sites/pages, edges = discovered links).}
-    \label{fig:link_graph}
+    \caption{Crawl link graph (nodes = sites/pages, edges = discovered links).}\label{fig:link_graph}
 \end{figure}
 
 \section{Conclusion}
