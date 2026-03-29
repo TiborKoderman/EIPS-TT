@@ -90,7 +90,7 @@ in-memory per-daemon/per-site cooldowns (minimum 5\,s), not through a \texttt{fr
 
 \section{Preferential crawling strategy}
 The crawler uses a preferential strategy: every discovered URL is assigned a numeric priority (stored as \texttt{priority}
-in \texttt{crawldb.frontier_queue}), and workers always claim the currently due URL with the highest priority.
+in \texttt{crawldb.frontier\_queue}), and workers always claim the currently due URL with the highest priority.
 % NOTE (code sync): Queue column name is \texttt{priority} in \texttt{crawldb.frontier_queue} (not \texttt{frontier_priority}).
 
 \subsection{Scoring function}
@@ -206,7 +206,7 @@ This design allows multiple workers to operate in parallel while still respectin
 
 \subsection{Frontier concurrency}
 \textbf{Problem:} multiple workers may claim the same URL.\\
-\textbf{Solution:} The workers don't connect to the database directly, this is also a security design to allow workers to run on seperate machines without exposing the database to the networ. Instead the frontier is implemented on the server. When a worker is in a \texit{idle} state, the server deques the highest priority URL, and locks it by updating it's status in the database, this removes it from the frontier candidates. To ensure that the queue is fast and responsive, the server maintains an in-memory queue of the urls in the fronntier. The databae table is also indexed by the frontier\_priority and frontier\_next\_fetch\_time, so that the server can quickly find the next available URL to assign to a worker. If a worker fails to fetch a URL, the server can re-enqueue it by updating its status and frontier\_next\_fetch\_time in the database.
+\textbf{Solution:} The workers don't connect to the database directly, this is also a security design to allow workers to run on seperate machines without exposing the database to the networ. Instead the frontier is implemented on the server. When a worker is in a \textit{idle} state, the server deques the highest priority URL, and locks it by updating it's status in the database, this removes it from the frontier candidates. To ensure that the queue is fast and responsive, the server maintains an in-memory queue of the urls in the fronntier. The databae table is also indexed by the frontier\_priority and frontier\_next\_fetch\_time, so that the server can quickly find the next available URL to assign to a worker. If a worker fails to fetch a URL, the server can re-enqueue it by updating its status and frontier\_next\_fetch\_time in the database.
 % NOTE (code sync): Current DB claim path uses \texttt{FOR UPDATE SKIP LOCKED} and lease fields (\texttt{locked_at}, \texttt{locked_by_worker_id}) in \texttt{crawldb.frontier_queue}.
 % NOTE (code sync): Current primary queue index is state + priority DESC + discovered_at ASC; \texttt{frontier_next_fetch_time} is not part of the schema.
 
@@ -218,25 +218,28 @@ This design allows multiple workers to operate in parallel while still respectin
 \textbf{Problem:} repeated navigation patterns and low-value loops can waste crawl budget.\\
 \textbf{Solution:} canonical URL uniqueness in DB, relevance scoring, and robots compliance constraints.
 
-\section{Results, statistics, and sisualization (Placeholders)}
-This section is intentionally a scaffold for the final submission stage.
+\section{Results, statistics, and visualization}
+This section summarizes the final crawl snapshot and includes screenshots from the manager UI.
+All numeric values below were extracted from the project PostgreSQL database (\texttt{crawldb}) after the run.
 
 \subsection{Crawldb statistics}
-\textbf{PLACEHOLDER:} fill values from SQL queries after final crawl run.
+The seed-domain subset below refers to \texttt{medover.zurnal24.si}.
 
 \begin{table}[H]
     \centering
     \caption{Main crawl statistics (seed domain and full crawldb)}
+    \resizebox{\columnwidth}{!}{%
     \begin{tabular}{@{}lll@{}}
         \toprule
-        Metric                       & Seed domain (MedOverNet) & Full crawldb   \\ \midrule
-        Number of sites              & \texttt{174}           & \texttt{[TBD]} \\
-        Number of HTML pages         & \texttt{1001}           & \texttt{[TBD]} \\
-        Number of duplicates         & \texttt{[TBD]}           & \texttt{[TBD]} \\
-        Number of binary pages       & \texttt{[TBD]}           & \texttt{[TBD]} \\
-        Number of images             & \texttt{[TBD]}           & \texttt{[TBD]} \\
-        Average images per HTML page & \texttt{[TBD]}           & \texttt{[TBD]} \\ \bottomrule
-    \end{tabular}
+        Metric                       & Seed domain (MedOverNet) & Full crawldb \\ \midrule
+        Number of sites              & 1                         & 174 \\
+        Number of HTML pages         & 36                        & 1001 \\
+        Number of duplicates         & 0                         & 27 \\
+        Number of binary pages       & 583                       & 16767 \\
+        Number of images             & 807                       & 37210 \\
+        Average images per HTML page & 22.42                     & 37.17 \\ \bottomrule
+    \end{tabular}%
+    }
 \end{table}
 
 \begin{table}[H]
@@ -244,30 +247,74 @@ This section is intentionally a scaffold for the final submission stage.
     \caption{Binary documents by type}
     \begin{tabular}{@{}ll@{}}
         \toprule
-        Data type & Count          \\ \midrule
-        PDF       & \texttt{[TBD]} \\
-        DOC       & \texttt{[TBD]} \\
-        DOCX      & \texttt{[TBD]} \\
-        PPT       & \texttt{[TBD]} \\
-        PPTX      & \texttt{[TBD]} \\ \bottomrule
+        Data type & Count \\ \midrule
+        PDF       & 0 \\
+        DOC       & 0 \\
+        DOCX      & 0 \\
+        PPT       & 0 \\
+        PPTX      & 0 \\ \bottomrule
     \end{tabular}
 \end{table}
 
-\subsection{Link graph visualization}
-\textbf{PLACEHOLDER:} add graph visualization figure generated in Gephi/D3/vis.js.
+\subsection{Manager dashboard overview}
+Figure~\ref{fig:dashboard_overview} shows the aggregate crawl status and live worker/frontier monitoring.
 
 \begin{figure}[H]
     \centering
-    \fbox{\parbox{0.95\columnwidth}{\centering PLACEHOLDER: Link graph figure (nodes=pages, edges=links)}}
-    \caption{Crawl link structure (placeholder).}
-    \label{fig:link_graph_placeholder}
+    \includegraphics[width=\columnwidth]{figures/dashboard.png}
+    \caption{Crawler manager dashboard with final aggregate counters and live frontier status.}
+    \label{fig:dashboard_overview}
 \end{figure}
 
-\subsection{Example pages/images}
-\textbf{PLACEHOLDER:} add 1--2 representative screenshots or extracted image examples.
+\subsection{Worker runtime snapshot}
+Figure~\ref{fig:workers_runtime} shows active daemon workers, per-worker processed/error counts, and current worker states.
+
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=\columnwidth]{figures/workers_view.png}
+    \caption{Workers view during crawl execution (active workers with per-worker progress).}
+    \label{fig:workers_runtime}
+\end{figure}
+
+\subsection{Collected pages inspection}
+Figure~\ref{fig:collected_pages_view} shows collected page entries and metadata (HTTP status, robots info, score, backlinks, extracted images).
+
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=\columnwidth]{figures/collected_pages.png}
+    \caption{Collected pages view used to inspect crawl metadata and indexed content.}
+    \label{fig:collected_pages_view}
+\end{figure}
+
+\subsection{Relevance results}
+We calculaculaed the final relevance report by running the crawler overnight and evaluating the top 5000 scored pages in the database. This approach is is not the most accurate way to estimate the results, as it has certain untracked variables, like run time, crawl budget, and the fact that the relevance report is not based on a random sample of the crawled pages, but on the top scored pages. However, it is a good way to get an estimate of the relevance of the collected pages, and to see how well the crawler is able to prioritize relevant content.
+For the Assignment 1 relevance target sample, the manager report shows:
+\begin{itemize}
+    \item top scored sample / target: 5000 / 5000,
+    \item estimated relevant: 1668 (33.4\%),
+    \item keyword evidence: 1122,
+    \item average / median / top score: 6.42 / 0.10 / 34.80.
+\end{itemize}
+
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=\columnwidth]{figures/Report.png}
+    \caption{Relevance report summary and top-scored URLs over the 5000-page target sample.}
+    \label{fig:relevance_report}
+\end{figure}
+
+\subsection{Link graph visualization}
+The cross-domain link graph is shown in Figure~\ref{fig:link_graph}.
+
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=\columnwidth]{figures/sites_graph.png}
+    \caption{Crawl link graph (nodes = sites/pages, edges = discovered links).}
+    \label{fig:link_graph}
+\end{figure}
 
 \section{Conclusion}
-We prepared a working foundation for a preferential MedOverNet crawler with core requirements: robots compliance, politeness control, HTML/binary handling, optional JS rendering, exact hash dedup support, and a multi-worker DB-backed crawl design.
-The preferential strategy is implemented via a configurable scoring function that prioritizes same-host and shallow URLs by default.
+We implemented and validated a preferential crawler pipeline with robots compliance, politeness enforcement, deduplication, queue-based worker coordination, and database persistence.
+The final crawl snapshot contains 1001 HTML pages, 27 exact duplicates, and 37210 images across 174 sites, while the relevance report reached the 5000/5000 target sample with 1668 estimated relevant pages (33.4\%).
 
 \end{document}
