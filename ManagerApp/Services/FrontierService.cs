@@ -38,35 +38,12 @@ public sealed class FrontierService
            SET priority = GREATEST(crawldb.frontier_queue.priority, EXCLUDED.priority),
                source_url = COALESCE(crawldb.frontier_queue.source_url, EXCLUDED.source_url),
                depth = LEAST(crawldb.frontier_queue.depth, EXCLUDED.depth),
-               discovered_at = LEAST(crawldb.frontier_queue.discovered_at, EXCLUDED.discovered_at),
-               state = CASE
-                   WHEN crawldb.frontier_queue.state IN (
-                       'COMPLETED'::crawldb.frontier_queue_state,
-                       'FAILED'::crawldb.frontier_queue_state
-                   ) THEN 'QUEUED'::crawldb.frontier_queue_state
-                   ELSE crawldb.frontier_queue.state
-               END,
-               finished_at = CASE
-                   WHEN crawldb.frontier_queue.state IN (
-                       'COMPLETED'::crawldb.frontier_queue_state,
-                       'FAILED'::crawldb.frontier_queue_state
-                   ) THEN NULL
-                   ELSE crawldb.frontier_queue.finished_at
-               END,
-               locked_at = CASE
-                   WHEN crawldb.frontier_queue.state IN (
-                       'COMPLETED'::crawldb.frontier_queue_state,
-                       'FAILED'::crawldb.frontier_queue_state
-                   ) THEN NULL
-                   ELSE crawldb.frontier_queue.locked_at
-               END,
-               locked_by_worker_id = CASE
-                   WHEN crawldb.frontier_queue.state IN (
-                       'COMPLETED'::crawldb.frontier_queue_state,
-                       'FAILED'::crawldb.frontier_queue_state
-                   ) THEN NULL
-                   ELSE crawldb.frontier_queue.locked_by_worker_id
-               END;
+               discovered_at = LEAST(crawldb.frontier_queue.discovered_at, EXCLUDED.discovered_at)
+         WHERE crawldb.frontier_queue.state NOT IN (
+             'COMPLETED'::crawldb.frontier_queue_state,
+             'FAILED'::crawldb.frontier_queue_state,
+             'DUPLICATE'::crawldb.frontier_queue_state
+         );
         """;
 
     private readonly IConfiguration _configuration;
