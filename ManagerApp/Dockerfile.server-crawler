@@ -1,0 +1,37 @@
+FROM mcr.microsoft.com/dotnet/sdk:10.0 AS build
+WORKDIR /src
+
+COPY ManagerApp/ManagerApp.csproj ManagerApp/
+RUN dotnet restore ManagerApp/ManagerApp.csproj
+
+COPY . .
+RUN dotnet publish ManagerApp/ManagerApp.csproj -c Release -o /app/publish /p:UseAppHost=false
+
+FROM mcr.microsoft.com/dotnet/aspnet:10.0 AS runtime
+WORKDIR /app
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    python3 \
+    python3-pip \
+    python3-venv \
+    ca-certificates \
+    && rm -rf /var/lib/apt/lists/*
+
+COPY requirements.txt /tmp/requirements.txt
+RUN python3 -m venv /opt/venv \
+    && /opt/venv/bin/pip install --no-cache-dir --upgrade pip \
+    && /opt/venv/bin/pip install --no-cache-dir -r /tmp/requirements.txt \
+    && rm /tmp/requirements.txt
+
+COPY pa1/crawler /app/pa1/crawler
+COPY --from=build /app/publish .
+
+ENV ASPNETCORE_URLS=http://+:5175 \
+    PATH=/opt/venv/bin:$PATH \
+    PYTHONPATH=/app/pa1/crawler/src \
+    CrawlerApi__PythonExecutable=python3 \
+    CrawlerApi__LocalDaemonArgs=/app/pa1/crawler/src/main.py
+
+EXPOSE 5175
+
+ENTRYPOINT ["dotnet", "ManagerApp.dll"]

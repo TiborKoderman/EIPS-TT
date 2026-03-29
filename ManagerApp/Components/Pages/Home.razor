@@ -1,0 +1,1346 @@
+@page "/"
+@using System.Text.Json
+@using ManagerApp.Services
+@using ManagerApp.Models
+@inject IStatisticsService StatisticsService
+@inject IWorkerService WorkerService
+@inject IPageService PageService
+@inject NavigationManager Navigation
+@implements IAsyncDisposable
+
+<div class="page-header">
+    <div class="page-header-main">
+        <div>
+            <h1 class="page-title">Dashboard</h1>
+            <p class="page-subtitle">Overview of crawler statistics and worker status</p>
+        </div>
+        <HoverTooltip Text="@GetSinceUpdateDetailsText()" Class="header-update-tooltip-wrap">
+            <div class="header-updated-pill">
+                <span class="mdi mdi-history"></span>
+                <span>@GetSinceUpdateCompactText()</span>
+            </div>
+        </HoverTooltip>
+    </div>
+</div>
+
+<div class="page-body">
+    @if (isLoading)
+    {
+        <div class="text-center mt-lg">
+            <p>Loading statistics...</p>
+        </div>
+    }
+    else if (stats != null)
+    {
+        <div class="grid grid-cols-4 mb-lg">
+            <StatCard Label="Total Sites" Value="@stats.TotalSites.ToString()" Footnote="Crawled domains" />
+            <StatCard Label="Total Pages" Value="@stats.TotalPages.ToString()" Footnote="@($"{stats.HtmlPages} HTML pages")" />
+            <StatCard Label="Duplicates" Value="@stats.DuplicatePages.ToString()" Footnote="Duplicate detections" />
+            <StatCard Label="Images" Value="@stats.TotalImages.ToString()" Footnote="@($"Avg: {stats.AverageImagesPerPage} per page")" />
+        </div>
+
+        <div class="dashboard-main-grid mb-lg">
+            <div class="dashboard-worker-column">
+                <div class="card dashboard-worker-status-card">
+                    <div class="card-header-inline mb-sm">
+                        <h2 class="card-title mb-0">Worker Status</h2>
+                        <span class="live-pill"><span class="live-dot"></span> Live</span>
+                    </div>
+                    @if (workerStatusCounts != null && WorkerStatusTotal > 0)
+                    {
+                        <div class="dashboard-worker-status">
+                            <div style="flex: 0 0 auto;">
+                                <WorkerStatusPieChart StatusCounts="workerStatusCounts"
+                                                      SelectedStatus="selectedWorkerStatus"
+                                                      OnSliceClick="OnWorkerSliceClick" />
+                            </div>
+                            <div class="dashboard-worker-status-list">
+                                @foreach (var status in DashboardStatuses)
+                                {
+                                    var count = workerStatusCounts.GetValueOrDefault(status, 0);
+                                    <button class="status-row @(selectedWorkerStatus == status ? "active" : "")"
+                                            @onclick="() => ToggleWorkerStatus(status)">
+                                        <span class="badge @GetStatusBadgeClass(status) status-pill">
+                                            <span>@status</span>
+                                            <span class="pill-count">@count</span>
+                                        </span>
+                                    </button>
+                                }
+                            </div>
+                        </div>
+                    }
+                    else
+                    {
+                        <p class="text-muted">No workers currently running</p>
+                    }
+                </div>
+
+                <div class="card dashboard-worker-snapshot-card">
+                    <div class="card-header-inline">
+                        <h2 class="card-title mb-0">Workers Snapshot</h2>
+                        <span class="live-pill"><span class="live-dot"></span> Live</span>
+                    </div>
+                    @if (visibleWorkers.Count == 0)
+                    {
+                        <p class="text-muted">No workers available.</p>
+                    }
+                    else
+                    {
+                        <ul class="list dashboard-worker-list">
+                            @foreach (var worker in visibleWorkers.Take(6))
+                            {
+                                var activity = GetWorkerActivity(worker);
+                                <li class="list-item worker-list-clickable" @onclick="() => OpenWorkerDetail(worker.Id)">
+                                    <div class="flex items-center justify-between gap-sm">
+                                        <strong>@worker.Name</strong>
+                                        <div class="flex items-center gap-sm">
+                                            <span class="badge @GetStatusBadgeClass(worker.Status)">@worker.Status</span>
+                                            <span class="badge @GetStatusBadgeClass(worker.Status) state-badge-short" title="@BuildWorkerStateTooltip(worker)">
+                                                <span class="mdi @GetStatusIcon(worker.Status)"></span>
+                                            </span>
+                                        </div>
+                                    </div>
+                                    <div class="text-small text-muted worker-url-row">
+                                        <HoverTooltip Text="@activity.Label" Class="worker-activity-tooltip-wrap">
+                                            <span class="mdi @activity.IconClass worker-activity-icon @activity.CssClass"></span>
+                                        </HoverTooltip>
+                                        <span class="worker-url-processing @(activity.IsProcessing ? "is-processing" : "")">
+                                            @(string.IsNullOrWhiteSpace(worker.CurrentUrl) ? "Waiting for next page..." : worker.CurrentUrl) · @worker.Status
+                                        </span>
+                                        @if (activity.IsProcessing)
+                                        {
+                                            <span class="processing-ellipsis" aria-hidden="true">
+                                                <span></span><span></span><span></span>
+                                            </span>
+                                        }
+                                    </div>
+                                </li>
+                            }
+                        </ul>
+                    }
+                </div>
+            </div>
+
+            <div class="card dashboard-queue-card">
+                @{
+                    var activeIpTimeouts = GetActiveIpTimeouts();
+                }
+                <div class="dashboard-queue-header mb-sm">
+                    <div class="card-header-inline mb-0">
+                        <h2 class="card-title mb-0">Frontier Queue</h2>
+                        <span class="live-pill"><span class="live-dot"></span> Live</span>
+                    </div>
+                    <div class="dashboard-ip-timeout-widget dashboard-ip-timeout-header">
+                        <div class="text-small font-semibold mb-sm">IP timeouts</div>
+                        <div class="dashboard-ip-timeout-viewport">
+                            @if (activeIpTimeouts.Count > 0)
+                            {
+                                <ul class="list dashboard-ip-timeout-list">
+                                    @foreach (var timeout in activeIpTimeouts)
+                                    {
+                                        <li class="dashboard-ip-timeout-row">
+                                            <div class="flex items-center justify-between gap-sm">
+                                                <span class="text-small font-semibold">@timeout.SiteIpKey</span>
+                                                <span class="badge badge-warning">@FormatTimeoutRemaining(timeout.RemainingMilliseconds)</span>
+                                            </div>
+                                            <div>
+                                                <span class="text-small text-muted">@FormatTimeoutDomains(timeout)</span>
+                                            </div>
+                                        </li>
+                                    }
+                                </ul>
+                            }
+                            else
+                            {
+                                <div class="dashboard-ip-timeout-empty text-small text-muted">
+                                    No active timeouts.
+                                </div>
+                            }
+                        </div>
+                    </div>
+                </div>
+
+                @if (daemonQueueSnapshots.Count == 0)
+                {
+                    <p class="text-small text-muted">No daemon queue data yet.</p>
+                }
+                else
+                {
+                    <div class="grid grid-cols-2 gap-md">
+                        @foreach (var snapshot in daemonQueueSnapshots.OrderBy(item => item.DaemonId))
+                        {
+                            <div>
+                                <div class="text-small font-semibold">@snapshot.DaemonId</div>
+                                <div class="grid grid-cols-3 gap-sm mt-sm text-small">
+                                    <div>
+                                        <div class="text-muted">In queue</div>
+                                        <div class="font-semibold">@snapshot.InQueue</div>
+                                    </div>
+                                    <div>
+                                        <div class="text-muted">In memory</div>
+                                        <div class="font-semibold">@snapshot.InMemoryQueued</div>
+                                    </div>
+                                    <div>
+                                        <div class="text-muted">Leases</div>
+                                        <div class="font-semibold">@snapshot.ActiveLeases</div>
+                                    </div>
+                                </div>
+                                <div class="text-small text-muted mt-sm">
+                                    Local: @snapshot.LocalQueued | Known URLs: @snapshot.KnownUrls
+                                </div>
+                            </div>
+                        }
+                    </div>
+                }
+
+                @if (topQueueItems.Count > 0)
+                {
+                    <div class="dashboard-queue-widget mt-md">
+                        <div class="text-small font-semibold mb-sm">Top queue items (non-claimed)</div>
+                        <div class="dashboard-queue-viewport">
+                            <ul class="list dashboard-queue-list">
+                                @foreach (var item in topQueueItems)
+                                {
+                                    var timeoutInfo = GetQueueTimeoutInfo(item.Url, activeIpTimeouts);
+                                    var tooltip = $"{item.State} | reason=queued | url={item.Url}";
+                                    <li class="dashboard-queue-row @(timeoutInfo.IsTimedOut ? "is-timeout" : string.Empty)" title="@tooltip" @key="item.Url">
+                                        <div class="flex items-center justify-between gap-sm">
+                                            <div class="flex items-center gap-sm">
+                                                <span class="badge @GetQueueStateBadgeClass(item.State)">@item.State.ToUpperInvariant()</span>
+                                                @if (timeoutInfo.IsTimedOut)
+                                                {
+                                                    <span class="badge badge-warning" title="Rate-limited by @timeoutInfo.SiteIpKey">Timeout @FormatTimeoutRemaining(timeoutInfo.RemainingMilliseconds)</span>
+                                                }
+                                            </div>
+                                            <span class="text-small font-semibold">R @item.RelevanceScore.ToString("0.00")</span>
+                                        </div>
+                                        <div class="text-small text-muted queue-url">@item.Url</div>
+                                    </li>
+                                }
+                            </ul>
+                        </div>
+                    </div>
+                }
+                else
+                {
+                    <p class="text-small text-muted mt-sm">No queued frontier items available.</p>
+                }
+
+                @if (lockedQueueItems.TotalCount > 0)
+                {
+                    <details class="dashboard-queue-collapsed mt-sm">
+                        <summary>
+                            <span class="text-small font-semibold">Locked / processing items</span>
+                            <span class="badge badge-warning">@lockedQueueItems.TotalCount</span>
+                            <span class="text-small text-muted">expand</span>
+                        </summary>
+                        <ul class="list dashboard-queue-locked-list">
+                            @foreach (var item in lockedQueueItems.Items)
+                            {
+                                var lockTooltip = $"state={item.State} | worker={item.LockedByWorkerId?.ToString() ?? "n/a"} | url={item.Url}";
+                                <li class="dashboard-queue-row" title="@lockTooltip" @key="item.Url">
+                                    <div class="flex items-center justify-between gap-sm">
+                                        <div class="flex items-center gap-sm">
+                                            <span class="badge @GetQueueStateBadgeClass(item.State)">@item.State.ToUpperInvariant()</span>
+                                            <span class="text-small text-muted">@BuildLockedWorkerLabel(item.LockedByWorkerId)</span>
+                                        </div>
+                                        <span class="text-small text-muted">@FormatLockAge(item.LockedAt)</span>
+                                    </div>
+                                    <div class="text-small text-muted queue-url">@item.Url</div>
+                                </li>
+                            }
+                        </ul>
+                        @if (lockedQueueItems.TotalCount > lockedQueueItems.Items.Count)
+                        {
+                            <div class="text-small text-muted mt-sm">
+                                Showing @lockedQueueItems.Items.Count of @lockedQueueItems.TotalCount locked/processing items.
+                            </div>
+                        }
+                    </details>
+                }
+            </div>
+
+            <div class="card">
+                <div class="card-header-inline mb-md">
+                    <h2 class="card-title mb-0">Recent Events</h2>
+                    <div class="flex items-center gap-sm">
+                        <span class="live-pill"><span class="live-dot"></span> Live</span>
+                        <span class="text-small text-muted">@GetRecentEventSourceLabel()</span>
+                    </div>
+                </div>
+                @if (recentLogs.Count == 0)
+                {
+                    <p class="text-small text-muted">No recent events yet.</p>
+                }
+                else
+                {
+                    <div class="workers-log-table-wrap">
+                        <table class="workers-log-table">
+                            <thead>
+                                <tr>
+                                    <th>SEV</th>
+                                    <th>TS</th>
+                                    <th>Scope</th>
+                                    <th>Message</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                @foreach (var log in recentLogs.OrderByDescending(l => l.TimestampUtc).Take(15))
+                                {
+                                    <tr>
+                                        <td><span class="badge severity-badge @GetLogLevelClass(log.Level)">@ToShortSeverity(log.Level)</span></td>
+                                        <td class="workers-log-ts">@log.TimestampUtc.ToLocalTime().ToString("HH:mm:ss")</td>
+                                        <td class="text-small text-muted">@((log.DaemonId ?? "local-default") + " / w" + (log.WorkerId?.ToString() ?? "-"))</td>
+                                        <td>
+                                            <span class="event-icon mdi @GetEventIcon(log.Message)" aria-hidden="true"></span>
+                                            @if (TryRenderStatusTransition(log.Message, out var fromState, out var toState, out var details))
+                                            {
+                                                <span class="badge @GetStatusBadgeClass(fromState) state-badge-short" title="@details"><span class="mdi @GetStatusIcon(fromState)"></span></span>
+                                                <span class="mdi mdi-arrow-right-thin"></span>
+                                                <span class="badge @GetStatusBadgeClass(toState) state-badge-short" title="@details"><span class="mdi @GetStatusIcon(toState)"></span></span>
+                                            }
+                                            else
+                                            {
+                                                <span>@log.Message</span>
+                                            }
+                                        </td>
+                                    </tr>
+                                }
+                            </tbody>
+                        </table>
+                    </div>
+                }
+            </div>
+
+            <div class="card">
+                <div class="card-header-inline mb-md">
+                    <h2 class="card-title mb-0">Cluster Throughput Trend</h2>
+                    <div class="flex items-center gap-sm">
+                        <span class="live-pill"><span class="live-dot"></span> Live</span>
+                        <span class="text-small text-muted">@GetThroughputSourceLabel()</span>
+                        <span class="text-small text-muted">unit: pages/30s</span>
+                    </div>
+                </div>
+                @if (dashboardThroughputSeries.Count == 0)
+                {
+                    <p class="text-small text-muted">No throughput points yet.</p>
+                }
+                else
+                {
+                    <ThroughputLineChart Points="dashboardThroughputSeries" BucketSeconds="30" />
+                }
+            </div>
+        </div>
+    }
+    else
+    {
+        <div class="card">
+            <p class="text-muted">Failed to load statistics. Please ensure the database is running.</p>
+        </div>
+    }
+</div>
+
+@code {
+    private StatisticsViewModel? stats;
+    private Dictionary<string, int>? workerStatusCounts;
+    private List<WorkerViewModel> workers = new();
+    private FrontierStatusViewModel? frontierStatus;
+    private List<DaemonQueueSnapshot> daemonQueueSnapshots = new();
+    private List<QueueTopItemViewModel> topQueueItems = new();
+    private LockedQueueItemsSnapshotViewModel lockedQueueItems = new();
+    private List<WorkerThroughputPointViewModel> dashboardThroughputSeries = new();
+    private List<WorkerLogEntryViewModel> recentLogs = new();
+    private string? selectedWorkerStatus;
+    private bool isLoading = true;
+    private PeriodicTimer? refreshTimer;
+    private CancellationTokenSource? refreshCts;
+    private readonly SemaphoreSlim workerRefreshLock = new(1, 1);
+    private static readonly string[] DashboardStatuses = ["Active", "Idle", "Paused", "Error", "Stopped"];
+    private DateTime lastDashboardUpdateUtc = DateTime.UtcNow;
+    private bool recentLogsUsingFallback;
+    private bool dashboardThroughputUsingFallback;
+
+    private int WorkerStatusTotal => workerStatusCounts?.Values.Sum() ?? 0;
+
+    private List<WorkerViewModel> visibleWorkers => workers
+        .Where(w => selectedWorkerStatus == null || string.Equals(w.Status, selectedWorkerStatus, StringComparison.OrdinalIgnoreCase))
+        .OrderBy(w => w.Name)
+        .ToList();
+
+    protected override async Task OnInitializedAsync()
+    {
+        try
+        {
+            stats = await StatisticsService.GetStatisticsAsync();
+            lastDashboardUpdateUtc = DateTime.UtcNow;
+            await RefreshWorkersAsync();
+            StartWorkerRefreshLoop();
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"Error loading dashboard data: {ex.Message}");
+            stats = null;
+        }
+        finally
+        {
+            isLoading = false;
+        }
+    }
+
+    private void StartWorkerRefreshLoop()
+    {
+        refreshCts = new CancellationTokenSource();
+        refreshTimer = new PeriodicTimer(TimeSpan.FromSeconds(2));
+        _ = PollWorkersAsync(refreshTimer, refreshCts.Token);
+    }
+
+    private async Task PollWorkersAsync(PeriodicTimer timer, CancellationToken cancellationToken)
+    {
+        try
+        {
+            while (await timer.WaitForNextTickAsync(cancellationToken))
+            {
+                await RefreshWorkersAsync();
+                await InvokeAsync(StateHasChanged);
+            }
+        }
+        catch (OperationCanceledException)
+        {
+            // Normal shutdown path when leaving the page.
+        }
+    }
+
+    private async Task RefreshWorkersAsync()
+    {
+        if (!await workerRefreshLock.WaitAsync(0))
+        {
+            return;
+        }
+
+        try
+        {
+            workers = await WorkerService.GetAllWorkersAsync();
+            workerStatusCounts = BuildStatusCounts(workers);
+
+            var daemonStatus = await WorkerService.GetDaemonStatusAsync();
+            frontierStatus = await WorkerService.GetFrontierStatusAsync();
+            var events = await WorkerService.GetRecentCrawlerEventsAsync(2000);
+            daemonQueueSnapshots = BuildDaemonQueueSnapshots(daemonStatus, events, frontierStatus);
+            topQueueItems = await PageService.GetTopQueueItemsAsync(20);
+            lockedQueueItems = await PageService.GetLockedQueueItemsAsync(10);
+            dashboardThroughputSeries = await WorkerService.GetThroughputSeriesAsync(workerId: null, windowMinutes: 60, bucketSeconds: 30);
+            dashboardThroughputUsingFallback = false;
+            if (dashboardThroughputSeries.Count == 0)
+            {
+                dashboardThroughputSeries = BuildThroughputSeriesFromCrawlerEvents(events, windowMinutes: 60, bucketSeconds: 30);
+                dashboardThroughputUsingFallback = dashboardThroughputSeries.Count > 0;
+            }
+            recentLogs = await WorkerService.GetPersistedWorkerLogsAsync(workerId: null, limit: 50);
+            recentLogsUsingFallback = false;
+            if (recentLogs.Count == 0)
+            {
+                recentLogs = BuildLogsFromCrawlerEvents(events, 50);
+                recentLogsUsingFallback = true;
+            }
+
+            lastDashboardUpdateUtc = DateTime.UtcNow;
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"Error refreshing worker snapshot: {ex.Message}");
+        }
+        finally
+        {
+            workerRefreshLock.Release();
+        }
+    }
+
+    private Task OnWorkerSliceClick(string status)
+    {
+        ToggleWorkerStatus(status);
+        return Task.CompletedTask;
+    }
+
+    private void ToggleWorkerStatus(string status)
+    {
+        selectedWorkerStatus = string.Equals(selectedWorkerStatus, status, StringComparison.OrdinalIgnoreCase)
+            ? null
+            : status;
+    }
+
+    private string GetStatusBadgeClass(string status)
+    {
+        var normalized = (status ?? string.Empty).Trim().ToLowerInvariant();
+        return normalized switch
+        {
+            "active" or "running" or "processing" or "fetching" or "parsing" or "claiming" => "badge-success",
+            "error" or "failed" => "badge-error",
+            "paused" or "locked" or "duplicate" => "badge-warning",
+            "stopped" or "completed" or "done" => "badge-secondary",
+            "idle" or "ready" or "waiting" or "queued" or "in_memory" => "badge-info",
+            _ => "badge-secondary"
+        };
+    }
+
+    private string GetLogLevelClass(string level) =>
+        (level ?? "").ToLowerInvariant() switch
+        {
+            "error" => "badge-error",
+            "warn" or "warning" => "badge-warning",
+            "info" => "badge-info",
+            "debug" => "badge-secondary",
+            _ => "badge-secondary"
+        };
+
+    private static string ToShortSeverity(string level)
+    {
+        return level.ToUpperInvariant() switch
+        {
+            "WARNING" => "WRN",
+            "INFORMATION" => "INF",
+            "DEBUG" => "DBG",
+            _ => level.ToUpperInvariant() switch
+            {
+                var text when text.Length >= 3 => text[..3],
+                var text => text,
+            }
+        };
+    }
+
+    private static string GetEventIcon(string message)
+    {
+        var text = (message ?? string.Empty).ToLowerInvariant();
+        if (text.Contains("frontier-prune", StringComparison.Ordinal)) return "mdi-content-cut";
+        if (text.Contains("frontier-lease", StringComparison.Ordinal)) return "mdi-key-outline";
+        if (text.Contains("frontier-complete", StringComparison.Ordinal)) return "mdi-check-circle-outline";
+        if (text.Contains("worker-metric", StringComparison.Ordinal)) return "mdi-chart-line";
+        if (text.Contains("page-reported", StringComparison.Ordinal)) return "mdi-file-check-outline";
+        if (text.Contains("status-change", StringComparison.Ordinal)) return "mdi-swap-horizontal";
+        if (text.Contains("queue-change", StringComparison.Ordinal)) return "mdi-tray-arrow-down";
+        return "mdi-dots-horizontal-circle-outline";
+    }
+
+    private static bool TryRenderStatusTransition(string message, out string fromState, out string toState, out string details)
+    {
+        fromState = "Idle";
+        toState = "Idle";
+        details = message ?? string.Empty;
+        if (string.IsNullOrWhiteSpace(message) || !message.Contains("[status-change]", StringComparison.OrdinalIgnoreCase))
+        {
+            return false;
+        }
+
+        var text = message;
+        var prevToken = "previousStatus=";
+        var statusToken = "status=";
+        var prevIdx = text.IndexOf(prevToken, StringComparison.OrdinalIgnoreCase);
+        var statusIdx = text.IndexOf(statusToken, StringComparison.OrdinalIgnoreCase);
+        if (statusIdx < 0)
+        {
+            return false;
+        }
+
+        if (prevIdx >= 0)
+        {
+            var prevStart = prevIdx + prevToken.Length;
+            var prevEnd = text.IndexOf('|', prevStart);
+            fromState = (prevEnd >= 0 ? text[prevStart..prevEnd] : text[prevStart..]).Trim();
+        }
+
+        var nextStart = statusIdx + statusToken.Length;
+        var nextEnd = text.IndexOf('|', nextStart);
+        toState = (nextEnd >= 0 ? text[nextStart..nextEnd] : text[nextStart..]).Trim();
+        if (string.IsNullOrWhiteSpace(fromState))
+        {
+            fromState = "Idle";
+        }
+        if (string.IsNullOrWhiteSpace(toState))
+        {
+            toState = "Idle";
+        }
+
+        return true;
+    }
+
+    private static string GetStatusIcon(string status)
+    {
+        return (status ?? string.Empty).Trim().ToLowerInvariant() switch
+        {
+            "active" or "running" => "mdi-play-circle",
+            "processing" => "mdi-cog-play-outline",
+            "fetching" => "mdi-download-circle-outline",
+            "parsing" => "mdi-file-tree-outline",
+            "claiming" => "mdi-key-link",
+            "idle" or "ready" or "waiting" => "mdi-timer-sand",
+            "queued" or "in_memory" => "mdi-playlist-plus",
+            "paused" => "mdi-pause-circle",
+            "locked" => "mdi-lock-outline",
+            "stopped" => "mdi-stop-circle",
+            "completed" or "done" => "mdi-check-circle",
+            "duplicate" => "mdi-content-duplicate",
+            "error" or "failed" => "mdi-alert-circle",
+            _ => "mdi-help-circle",
+        };
+    }
+
+    private static string BuildWorkerStateTooltip(WorkerViewModel worker)
+    {
+        return $"{worker.Status} | reason={worker.StatusReason ?? "n/a"} | url={(string.IsNullOrWhiteSpace(worker.CurrentUrl) ? "n/a" : worker.CurrentUrl)}";
+    }
+
+    private static string GetQueueStateBadgeClass(string state)
+    {
+        return (state ?? string.Empty).Trim().ToLowerInvariant() switch
+        {
+            "queued" => "badge-info",
+            "in_memory" => "badge-info",
+            "locked" => "badge-warning",
+            "processing" => "badge-success",
+            "completed" => "badge-success",
+            "duplicate" => "badge-warning",
+            "failed" => "badge-error",
+            _ => "badge-secondary",
+        };
+    }
+
+    private List<IpTimeoutViewModel> GetActiveIpTimeouts()
+    {
+        if (frontierStatus?.IpTimeouts is null || frontierStatus.IpTimeouts.Count == 0)
+        {
+            return new List<IpTimeoutViewModel>();
+        }
+
+        return frontierStatus.IpTimeouts
+            .Where(item => item.RemainingMilliseconds > 0)
+            .OrderByDescending(item => item.RemainingMilliseconds)
+            .ThenBy(item => item.SiteIpKey, StringComparer.OrdinalIgnoreCase)
+            .Take(12)
+            .ToList();
+    }
+
+    private static QueueTimeoutInfo GetQueueTimeoutInfo(string? url, IReadOnlyCollection<IpTimeoutViewModel> activeIpTimeouts)
+    {
+        if (string.IsNullOrWhiteSpace(url) || activeIpTimeouts.Count == 0)
+        {
+            return QueueTimeoutInfo.None;
+        }
+
+        if (!Uri.TryCreate(url, UriKind.Absolute, out var parsedUri))
+        {
+            return QueueTimeoutInfo.None;
+        }
+
+        var host = NormalizeHost(parsedUri.Host);
+        if (string.IsNullOrWhiteSpace(host))
+        {
+            return QueueTimeoutInfo.None;
+        }
+
+        foreach (var timeout in activeIpTimeouts)
+        {
+            if (IsTimeoutMatch(host, timeout))
+            {
+                return new QueueTimeoutInfo(true, timeout.RemainingMilliseconds, timeout.SiteIpKey);
+            }
+        }
+
+        return QueueTimeoutInfo.None;
+    }
+
+    private static bool IsTimeoutMatch(string normalizedHost, IpTimeoutViewModel timeout)
+    {
+        if (string.IsNullOrWhiteSpace(normalizedHost))
+        {
+            return false;
+        }
+
+        if (string.Equals(normalizedHost, NormalizeHost(timeout.SiteIpKey), StringComparison.OrdinalIgnoreCase))
+        {
+            return true;
+        }
+
+        foreach (var domain in timeout.Domains)
+        {
+            if (string.Equals(normalizedHost, NormalizeHost(domain), StringComparison.OrdinalIgnoreCase))
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    private static string NormalizeHost(string? host)
+    {
+        return (host ?? string.Empty).Trim().TrimEnd('.').ToLowerInvariant();
+    }
+
+    private static string FormatTimeoutDomains(IpTimeoutViewModel timeout)
+    {
+        if (timeout.Domains.Count == 0)
+        {
+            return "No domains mapped";
+        }
+
+        var domains = timeout.Domains
+            .Where(domain => !string.IsNullOrWhiteSpace(domain))
+            .Select(NormalizeHost)
+            .Where(domain => !string.IsNullOrWhiteSpace(domain))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .Take(4)
+            .ToList();
+
+        if (domains.Count == 0)
+        {
+            return "No domains mapped";
+        }
+
+        return string.Join(", ", domains);
+    }
+
+    private static string FormatTimeoutRemaining(int remainingMilliseconds)
+    {
+        if (remainingMilliseconds <= 0)
+        {
+            return "0s";
+        }
+
+        var remaining = TimeSpan.FromMilliseconds(remainingMilliseconds);
+        if (remaining.TotalMinutes >= 1)
+        {
+            return $"{(int)remaining.TotalMinutes}m {remaining.Seconds}s";
+        }
+
+        return $"{Math.Max(1, (int)Math.Ceiling(remaining.TotalSeconds))}s";
+    }
+
+    private static string BuildLockedWorkerLabel(int? workerId)
+    {
+        return workerId is int id ? $"worker {id}" : "worker n/a";
+    }
+
+    private static string FormatLockAge(DateTime? lockedAt)
+    {
+        if (lockedAt is null)
+        {
+            return "lock time n/a";
+        }
+
+        var delta = DateTime.UtcNow - lockedAt.Value;
+        if (delta.TotalMinutes >= 1)
+        {
+            return $"locked {(int)delta.TotalMinutes}m ago";
+        }
+
+        return $"locked {Math.Max(1, (int)Math.Ceiling(delta.TotalSeconds))}s ago";
+    }
+
+    private string GetRecentEventSourceLabel()
+    {
+        return recentLogsUsingFallback ? "source: live event fallback" : "source: persisted worker_log";
+    }
+
+    private string GetThroughputSourceLabel()
+    {
+        return dashboardThroughputUsingFallback ? "source: live event fallback" : "source: persisted worker_metric";
+    }
+
+    private static Dictionary<string, int> BuildStatusCounts(IEnumerable<WorkerViewModel> source)
+    {
+        var counts = source
+            .Select(worker => NormalizeStatus(worker.Status))
+            .GroupBy(status => status)
+            .ToDictionary(group => group.Key, group => group.Count(), StringComparer.OrdinalIgnoreCase);
+
+        foreach (var status in DashboardStatuses)
+        {
+            counts.TryAdd(status, 0);
+        }
+
+        return counts;
+    }
+
+    private static string NormalizeStatus(string? status)
+    {
+        if (string.IsNullOrWhiteSpace(status))
+        {
+            return "Unknown";
+        }
+
+        var normalized = status.Trim();
+        return char.ToUpperInvariant(normalized[0]) + normalized[1..].ToLowerInvariant();
+    }
+
+    private static List<DaemonQueueSnapshot> BuildDaemonQueueSnapshots(
+        DaemonStatusViewModel? daemonStatus,
+        IReadOnlyList<CrawlerEventViewModel> events,
+        FrontierStatusViewModel? frontierStatus)
+    {
+        var byDaemon = new Dictionary<string, DaemonQueueSnapshot>(StringComparer.OrdinalIgnoreCase);
+
+        if (frontierStatus is not null)
+        {
+            byDaemon["server-frontier"] = new DaemonQueueSnapshot
+            {
+                DaemonId = "server-frontier",
+                InQueue = frontierStatus.InQueue,
+                InMemoryQueued = frontierStatus.InMemoryQueued,
+                LocalQueued = frontierStatus.LocalQueued,
+                ActiveLeases = frontierStatus.ActiveLeases,
+                KnownUrls = frontierStatus.KnownUrls,
+            };
+            return byDaemon.Values.ToList();
+        }
+
+        if (daemonStatus?.Frontier != null)
+        {
+            var inQueue = daemonStatus.Frontier.InQueue;
+            byDaemon["local-default"] = new DaemonQueueSnapshot
+            {
+                DaemonId = "local-default",
+                InQueue = inQueue > 0 ? inQueue : daemonStatus.Frontier.InMemoryQueued,
+                InMemoryQueued = daemonStatus.Frontier.InMemoryQueued,
+                LocalQueued = daemonStatus.Frontier.LocalQueued,
+                ActiveLeases = daemonStatus.Frontier.ActiveLeases,
+                KnownUrls = daemonStatus.Frontier.KnownUrls,
+            };
+        }
+
+        foreach (var evt in events.OrderBy(item => item.TimestampUtc))
+        {
+            if (!string.Equals(evt.Type, "queue-change", StringComparison.OrdinalIgnoreCase)
+                && !evt.Type.StartsWith("frontier", StringComparison.OrdinalIgnoreCase))
+            {
+                continue;
+            }
+
+            if (!TryParseQueuePayload(evt.PayloadJson, out var payload))
+            {
+                continue;
+            }
+
+            var daemonId = string.IsNullOrWhiteSpace(evt.DaemonId) ? "local-default" : evt.DaemonId;
+            if (!byDaemon.TryGetValue(daemonId, out var snapshot))
+            {
+                snapshot = new DaemonQueueSnapshot { DaemonId = daemonId };
+                byDaemon[daemonId] = snapshot;
+            }
+
+            if (payload.TryGetValue("inMemoryQueued", out var inMemory))
+            {
+                snapshot.InMemoryQueued = inMemory;
+            }
+
+            if (payload.TryGetValue("inQueue", out var inQueue))
+            {
+                snapshot.InQueue = inQueue;
+            }
+
+            if (payload.TryGetValue("localQueued", out var localQueued))
+            {
+                snapshot.LocalQueued = localQueued;
+            }
+
+            if (payload.TryGetValue("knownUrls", out var known))
+            {
+                snapshot.KnownUrls = known;
+            }
+
+            if (payload.TryGetValue("activeLeases", out var leases))
+            {
+                snapshot.ActiveLeases = leases;
+            }
+        }
+
+        return byDaemon.Values.ToList();
+    }
+
+    private static bool TryParseQueuePayload(string? payloadJson, out Dictionary<string, int> values)
+    {
+        values = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+
+        if (string.IsNullOrWhiteSpace(payloadJson))
+        {
+            return false;
+        }
+
+        try
+        {
+            using var document = JsonDocument.Parse(payloadJson);
+            if (document.RootElement.ValueKind != JsonValueKind.Object)
+            {
+                return false;
+            }
+
+            foreach (var property in document.RootElement.EnumerateObject())
+            {
+                if (property.Value.ValueKind == JsonValueKind.Number && property.Value.TryGetInt32(out var parsed))
+                {
+                    values[property.Name] = parsed;
+                }
+            }
+
+            return values.Count > 0;
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
+    private static WorkerActivity GetWorkerActivity(WorkerViewModel worker)
+    {
+        var status = worker.Status.ToLowerInvariant();
+        var reason = (worker.StatusReason ?? string.Empty).ToLowerInvariant();
+
+        if (status == "error")
+        {
+            return new WorkerActivity("mdi-alert-circle-outline", string.IsNullOrWhiteSpace(worker.StatusReason) ? "Issue" : worker.StatusReason, "activity-error", false);
+        }
+
+        if (status is "idle" or "stopped")
+        {
+            var label = string.IsNullOrWhiteSpace(worker.StatusReason) ? "Waiting" : worker.StatusReason;
+            return new WorkerActivity("mdi-sleep", label, "activity-waiting", false);
+        }
+
+        if (status == "paused")
+        {
+            var label = string.IsNullOrWhiteSpace(worker.StatusReason) ? "Paused" : worker.StatusReason;
+            return new WorkerActivity("mdi-pause-circle-outline", label, "activity-paused", false);
+        }
+
+        if (status == "active")
+        {
+            if (reason.Contains("waiting"))
+            {
+                return new WorkerActivity("mdi-timer-sand", "Waiting for queue", "activity-waiting", false);
+            }
+
+            if (reason.Contains("processing") || reason.Contains("fetch"))
+            {
+                return new WorkerActivity("mdi-file-code-outline", "Parsing", "activity-parsing", true);
+            }
+
+            return new WorkerActivity("mdi-magnify", "Searching", "activity-searching", true);
+        }
+
+        return new WorkerActivity("mdi-cog-outline", "Processing", "activity-processing", true);
+    }
+
+    private static List<WorkerLogEntryViewModel> BuildLogsFromCrawlerEvents(
+        IReadOnlyList<CrawlerEventViewModel> events,
+        int limit)
+    {
+        var bounded = Math.Clamp(limit, 1, 200);
+        return events
+            .OrderByDescending(evt => evt.TimestampUtc)
+            .Take(bounded)
+            .Select(evt => new WorkerLogEntryViewModel
+            {
+                TimestampUtc = evt.TimestampUtc,
+                Level = ResolveEventLevel(evt.Type, evt.PayloadJson),
+                Message = FormatEventMessage(evt.Type, evt.PayloadJson),
+                DaemonId = string.IsNullOrWhiteSpace(evt.DaemonId) ? "local-default" : evt.DaemonId,
+                WorkerId = evt.WorkerId,
+            })
+            .ToList();
+    }
+
+    private static string InferLevelFromEventType(string eventType)
+    {
+        var normalized = (eventType ?? string.Empty).Trim().ToLowerInvariant();
+        if (normalized.Contains("error") || normalized.Contains("failed"))
+        {
+            return "Error";
+        }
+
+        if (normalized.Contains("warn"))
+        {
+            return "Warning";
+        }
+
+        return "Info";
+    }
+
+    private static string ResolveEventLevel(string eventType, string payloadJson)
+    {
+        try
+        {
+            using var document = JsonDocument.Parse(payloadJson);
+            if (document.RootElement.ValueKind == JsonValueKind.Object
+                && document.RootElement.TryGetProperty("level", out var levelElement)
+                && levelElement.ValueKind == JsonValueKind.String)
+            {
+                var level = levelElement.GetString();
+                if (!string.IsNullOrWhiteSpace(level))
+                {
+                    return level.Trim();
+                }
+            }
+        }
+        catch
+        {
+            // fall back to event type inference below
+        }
+
+        return InferLevelFromEventType(eventType);
+    }
+
+    private static string FormatEventMessage(string eventType, string payloadJson)
+    {
+        try
+        {
+            using var document = JsonDocument.Parse(payloadJson);
+            if (document.RootElement.ValueKind != JsonValueKind.Object)
+            {
+                return $"[{eventType}] {payloadJson}";
+            }
+
+            if (document.RootElement.TryGetProperty("message", out var messageElement)
+                && messageElement.ValueKind == JsonValueKind.String)
+            {
+                var message = messageElement.GetString();
+                if (!string.IsNullOrWhiteSpace(message))
+                {
+                    if ((string.Equals(eventType, "worker-metric", StringComparison.OrdinalIgnoreCase)
+                        || (string.Equals(eventType, "worker-log", StringComparison.OrdinalIgnoreCase)
+                            && message.Contains("[worker-metric]", StringComparison.OrdinalIgnoreCase)))
+                        && TryFormatMetricMessage(message.Trim(), out var metricMessage))
+                    {
+                        return metricMessage;
+                    }
+
+                    return string.Equals(eventType, "worker-log", StringComparison.OrdinalIgnoreCase)
+                        ? message.Trim()
+                        : $"[{eventType}] {message.Trim()}";
+                }
+            }
+
+            var parts = new List<string>();
+            AppendPayloadPart(parts, document.RootElement, "previousStatus");
+            AppendPayloadPart(parts, document.RootElement, "status");
+            AppendPayloadPart(parts, document.RootElement, "reason");
+            AppendPayloadPart(parts, document.RootElement, "url");
+            AppendPayloadPart(parts, document.RootElement, "name");
+            AppendPayloadPart(parts, document.RootElement, "inMemoryQueued");
+            AppendPayloadPart(parts, document.RootElement, "localQueued");
+            AppendPayloadPart(parts, document.RootElement, "activeLeases");
+            AppendPayloadPart(parts, document.RootElement, "knownUrls");
+            AppendPayloadPart(parts, document.RootElement, "error");
+            AppendPayloadPart(parts, document.RootElement, "pages_processed_total");
+            AppendPayloadPart(parts, document.RootElement, "errors_total");
+            AppendPayloadPart(parts, document.RootElement, "page_processed");
+            AppendPayloadPart(parts, document.RootElement, "page_error");
+
+            if (parts.Count > 0)
+            {
+                return $"[{eventType}] {string.Join(" | ", parts)}";
+            }
+        }
+        catch
+        {
+            // keep raw payload if parsing fails
+        }
+
+        return $"[{eventType}] {payloadJson}";
+    }
+
+    private static void AppendPayloadPart(List<string> parts, JsonElement root, string key)
+    {
+        if (!root.TryGetProperty(key, out var value))
+        {
+            return;
+        }
+
+        var text = value.ValueKind switch
+        {
+            JsonValueKind.String => value.GetString(),
+            JsonValueKind.Number => value.GetRawText(),
+            JsonValueKind.True => "true",
+            JsonValueKind.False => "false",
+            _ => null,
+        };
+
+        if (!string.IsNullOrWhiteSpace(text))
+        {
+            parts.Add($"{key}={text}");
+        }
+    }
+
+    private static List<WorkerThroughputPointViewModel> BuildThroughputSeriesFromCrawlerEvents(
+        IReadOnlyList<CrawlerEventViewModel> events,
+        int windowMinutes,
+        int bucketSeconds)
+    {
+        var windowStart = DateTime.UtcNow.AddMinutes(-Math.Clamp(windowMinutes, 5, 24 * 60));
+        var boundedBucket = Math.Clamp(bucketSeconds, 10, 600);
+        var bucketSums = new Dictionary<DateTime, double>();
+
+        foreach (var evt in events)
+        {
+            if (evt.TimestampUtc < windowStart)
+            {
+                continue;
+            }
+
+            if (!TryParseMetricIncrement(evt.PayloadJson, out var increment) || increment <= 0)
+            {
+                continue;
+            }
+
+            var bucket = FloorToBucketUtc(evt.TimestampUtc, boundedBucket);
+            bucketSums[bucket] = bucketSums.TryGetValue(bucket, out var current) ? current + increment : increment;
+        }
+
+        return bucketSums
+            .OrderBy(item => item.Key)
+            .Select(item => new WorkerThroughputPointViewModel
+            {
+                TimestampUtc = item.Key,
+                Value = item.Value,
+            })
+            .ToList();
+    }
+
+    private static bool TryParseMetricIncrement(string payloadJson, out double value)
+    {
+        value = 0;
+
+        if (string.IsNullOrWhiteSpace(payloadJson))
+        {
+            return false;
+        }
+
+        try
+        {
+            using var document = JsonDocument.Parse(payloadJson);
+            if (document.RootElement.ValueKind != JsonValueKind.Object)
+            {
+                return false;
+            }
+
+            if (document.RootElement.TryGetProperty("type", out var typeElement)
+                && typeElement.ValueKind == JsonValueKind.String
+                && string.Equals(typeElement.GetString(), "page-reported", StringComparison.OrdinalIgnoreCase))
+            {
+                value = 1;
+                return true;
+            }
+
+            if (document.RootElement.TryGetProperty("page_processed", out var pageProcessed)
+                && TryReadNumericValue(pageProcessed, out var parsedIncrement))
+            {
+                value = parsedIncrement;
+                return true;
+            }
+
+            if (document.RootElement.TryGetProperty("metric_value", out var metricValue)
+                && TryReadNumericValue(metricValue, out var parsedMetricValue))
+            {
+                value = parsedMetricValue;
+                return true;
+            }
+
+            if (document.RootElement.TryGetProperty("event_type", out var eventType)
+                && eventType.ValueKind == JsonValueKind.String
+                && string.Equals(eventType.GetString(), "page-reported", StringComparison.OrdinalIgnoreCase))
+            {
+                value = 1;
+                return true;
+            }
+
+            if (document.RootElement.TryGetProperty("status", out var statusElement)
+                && statusElement.ValueKind == JsonValueKind.String
+                && string.Equals(statusElement.GetString(), "Active", StringComparison.OrdinalIgnoreCase)
+                && document.RootElement.TryGetProperty("url", out var urlElement)
+                && urlElement.ValueKind == JsonValueKind.String)
+            {
+                value = 1;
+                return true;
+            }
+
+            if (document.RootElement.TryGetProperty("message", out var messageElement)
+                && messageElement.ValueKind == JsonValueKind.String)
+            {
+                return TryParseMetricIncrementFromString(messageElement.GetString(), out value);
+            }
+        }
+        catch
+        {
+            return false;
+        }
+
+        return false;
+    }
+
+    private static bool TryParseMetricIncrementFromString(string? metricText, out double value)
+    {
+        value = 0;
+        if (string.IsNullOrWhiteSpace(metricText))
+        {
+            return false;
+        }
+
+        var candidate = metricText.Trim();
+        var firstBrace = candidate.IndexOf('{');
+        if (firstBrace >= 0)
+        {
+            candidate = candidate[firstBrace..];
+        }
+
+        try
+        {
+            using var nestedDoc = JsonDocument.Parse(candidate);
+            if (nestedDoc.RootElement.ValueKind != JsonValueKind.Object)
+            {
+                return false;
+            }
+
+            if (nestedDoc.RootElement.TryGetProperty("page_processed", out var pageProcessed)
+                && TryReadNumericValue(pageProcessed, out var parsedIncrement))
+            {
+                value = parsedIncrement;
+                return true;
+            }
+
+            if (nestedDoc.RootElement.TryGetProperty("metric_value", out var metricValue)
+                && TryReadNumericValue(metricValue, out var parsedMetricValue))
+            {
+                value = parsedMetricValue;
+                return true;
+            }
+
+            if (nestedDoc.RootElement.TryGetProperty("type", out var typeElement)
+                && typeElement.ValueKind == JsonValueKind.String
+                && string.Equals(typeElement.GetString(), "page-reported", StringComparison.OrdinalIgnoreCase))
+            {
+                value = 1;
+                return true;
+            }
+
+            if (nestedDoc.RootElement.TryGetProperty("event_type", out var eventType)
+                && eventType.ValueKind == JsonValueKind.String
+                && string.Equals(eventType.GetString(), "page-reported", StringComparison.OrdinalIgnoreCase))
+            {
+                value = 1;
+                return true;
+            }
+        }
+        catch
+        {
+            return false;
+        }
+
+        return false;
+    }
+
+    private static bool TryReadNumericValue(JsonElement element, out double value)
+    {
+        value = 0;
+        if (element.ValueKind == JsonValueKind.Number)
+        {
+            return element.TryGetDouble(out value);
+        }
+
+        if (element.ValueKind == JsonValueKind.String)
+        {
+            return double.TryParse(element.GetString(), out value);
+        }
+
+        return false;
+    }
+
+    private static bool TryFormatMetricMessage(string metricText, out string formatted)
+    {
+        formatted = string.Empty;
+        var candidate = metricText;
+        var firstBrace = candidate.IndexOf('{');
+        if (firstBrace >= 0)
+        {
+            candidate = candidate[firstBrace..];
+        }
+
+        try
+        {
+            using var document = JsonDocument.Parse(candidate);
+            if (document.RootElement.ValueKind != JsonValueKind.Object)
+            {
+                return false;
+            }
+
+            var parts = new List<string>();
+            AppendPayloadPart(parts, document.RootElement, "pages_processed_total");
+            AppendPayloadPart(parts, document.RootElement, "errors_total");
+            AppendPayloadPart(parts, document.RootElement, "page_processed");
+            AppendPayloadPart(parts, document.RootElement, "page_error");
+            AppendPayloadPart(parts, document.RootElement, "frontier_in_memory");
+            AppendPayloadPart(parts, document.RootElement, "frontier_leases");
+
+            if (parts.Count == 0)
+            {
+                return false;
+            }
+
+            formatted = $"[worker-metric] {string.Join(" | ", parts)}";
+            return true;
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
+    private static DateTime FloorToBucketUtc(DateTime timestampUtc, int bucketSeconds)
+    {
+        var normalized = timestampUtc.Kind == DateTimeKind.Utc
+            ? timestampUtc
+            : DateTime.SpecifyKind(timestampUtc, DateTimeKind.Utc);
+        var ticksPerBucket = TimeSpan.FromSeconds(bucketSeconds).Ticks;
+        var flooredTicks = normalized.Ticks - (normalized.Ticks % ticksPerBucket);
+        return new DateTime(flooredTicks, DateTimeKind.Utc);
+    }
+
+    private readonly record struct WorkerActivity(string IconClass, string Label, string CssClass, bool IsProcessing);
+
+    private sealed class DaemonQueueSnapshot
+    {
+        public string DaemonId { get; set; } = "local-default";
+        public int InQueue { get; set; }
+        public int InMemoryQueued { get; set; }
+        public int LocalQueued { get; set; }
+        public int ActiveLeases { get; set; }
+        public int KnownUrls { get; set; }
+    }
+
+    private readonly record struct QueueTimeoutInfo(bool IsTimedOut, int RemainingMilliseconds, string SiteIpKey)
+    {
+        public static QueueTimeoutInfo None => new(false, 0, string.Empty);
+    }
+
+    private void OpenWorkerDetail(int workerId)
+    {
+        Navigation.NavigateTo($"/workers/{workerId}");
+    }
+
+    private string GetSinceUpdateCompactText()
+    {
+        var seconds = Math.Max(0, (int)(DateTime.UtcNow - lastDashboardUpdateUtc).TotalSeconds);
+        return $"{seconds}s";
+    }
+
+    private string GetSinceUpdateDetailsText()
+    {
+        var seconds = Math.Max(0, (int)(DateTime.UtcNow - lastDashboardUpdateUtc).TotalSeconds);
+        return $"{seconds}s since last dashboard update (stats and worker telemetry refresh).";
+    }
+
+    public ValueTask DisposeAsync()
+    {
+        refreshCts?.Cancel();
+        refreshTimer?.Dispose();
+        refreshCts?.Dispose();
+        workerRefreshLock.Dispose();
+        return ValueTask.CompletedTask;
+    }
+}

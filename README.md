@@ -1,76 +1,80 @@
-# EIPS-TT - Preferential Crawler (PA1)
+# EIPS-TT
 
-Single-compose setup with two modes:
-- host mode: local `.venv` + `db` service
-- devcontainer mode: `app` + `db` services
+Preferential crawler project with:
 
-`docker-compose.yml` is shared by both modes. If you only want host mode, do not start `app`.
+- `ManagerApp`: Blazor UI + server control plane
+- `pa1/crawler`: websocket daemon runtime (Python)
+- `db/migrations`: PostgreSQL schema history
 
-## Recommended Workflow
+## Development (Host)
 
-```bash
-# restore python env from requirements.txt
-bash scripts/venv-restore.sh
-
-# start postgres and apply migrations
-bash scripts/db-migrate.sh
-```
-
-When dependencies change:
+1. Bootstrap environment:
 
 ```bash
-# save current .venv packages back to requirements.txt
-bash scripts/venv-dump.sh
+cd /home/tibor/Repos/EIPS-TT
+bash scripts/bootstrap.sh
 ```
 
-## Host Mode (No Devcontainer)
+2. Start manager in development mode:
+
+```bash
+cd /home/tibor/Repos/EIPS-TT
+ASPNETCORE_ENVIRONMENT=Development ASPNETCORE_URLS=http://127.0.0.1:5175 \
+	dotnet run --project ManagerApp/ManagerApp.csproj
+```
+
+3. Start crawler from Python (websocket daemon):
+
+```bash
+cd /home/tibor/Repos/EIPS-TT
+source .venv/bin/activate
+python pa1/crawler/src/main.py
+```
+
+Optional manual venv restore:
 
 ```bash
 bash scripts/venv-restore.sh
 source .venv/bin/activate
-docker compose up -d db
+```
+
+## Deployment (Docker)
+
+1. Build images and start stack:
+
+```bash
+cd /home/tibor/Repos/EIPS-TT
+docker compose --profile server --profile crawler build manager crawler
+docker compose --profile server --profile crawler up -d manager crawler db
+```
+
+2. Apply migrations (if needed):
+
+```bash
 bash scripts/db-migrate.sh
-python pa1/crawler/src/db/pg_connect.py
 ```
 
-## Devcontainer Mode (Optional)
-
-1. Open this repository folder in VS Code.
-2. Run `Dev Containers: Rebuild and Reopen in Container`.
-3. The container uses `/usr/local/bin/python`, while host mode uses `.venv/bin/python`.
-
-Both interpreter paths are only active in their own context.
-
-Non-VS Code equivalent (for quick container checks):
+3. Check status/logs:
 
 ```bash
-docker compose --profile devcontainer up -d app
+docker compose ps
+docker compose logs --tail=200 manager
+docker compose logs --tail=200 crawler
 ```
 
-## Database Connection
-
-Use this from DB tools:
-
-`postgresql://postgres:postgres@localhost:5432/crawldb`
-
-Credentials are local to your compose stack.
-
-## Utility Commands
+4. Stop deployment:
 
 ```bash
-# full setup shortcut (.venv + db + migrations)
-bash scripts/bootstrap.sh
-
-# reset schema, then re-apply migrations
-bash scripts/reset-db.sh
-
-# full DB reset (drops compose volumes), then re-apply migrations
-bash scripts/reset-db.sh --clean
-
-# db logs
-docker compose logs -f db
+docker compose --profile server --profile crawler down
 ```
 
-## Optional Devcontainer Notes
+## Notes
 
-See `.devcontainer/NOTE.md`.
+- Manager default URL is `http://127.0.0.1:5175` in these examples.
+- Use `MANAGER_HOST_PORT=<port>` for host port override in Docker Compose.
+
+## Module Docs
+
+- [ManagerApp/README.md](ManagerApp/README.md)
+- [pa1/crawler/crawler.md](pa1/crawler/crawler.md)
+- [docs/daemon-worker-runtime.md](docs/daemon-worker-runtime.md)

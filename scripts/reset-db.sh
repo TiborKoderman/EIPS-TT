@@ -2,6 +2,7 @@
 set -euo pipefail
 
 cd "$(dirname "${BASH_SOURCE[0]}")/.."
+source scripts/project-env.sh
 
 DB_USER="postgres"
 DB_NAME="crawldb"
@@ -35,21 +36,24 @@ while (($# > 0)); do
   esac
 done
 
+ensure_project_env
+source_project_env
+
 if (( CLEAN_RESET )); then
   echo "Performing full clean reset (containers + volumes)..."
-  docker compose down -v --remove-orphans
+  project_compose down -v --remove-orphans
   bash scripts/db-migrate.sh
   echo "Database clean reset complete."
   exit 0
 fi
 
-docker compose up -d db
+project_compose up -d db
 
-if ! docker compose exec -T db psql -U "${DB_USER}" -d "${SYSTEM_DB}" -tAc "SELECT 1 FROM pg_database WHERE datname='${DB_NAME}';" | grep -q "1"; then
-  docker compose exec -T db psql -v ON_ERROR_STOP=1 -U "${DB_USER}" -d "${SYSTEM_DB}" -c "CREATE DATABASE ${DB_NAME};"
+if ! project_compose exec -T db psql -U "${DB_USER}" -d "${SYSTEM_DB}" -tAc "SELECT 1 FROM pg_database WHERE datname='${DB_NAME}';" | grep -q "1"; then
+  project_compose exec -T db psql -v ON_ERROR_STOP=1 -U "${DB_USER}" -d "${SYSTEM_DB}" -c "CREATE DATABASE ${DB_NAME};"
 fi
 
-docker compose exec -T db psql -v ON_ERROR_STOP=1 -U "${DB_USER}" -d "${DB_NAME}" -c "DROP SCHEMA IF EXISTS crawldb CASCADE;"
+project_compose exec -T db psql -v ON_ERROR_STOP=1 -U "${DB_USER}" -d "${DB_NAME}" -c "DROP SCHEMA IF EXISTS crawldb CASCADE;"
 bash scripts/db-migrate.sh
 
 echo "Database reset complete."

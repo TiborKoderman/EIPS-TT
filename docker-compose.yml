@@ -1,37 +1,63 @@
 services:
-  app:
-    profiles: ["devcontainer"]
+  db:
+    image: postgres:latest
+    environment:
+      POSTGRES_DB: crawldb
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+    ports:
+      - "${DB_HOST_PORT:-5432}:5432"
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+      - ./db/migrations:/db-migrations:ro
+      - ./db/migrations/00_initial_crawldb.sql:/docker-entrypoint-initdb.d/00_initial_crawldb.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d crawldb"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+  manager:
+    profiles: ["server"]
     build:
       context: .
-      dockerfile: .devcontainer/Dockerfile
-    command: sleep infinity
-    environment:
-      DB_HOST: db
-      DB_PORT: 5432
-      DB_USER: postgres
-      DB_PASSWORD: postgres
-      DB_NAME: crawldb
+      dockerfile: ManagerApp/Dockerfile.server-crawler
+    image: ghcr.io/${GHCR_OWNER:-tiborkoderman}/eips-tt-server-crawler:latest
     depends_on:
       db:
         condition: service_healthy
-
-  db:
-    image: postgres:latest
-    restart: unless-stopped
-    ports:
-      - "5432:5432"
     environment:
-      POSTGRES_USER: postgres
-      POSTGRES_DB: crawldb
-      POSTGRES_PASSWORD: postgres
-    volumes:
-      - postgres-data:/var/lib/postgresql/data
-      - ./db/migrations:/docker-entrypoint-initdb.d:ro
-    healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U postgres -d crawldb"]
-      interval: 3s
-      timeout: 3s
-      retries: 20
+      ASPNETCORE_URLS: http://+:5175
+      ConnectionStrings__CrawldbConnection: Host=db;Port=5432;Database=crawldb;Username=postgres;Password=postgres
+      CrawlerApi__PythonExecutable: python3
+      CrawlerApi__LocalDaemonArgs: /app/pa1/crawler/src/main.py
+      CrawlerApi__ManagerBaseUrl: http://manager:5175
+      CrawlerApi__ManagerSocketUrl: ws://manager:5175/api/daemon-channel
+      CrawlerApi__DaemonChannelToken: ${CRAWLER_API_TOKEN:-}
+      CrawlerApi__FrontierApiToken: ${CRAWLER_API_TOKEN:-}
+      CRAWLER_USER_AGENT: fri-wier-T
+      CRAWLER_DOWNLOAD_PDF_CONTENT: "true"
+    ports:
+      - "${MANAGER_HOST_PORT:-5175}:5175"
+
+  crawler:
+    profiles: ["crawler"]
+    build:
+      context: .
+      dockerfile: pa1/crawler/Dockerfile
+    image: ghcr.io/${GHCR_OWNER:-tiborkoderman}/eips-tt-crawler:latest
+    depends_on:
+      manager:
+        condition: service_started
+    environment:
+      CRAWLER_DAEMON_ID: external-crawler
+      MANAGER_DAEMON_WS_URL: ws://manager:5175/api/daemon-channel?daemonId=external-crawler
+      MANAGER_INGEST_API_URL: http://manager:5175/api/crawler/ingest
+      MANAGER_EVENT_API_URL: http://manager:5175/api/crawler/events
+      MANAGER_INGEST_API_TOKEN: ${CRAWLER_API_TOKEN:-}
+      MANAGER_DAEMON_WS_TOKEN: ${CRAWLER_API_TOKEN:-}
+      CRAWLER_USER_AGENT: fri-wier-T
+      CRAWLER_DOWNLOAD_PDF_CONTENT: "true"
 
 volumes:
   postgres-data:
