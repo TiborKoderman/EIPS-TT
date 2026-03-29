@@ -53,8 +53,8 @@
                 <ul class="list">
                     @foreach (var group in groups)
                     {
-                        <li class="list-item worker-group-row @(selectedGroup?.Id == group.Id ? "selected" : "")"
-                            @onclick="() => SelectGroup(group.Id)">
+                        <li class="list-item worker-group-row @(IsSelectedGroup(group) ? "selected" : "")"
+                            @onclick="() => SelectGroup(group.DaemonId, group.Id)">
                             <div class="flex items-center justify-between gap-sm">
                                 <strong>@group.Name</strong>
                                 <span class="badge @(group.Enabled ? "badge-success" : "badge-warning")">
@@ -62,6 +62,7 @@
                                 </span>
                             </div>
                             <div class="text-small text-muted">@group.Description</div>
+                            <div class="text-small text-muted">Daemon: @NormalizeDaemonId(group.DaemonId)</div>
                             <div class="text-small">Workers: @group.WorkerIds.Count</div>
                         </li>
                     }
@@ -153,7 +154,10 @@
 
 @code {
     [SupplyParameterFromQuery(Name = "daemonId")]
-    public int? SelectedDaemonId { get; set; }
+    public string? SelectedDaemonId { get; set; }
+
+    [SupplyParameterFromQuery(Name = "groupId")]
+    public int? SelectedGroupId { get; set; }
 
     private List<WorkerGroupSettingsViewModel> groups = new();
     private WorkerGroupSettingsViewModel? selectedGroup;
@@ -176,22 +180,37 @@
                 group.TopicKeywordsText = string.Join("\n", group.TopicKeywords);
             }
         }
-        selectedGroup = SelectedDaemonId.HasValue
-            ? groups.FirstOrDefault(group => group.Id == SelectedDaemonId.Value)
-            : groups.FirstOrDefault();
+        selectedGroup = groups.FirstOrDefault(group =>
+                group.Id == SelectedGroupId.GetValueOrDefault(-1)
+                && string.Equals(NormalizeDaemonId(group.DaemonId), NormalizeDaemonId(SelectedDaemonId), StringComparison.OrdinalIgnoreCase))
+            ?? groups.FirstOrDefault();
         workerIdsInput = selectedGroup == null ? "" : string.Join(",", selectedGroup.WorkerIds);
         isLoading = false;
     }
 
-    private void SelectGroup(int id)
+    private void SelectGroup(string? daemonId, int id)
     {
-        selectedGroup = groups.FirstOrDefault(g => g.Id == id);
+        selectedGroup = groups.FirstOrDefault(group =>
+            group.Id == id
+            && string.Equals(NormalizeDaemonId(group.DaemonId), NormalizeDaemonId(daemonId), StringComparison.OrdinalIgnoreCase));
         workerIdsInput = selectedGroup == null ? "" : string.Join(",", selectedGroup.WorkerIds);
         if (selectedGroup != null && string.IsNullOrWhiteSpace(selectedGroup.TopicKeywordsText) && selectedGroup.TopicKeywords.Count > 0)
         {
             selectedGroup.TopicKeywordsText = string.Join("\n", selectedGroup.TopicKeywords);
         }
         statusMessage = null;
+    }
+
+    private bool IsSelectedGroup(WorkerGroupSettingsViewModel group)
+    {
+        return selectedGroup != null
+            && selectedGroup.Id == group.Id
+            && string.Equals(NormalizeDaemonId(selectedGroup.DaemonId), NormalizeDaemonId(group.DaemonId), StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static string NormalizeDaemonId(string? daemonId)
+    {
+        return string.IsNullOrWhiteSpace(daemonId) ? "local-default" : daemonId.Trim();
     }
 
     private async Task SaveSelectedGroup()

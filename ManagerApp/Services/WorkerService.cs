@@ -104,7 +104,8 @@ public class WorkerService : IWorkerService
         string? name = null,
         int? daemonGroupId = null,
         string? mode = null,
-        IReadOnlyList<string>? seedUrls = null)
+        IReadOnlyList<string>? seedUrls = null,
+        string? daemonId = null)
     {
         LastError = null;
         var normalizedSeedUrls = (seedUrls ?? Array.Empty<string>())
@@ -143,14 +144,14 @@ public class WorkerService : IWorkerService
         return envelope?.Data ?? new List<WorkerViewModel>();
     }
 
-    public async Task<WorkerViewModel?> GetWorkerAsync(int id)
+    public async Task<WorkerViewModel?> GetWorkerAsync(int id, string? daemonId = null)
     {
         LastError = null;
         var envelope = await GetAsync<WorkerViewModel>($"api/workers/{id}/status");
         return envelope?.Data;
     }
 
-    public async Task<bool> StartWorkerAsync(int id)
+    public async Task<bool> StartWorkerAsync(int id, string? daemonId = null)
     {
         LastError = null;
         var response = await PostAsync($"api/workers/{id}/start", new { });
@@ -168,7 +169,7 @@ public class WorkerService : IWorkerService
         return false;
     }
 
-    public async Task<bool> StopWorkerAsync(int id)
+    public async Task<bool> StopWorkerAsync(int id, string? daemonId = null)
     {
         LastError = null;
         var response = await PostAsync($"api/workers/{id}/stop", new { });
@@ -186,7 +187,7 @@ public class WorkerService : IWorkerService
         return false;
     }
 
-    public async Task<bool> PauseWorkerAsync(int id)
+    public async Task<bool> PauseWorkerAsync(int id, string? daemonId = null)
     {
         LastError = null;
         var response = await PostAsync($"api/workers/{id}/pause", new { });
@@ -303,7 +304,7 @@ public class WorkerService : IWorkerService
         return char.ToUpperInvariant(normalized[0]) + normalized[1..].ToLowerInvariant();
     }
 
-    public async Task<WorkerDetailViewModel?> GetWorkerDetailAsync(int id)
+    public async Task<WorkerDetailViewModel?> GetWorkerDetailAsync(int id, string? daemonId = null)
     {
         LastError = null;
         var envelope = await GetAsync<WorkerDetailViewModel>($"api/workers/{id}/detail");

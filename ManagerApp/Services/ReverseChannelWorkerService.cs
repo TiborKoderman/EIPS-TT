@@ -42,12 +42,14 @@ public sealed class ReverseChannelWorkerService : IWorkerService
     public Task<DaemonStatusViewModel?> GetDaemonStatusAsync()
     {
         LastError = null;
-        var snapshot = GetSnapshot();
-        if (snapshot is not null)
+        var snapshots = GetSnapshots();
+        if (snapshots.Count > 0)
         {
-            var daemon = CloneDaemonStatus(snapshot.Daemon);
-            daemon.WorkerCount = snapshot.Workers.Count;
-            daemon.ActiveWorkers = snapshot.Workers.Count(worker => string.Equals(worker.Status, "Active", StringComparison.OrdinalIgnoreCase));
+            var latest = snapshots.OrderByDescending(item => item.ReceivedAtUtc).First();
+            var daemon = CloneDaemonStatus(latest.Daemon);
+            daemon.WorkerCount = snapshots.Sum(item => item.Workers.Count);
+            daemon.ActiveWorkers = snapshots.Sum(item => item.Workers.Count(worker => string.Equals(worker.Status, "Active", StringComparison.OrdinalIgnoreCase)));
+            daemon.Running = snapshots.Any();
             return Task.FromResult<DaemonStatusViewModel?>(daemon);
         }
 
@@ -98,10 +100,12 @@ public sealed class ReverseChannelWorkerService : IWorkerService
         string? name = null,
         int? daemonGroupId = null,
         string? mode = null,
-        IReadOnlyList<string>? seedUrls = null)
+        IReadOnlyList<string>? seedUrls = null,
+        string? daemonId = null)
     {
         LastError = null;
-        if (!await EnsureDaemonConnectedAsync())
+        var targetDaemonId = ResolveTargetDaemonId(daemonId, daemonGroupId);
+        if (!await EnsureDaemonConnectedAsync(targetDaemonId))
         {
             return null;
         }
@@ -121,11 +125,13 @@ public sealed class ReverseChannelWorkerService : IWorkerService
             seedUrls = normalizedSeedUrls,
         };
 
-        var response = await RequestAsync<WorkerViewModel>("spawn-worker", payload);
+        var response = await RequestAsync<WorkerViewModel>("spawn-worker", payload, daemonId: targetDaemonId);
         if (response is null)
         {
             return null;
         }
+
+        response.DaemonId = targetDaemonId;
 
         if (normalizedSeedUrls.Count > 0)
         {
@@ -138,35 +144,40 @@ public sealed class ReverseChannelWorkerService : IWorkerService
     public Task<List<WorkerViewModel>> GetAllWorkersAsync()
     {
         LastError = null;
-        var snapshot = GetSnapshot();
-        var workers = snapshot?.Workers.Select(CloneWorker).ToList() ?? new List<WorkerViewModel>();
+        var workers = GetWorkersAcrossDaemons()
+            .Select(CloneWorker)
+            .OrderBy(worker => worker.DaemonId, StringComparer.OrdinalIgnoreCase)
+            .ThenBy(worker => worker.Id)
+            .ToList();
         return Task.FromResult(workers);
     }
 
-    public Task<WorkerViewModel?> GetWorkerAsync(int id)
+    public Task<WorkerViewModel?> GetWorkerAsync(int id, string? daemonId = null)
     {
         LastError = null;
-        var snapshot = GetSnapshot();
-        var worker = snapshot?.Workers.FirstOrDefault(item => item.Id == id);
+        var worker = GetWorkersAcrossDaemons()
+            .FirstOrDefault(item => item.Id == id
+                && (string.IsNullOrWhiteSpace(daemonId)
+                    || string.Equals(item.DaemonId, daemonId, StringComparison.OrdinalIgnoreCase)));
         return Task.FromResult(worker is null ? null : CloneWorker(worker));
     }
 
-    public Task<bool> StartWorkerAsync(int id)
+    public Task<bool> StartWorkerAsync(int id, string? daemonId = null)
     {
         LastError = null;
-        return ExecuteCommandAsync("start-worker", id);
+        return ExecuteCommandAsync("start-worker", id, daemonId);
     }
 
-    public Task<bool> StopWorkerAsync(int id)
+    public Task<bool> StopWorkerAsync(int id, string? daemonId = null)
     {
         LastError = null;
-        return ExecuteCommandAsync("stop-worker", id);
+        return ExecuteCommandAsync("stop-worker", id, daemonId);
     }
 
-    public Task<bool> PauseWorkerAsync(int id)
+    public Task<bool> PauseWorkerAsync(int id, string? daemonId = null)
     {
         LastError = null;
-        return ExecuteCommandAsync("pause-worker", id);
+        return ExecuteCommandAsync("pause-worker", id, daemonId);
     }
 
     public async Task<Dictionary<string, int>> GetWorkerStatusCountsAsync()
@@ -178,15 +189,21 @@ public sealed class ReverseChannelWorkerService : IWorkerService
             .ToDictionary(group => group.Key, group => group.Count());
     }
 
-    public async Task<WorkerDetailViewModel?> GetWorkerDetailAsync(int id)
+    public async Task<WorkerDetailViewModel?> GetWorkerDetailAsync(int id, string? daemonId = null)
     {
         LastError = null;
-        var snapshot = GetSnapshot();
-        var worker = snapshot?.Workers.FirstOrDefault(item => item.Id == id);
+        var worker = GetWorkersAcrossDaemons()
+            .FirstOrDefault(item => item.Id == id
+                && (string.IsNullOrWhiteSpace(daemonId)
+                    || string.Equals(item.DaemonId, daemonId, StringComparison.OrdinalIgnoreCase)));
         if (worker is null)
         {
             return null;
         }
+
+        daemonId = worker.DaemonId;
+
+        var snapshot = GetSnapshot(daemonId);
 
         var groupName = snapshot?.Groups.FirstOrDefault(group => group.WorkerIds.Contains(id))?.Name;
         return new WorkerDetailViewModel
@@ -228,10 +245,28 @@ public sealed class ReverseChannelWorkerService : IWorkerService
     public async Task<List<WorkerGroupSettingsViewModel>> GetWorkerGroupsAsync()
     {
         LastError = null;
-        var snapshot = GetSnapshot();
-        if (snapshot is not null && snapshot.Groups.Count > 0)
+        var snapshots = GetSnapshots();
+        if (snapshots.Count > 0)
         {
-            return snapshot.Groups.Select(CloneGroup).ToList();
+            var groups = new List<WorkerGroupSettingsViewModel>();
+            foreach (var snapshot in snapshots)
+            {
+                foreach (var group in snapshot.Groups)
+                {
+                    var clone = CloneGroup(group);
+                    clone.DaemonId = snapshot.DaemonId;
+                    groups.Add(clone);
+                }
+            }
+
+            if (groups.Count > 0)
+            {
+                return groups
+                    .OrderBy(group => group.DaemonId, StringComparer.OrdinalIgnoreCase)
+                    .ThenBy(group => group.Name, StringComparer.OrdinalIgnoreCase)
+                    .ThenBy(group => group.Id)
+                    .ToList();
+            }
         }
 
         var persisted = await LoadWorkerGroupsAsync();
@@ -263,6 +298,11 @@ public sealed class ReverseChannelWorkerService : IWorkerService
     public async Task<bool> SaveWorkerGroupAsync(WorkerGroupSettingsViewModel group)
     {
         LastError = null;
+        var targetDaemonId = string.IsNullOrWhiteSpace(group.DaemonId)
+            ? GetDaemonId()
+            : group.DaemonId.Trim();
+        group.DaemonId = targetDaemonId;
+
         group.TopicKeywords = group.TopicKeywordsText
             .Split(new[] { '\r', '\n' }, StringSplitOptions.RemoveEmptyEntries)
             .Select(value => value.Trim())
@@ -283,9 +323,9 @@ public sealed class ReverseChannelWorkerService : IWorkerService
 
         await SaveJsonGlobalSettingAsync("crawler.worker_groups", groups, updatedBy: "manager-ui");
 
-        if (_daemonChannel.IsConnected(GetDaemonId()))
+        if (_daemonChannel.IsConnected(targetDaemonId))
         {
-            var response = await RequestAsync<WorkerGroupSettingsViewModel>("save-group", group, ensureConnected: false);
+            var response = await RequestAsync<WorkerGroupSettingsViewModel>("save-group", group, ensureConnected: false, daemonId: targetDaemonId);
             return response is not null;
         }
 
@@ -604,15 +644,15 @@ public sealed class ReverseChannelWorkerService : IWorkerService
         return result;
     }
 
-    private async Task<T?> RequestAsync<T>(string action, object? payload, bool ensureConnected = true)
+    private async Task<T?> RequestAsync<T>(string action, object? payload, bool ensureConnected = true, string? daemonId = null)
     {
-        if (ensureConnected && !await EnsureDaemonConnectedAsync())
+        var targetDaemonId = ResolveTargetDaemonId(daemonId);
+        if (ensureConnected && !await EnsureDaemonConnectedAsync(targetDaemonId))
         {
             return default;
         }
 
-        var daemonId = GetDaemonId();
-        var response = await _daemonChannel.SendRequestAsync<T>(daemonId, action, payload);
+        var response = await _daemonChannel.SendRequestAsync<T>(targetDaemonId, action, payload);
         if (!response.Ok)
         {
             LastError = response.Error;
@@ -672,8 +712,9 @@ public sealed class ReverseChannelWorkerService : IWorkerService
         }
     }
 
-    private async Task<bool> ExecuteCommandAsync(string commandType, int? workerId)
+    private async Task<bool> ExecuteCommandAsync(string commandType, int? workerId, string? daemonId = null)
     {
+        var targetDaemonId = ResolveTargetDaemonId(daemonId);
         var payload = workerId.HasValue
             ? new { workerId }
             : null;
@@ -695,7 +736,7 @@ public sealed class ReverseChannelWorkerService : IWorkerService
             || string.Equals(commandType, "reload-daemon", StringComparison.OrdinalIgnoreCase)
             || string.Equals(commandType, "stop-daemon", StringComparison.OrdinalIgnoreCase))
         {
-            if (!await EnsureDaemonConnectedAsync())
+            if (!await EnsureDaemonConnectedAsync(targetDaemonId))
             {
                 return false;
             }
@@ -703,8 +744,7 @@ public sealed class ReverseChannelWorkerService : IWorkerService
 
         if (!string.IsNullOrWhiteSpace(action))
         {
-            var daemonId = GetDaemonId();
-            var direct = await _daemonChannel.SendRequestAsync<JsonElement>(daemonId, action, payload);
+            var direct = await _daemonChannel.SendRequestAsync<JsonElement>(targetDaemonId, action, payload);
             if (direct.Ok)
             {
                 LastError = null;
@@ -714,9 +754,9 @@ public sealed class ReverseChannelWorkerService : IWorkerService
             if (IsTransientRequestFailure(direct.Error))
             {
                 await Task.Delay(300);
-                if (await EnsureDaemonConnectedAsync())
+                if (await EnsureDaemonConnectedAsync(targetDaemonId))
                 {
-                    var retry = await _daemonChannel.SendRequestAsync<JsonElement>(daemonId, action, payload);
+                    var retry = await _daemonChannel.SendRequestAsync<JsonElement>(targetDaemonId, action, payload);
                     if (retry.Ok)
                     {
                         LastError = null;
@@ -784,24 +824,24 @@ public sealed class ReverseChannelWorkerService : IWorkerService
         }
     }
 
-    private async Task<bool> EnsureDaemonConnectedAsync()
+    private async Task<bool> EnsureDaemonConnectedAsync(string? daemonId = null)
     {
-        var daemonId = GetDaemonId();
-        if (_daemonChannel.IsConnected(daemonId))
+        var targetDaemonId = ResolveTargetDaemonId(daemonId);
+        if (_daemonChannel.IsConnected(targetDaemonId))
         {
             return true;
         }
 
-        if (!IsLocalDaemon())
+        if (!IsLocalDaemonTarget(targetDaemonId))
         {
-            LastError = $"Daemon '{daemonId}' is not connected.";
+            LastError = $"Daemon '{targetDaemonId}' is not connected.";
             return false;
         }
 
         await _daemonStartGate.WaitAsync();
         try
         {
-            if (_daemonChannel.IsConnected(daemonId))
+            if (_daemonChannel.IsConnected(targetDaemonId))
             {
                 return true;
             }
@@ -809,13 +849,13 @@ public sealed class ReverseChannelWorkerService : IWorkerService
             // Prevent repeated button clicks/refreshes from spawning many local daemon processes.
             if (DateTime.UtcNow - _lastLocalDaemonLaunchAttemptUtc < TimeSpan.FromSeconds(10))
             {
-                if (await _daemonChannel.WaitForConnectionAsync(daemonId, TimeSpan.FromSeconds(2), CancellationToken.None))
+                if (await _daemonChannel.WaitForConnectionAsync(targetDaemonId, TimeSpan.FromSeconds(2), CancellationToken.None))
                 {
                     LastError = null;
                     return true;
                 }
 
-                LastError = $"Daemon '{daemonId}' is still starting. Please retry in a few seconds.";
+                LastError = $"Daemon '{targetDaemonId}' is still starting. Please retry in a few seconds.";
                 return false;
             }
 
@@ -825,7 +865,7 @@ public sealed class ReverseChannelWorkerService : IWorkerService
             var repoRoot = Path.GetFullPath(Path.Combine(managerDir, ".."));
             var daemonArgs = _configuration["CrawlerApi:LocalDaemonArgs"] ?? "pa1/crawler/src/main.py";
             var managerHttpBaseUrl = ResolveManagerHttpBaseUrl();
-            var wsUrl = ResolveManagerSocketUrl(managerHttpBaseUrl, daemonId);
+            var wsUrl = ResolveManagerSocketUrl(managerHttpBaseUrl, targetDaemonId);
 
             foreach (var pythonExe in ResolvePythonCandidates(repoRoot))
             {
@@ -840,7 +880,7 @@ public sealed class ReverseChannelWorkerService : IWorkerService
                         RedirectStandardOutput = false,
                         RedirectStandardError = false,
                     };
-                    startInfo.Environment["CRAWLER_DAEMON_ID"] = daemonId;
+                    startInfo.Environment["CRAWLER_DAEMON_ID"] = targetDaemonId;
                     startInfo.Environment["MANAGER_DAEMON_WS_URL"] = wsUrl;
                     var daemonChannelToken = (_configuration["CrawlerApi:DaemonChannelToken"] ?? string.Empty).Trim();
                     var frontierApiToken = (_configuration["CrawlerApi:FrontierApiToken"] ?? daemonChannelToken).Trim();
@@ -865,16 +905,16 @@ public sealed class ReverseChannelWorkerService : IWorkerService
                     Process.Start(startInfo);
                     _logger.LogInformation("Triggered on-demand daemon startup using {PythonExe}", pythonExe);
 
-                    if (await _daemonChannel.WaitForConnectionAsync(daemonId, TimeSpan.FromSeconds(12), CancellationToken.None))
+                    if (await _daemonChannel.WaitForConnectionAsync(targetDaemonId, TimeSpan.FromSeconds(12), CancellationToken.None))
                     {
                         LastError = null;
                         return true;
                     }
 
-                    LastError = $"Daemon '{daemonId}' launched but did not connect to manager websocket in time.";
+                    LastError = $"Daemon '{targetDaemonId}' launched but did not connect to manager websocket in time.";
                     _logger.LogWarning(
                         "Daemon launch did not connect in time. daemonId={DaemonId} wsUrl={WsUrl} executable={PythonExe}",
-                        daemonId,
+                        targetDaemonId,
                         wsUrl,
                         pythonExe);
                     return false;
@@ -890,7 +930,7 @@ public sealed class ReverseChannelWorkerService : IWorkerService
             _daemonStartGate.Release();
         }
 
-        LastError = $"Daemon '{daemonId}' is not connected.";
+        LastError = $"Daemon '{targetDaemonId}' is not connected.";
         return false;
     }
 
@@ -998,10 +1038,69 @@ public sealed class ReverseChannelWorkerService : IWorkerService
         await cmd.ExecuteNonQueryAsync();
     }
 
-    private DaemonChannelService.DaemonSnapshot? GetSnapshot()
+    private DaemonChannelService.DaemonSnapshot? GetSnapshot(string? daemonId = null)
     {
-        var daemonId = GetDaemonId();
-        return _daemonChannel.GetSnapshot(daemonId) ?? _daemonChannel.GetLatestSnapshot();
+        var targetDaemonId = ResolveTargetDaemonId(daemonId);
+        return _daemonChannel.GetSnapshot(targetDaemonId) ?? _daemonChannel.GetLatestSnapshot();
+    }
+
+    private List<DaemonChannelService.DaemonSnapshot> GetSnapshots()
+    {
+        var snapshots = _daemonChannel
+            .GetConnectionInfos()
+            .Select(info => _daemonChannel.GetSnapshot(info.DaemonId))
+            .Where(snapshot => snapshot is not null)
+            .Cast<DaemonChannelService.DaemonSnapshot>()
+            .OrderBy(snapshot => snapshot.DaemonId, StringComparer.OrdinalIgnoreCase)
+            .ToList();
+
+        if (snapshots.Count == 0)
+        {
+            var latest = _daemonChannel.GetLatestSnapshot();
+            if (latest is not null)
+            {
+                snapshots.Add(latest);
+            }
+        }
+
+        return snapshots;
+    }
+
+    private List<WorkerViewModel> GetWorkersAcrossDaemons()
+    {
+        var workers = new List<WorkerViewModel>();
+        foreach (var snapshot in GetSnapshots())
+        {
+            foreach (var worker in snapshot.Workers)
+            {
+                var clone = CloneWorker(worker);
+                clone.DaemonId = snapshot.DaemonId;
+                workers.Add(clone);
+            }
+        }
+
+        return workers;
+    }
+
+    private string ResolveTargetDaemonId(string? daemonId = null, int? daemonGroupId = null)
+    {
+        if (!string.IsNullOrWhiteSpace(daemonId))
+        {
+            return daemonId.Trim();
+        }
+
+        if (daemonGroupId.HasValue)
+        {
+            foreach (var snapshot in GetSnapshots())
+            {
+                if (snapshot.Groups.Any(group => group.Id == daemonGroupId.Value))
+                {
+                    return snapshot.DaemonId;
+                }
+            }
+        }
+
+        return GetDaemonId();
     }
 
     private string GetDaemonId()
@@ -1015,6 +1114,11 @@ public sealed class ReverseChannelWorkerService : IWorkerService
         var baseUrl = _configuration["CrawlerApi:BaseUrl"] ?? "http://127.0.0.1:8090";
         return baseUrl.Contains("127.0.0.1", StringComparison.OrdinalIgnoreCase)
             || baseUrl.Contains("localhost", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private bool IsLocalDaemonTarget(string daemonId)
+    {
+        return string.Equals(daemonId, GetDaemonId(), StringComparison.OrdinalIgnoreCase) && IsLocalDaemon();
     }
 
     private IEnumerable<string> ResolvePythonCandidates(string repoRoot)
@@ -1220,6 +1324,7 @@ public sealed class ReverseChannelWorkerService : IWorkerService
         return new WorkerViewModel
         {
             Id = worker.Id,
+            DaemonId = string.IsNullOrWhiteSpace(worker.DaemonId) ? "local-default" : worker.DaemonId,
             Name = worker.Name,
             Status = worker.Status,
             StatusReason = worker.StatusReason,
@@ -1272,6 +1377,7 @@ public sealed class ReverseChannelWorkerService : IWorkerService
         return new WorkerGroupSettingsViewModel
         {
             Id = group.Id,
+            DaemonId = string.IsNullOrWhiteSpace(group.DaemonId) ? "local-default" : group.DaemonId,
             Name = group.Name,
             Description = group.Description,
             Enabled = group.Enabled,

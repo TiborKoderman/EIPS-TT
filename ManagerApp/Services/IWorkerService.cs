@@ -40,7 +40,8 @@ public interface IWorkerService
         string? name = null,
         int? daemonGroupId = null,
         string? mode = null,
-        IReadOnlyList<string>? seedUrls = null);
+        IReadOnlyList<string>? seedUrls = null,
+        string? daemonId = null);
 
     /// <summary>
     /// Get list of all workers with their current status
@@ -50,25 +51,25 @@ public interface IWorkerService
     /// <summary>
     /// Get details for a specific worker
     /// </summary>
-    Task<WorkerViewModel?> GetWorkerAsync(int id);
+    Task<WorkerViewModel?> GetWorkerAsync(int id, string? daemonId = null);
 
     /// <summary>
     /// Start a worker
     /// </summary>
     /// <returns>True if successful, false otherwise</returns>
-    Task<bool> StartWorkerAsync(int id);
+    Task<bool> StartWorkerAsync(int id, string? daemonId = null);
 
     /// <summary>
     /// Stop a worker
     /// </summary>
     /// <returns>True if successful, false otherwise</returns>
-    Task<bool> StopWorkerAsync(int id);
+    Task<bool> StopWorkerAsync(int id, string? daemonId = null);
 
     /// <summary>
     /// Pause a worker
     /// </summary>
     /// <returns>True if successful, false otherwise</returns>
-    Task<bool> PauseWorkerAsync(int id);
+    Task<bool> PauseWorkerAsync(int id, string? daemonId = null);
 
     /// <summary>
     /// Get worker status counts for pie chart display
@@ -79,7 +80,7 @@ public interface IWorkerService
     /// <summary>
     /// Get full details for a single worker.
     /// </summary>
-    Task<WorkerDetailViewModel?> GetWorkerDetailAsync(int id);
+    Task<WorkerDetailViewModel?> GetWorkerDetailAsync(int id, string? daemonId = null);
 
     /// <summary>
     /// Get global worker configuration.

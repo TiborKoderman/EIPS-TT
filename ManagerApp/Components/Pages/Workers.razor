@@ -47,10 +47,10 @@
                         <option value="@status">@status</option>
                     }
                 </select>
-                <select @bind="SpawnGroupId">
-                    @foreach (var daemon in SpawnableDaemons)
+                <select @bind="SpawnTargetKey">
+                    @foreach (var daemon in SpawnTargets)
                     {
-                        <option value="@daemon.Id">@daemon.Name</option>
+                        <option value="@daemon.Key">@daemon.Label</option>
                     }
                 </select>
                 <select @bind="SpawnMode">
@@ -150,10 +150,10 @@
                 @foreach (var daemon in Daemons)
                 {
                     var daemonWorkers = GetFilteredWorkersForDaemon(daemon);
-                    var expanded = expandedDaemonIds.Contains(daemon.Id);
+                    var expanded = expandedDaemonIds.Contains(GetDaemonExpandKey(daemon));
                     <li class="list-item daemon-item">
                         <div class="daemon-header-shell">
-                            <button class="daemon-header" type="button" @onclick="() => ToggleDaemonExpand(daemon.Id)">
+                            <button class="daemon-header" type="button" @onclick="() => ToggleDaemonExpand(daemon)">
                                 <div class="daemon-header-title">
                                     <span class="mdi @(expanded ? "mdi-chevron-down" : "mdi-chevron-right")"></span>
                                     <strong>@daemon.Name</strong>
@@ -181,8 +181,8 @@
                                         <input type="number"
                                                min="1"
                                                max="20"
-                                               value="@GetDaemonSpawnCount(daemon.Id)"
-                                               @onchange="(e) => OnDaemonSpawnCountChanged(daemon.Id, e)"
+                                               value="@GetDaemonSpawnCount(daemon)"
+                                               @onchange="(e) => OnDaemonSpawnCountChanged(daemon, e)"
                                                aria-label="Spawn count" />
                                         <button class="btn btn-icon"
                                                 type="button"
@@ -198,7 +198,7 @@
                             @if (daemon.Id > 0)
                             {
                                 <a class="btn btn-icon daemon-gear"
-                                   href="@($"/workers/groups?daemonId={daemon.Id}")"
+                                              href="@($"/workers/groups?daemonId={Uri.EscapeDataString(NormalizeDaemonId(daemon.DaemonId))}&groupId={daemon.Id}")"
                                    title="Configure daemon"
                                    aria-label="Configure daemon">
                                     <span class="mdi mdi-cog"></span>
@@ -217,7 +217,7 @@
                                 <ul class="list daemon-worker-list">
                                     @foreach (var worker in daemonWorkers)
                                     {
-                                        <li class="list-item worker-row worker-list-clickable" @onclick="() => OpenWorkerDetail(worker.Id)">
+                                        <li class="list-item worker-row worker-list-clickable" @onclick="() => OpenWorkerDetail(worker.Id, worker.DaemonId)">
                                             <div class="worker-row-main">
                                                 <div class="worker-title">@worker.Name</div>
                                                 @{
@@ -248,23 +248,23 @@
                                                 <span class="badge @GetStatusBadgeClass(worker.Status) state-badge-short" title="@BuildWorkerStateTooltip(worker)">
                                                     <span class="mdi @GetStatusIcon(worker.Status)"></span>
                                                 </span>
-                                                <button class="btn btn-icon" title="Logs" aria-label="Logs" @onclick='() => OpenWorkerSection(worker.Id, "logs")' type="button">
+                                                <button class="btn btn-icon" title="Logs" aria-label="Logs" @onclick='() => OpenWorkerSection(worker.Id, "logs", worker.DaemonId)' type="button">
                                                     <span class="mdi mdi-text-box-search-outline"></span>
                                                 </button>
-                                                <button class="btn btn-icon" title="Metrics" aria-label="Metrics" @onclick='() => OpenWorkerSection(worker.Id, "metrics")' type="button">
+                                                <button class="btn btn-icon" title="Metrics" aria-label="Metrics" @onclick='() => OpenWorkerSection(worker.Id, "metrics", worker.DaemonId)' type="button">
                                                     <span class="mdi mdi-chart-line"></span>
                                                 </button>
                                                 @if (workerActionInProgress.Contains(worker.Id))
                                                 {
                                                     <span class="badge badge-info">@GetWorkerProgressLabel(worker.Id)</span>
                                                 }
-                                                <button class="btn btn-icon" title="Start" aria-label="Start" @onclick="() => Start(worker.Id)" type="button" disabled="@workerActionInProgress.Contains(worker.Id)">
+                                                <button class="btn btn-icon" title="Start" aria-label="Start" @onclick="() => Start(worker)" type="button" disabled="@workerActionInProgress.Contains(worker.Id)">
                                                     <span class="mdi mdi-play"></span>
                                                 </button>
-                                                <button class="btn btn-icon" title="Pause" aria-label="Pause" @onclick="() => Pause(worker.Id)" type="button" disabled="@workerActionInProgress.Contains(worker.Id)">
+                                                <button class="btn btn-icon" title="Pause" aria-label="Pause" @onclick="() => Pause(worker)" type="button" disabled="@workerActionInProgress.Contains(worker.Id)">
                                                     <span class="mdi mdi-pause"></span>
                                                 </button>
-                                                <button class="btn btn-icon" title="Stop" aria-label="Stop" @onclick="() => Stop(worker.Id)" type="button" disabled="@workerActionInProgress.Contains(worker.Id)">
+                                                <button class="btn btn-icon" title="Stop" aria-label="Stop" @onclick="() => Stop(worker)" type="button" disabled="@workerActionInProgress.Contains(worker.Id)">
                                                     <span class="mdi mdi-stop"></span>
                                                 </button>
                                             </div>
@@ -391,12 +391,12 @@
     private WorkerGlobalConfigViewModel? globalConfig;
     private DaemonStatusViewModel? daemonStatus;
     private string? actionStatus;
-    private readonly HashSet<int> expandedDaemonIds = new();
+    private readonly HashSet<string> expandedDaemonIds = new(StringComparer.OrdinalIgnoreCase);
     private PeriodicTimer? _refreshTimer;
     private CancellationTokenSource? _refreshCts;
     private string SearchTerm { get; set; } = "";
     private string StatusFilter { get; set; } = "ALL";
-    private int SpawnGroupId { get; set; } = 1;
+    private string SpawnTargetKey { get; set; } = string.Empty;
     private string SpawnMode { get; set; } = "thread";
     private int SpawnCount { get; set; } = 1;
     private string SpawnSeedUrlsText { get; set; } = "";
@@ -409,7 +409,9 @@
     private bool daemonBulkInProgress;
     private readonly HashSet<int> workerActionInProgress = new();
     private readonly Dictionary<int, string> workerActionTypeInProgress = new();
-    private readonly Dictionary<int, int> daemonSpawnCounts = new();
+    private readonly Dictionary<string, int> daemonSpawnCounts = new(StringComparer.OrdinalIgnoreCase);
+
+    private sealed record SpawnTargetOption(string Key, int GroupId, string DaemonId, string Label);
 
     private IReadOnlyList<string> WorkerApiPending =>
     [
@@ -432,6 +434,20 @@
     private List<WorkerGroupSettingsViewModel> SpawnableDaemons => daemonGroups
         .Where(group => group.Id > 0)
         .OrderBy(group => group.Name)
+        .ToList();
+
+    private List<SpawnTargetOption> SpawnTargets => daemonGroups
+        .Where(group => group.Id > 0)
+        .Select(group =>
+        {
+            var daemonId = NormalizeDaemonId(group.DaemonId);
+            return new SpawnTargetOption(
+                Key: $"{daemonId}:{group.Id}",
+                GroupId: group.Id,
+                DaemonId: daemonId,
+                Label: $"{group.Name} ({daemonId})");
+        })
+        .OrderBy(option => option.Label, StringComparer.OrdinalIgnoreCase)
         .ToList();
 
     private List<WorkerViewModel> FilteredWorkers => workerItems
@@ -506,34 +522,37 @@
             combinedThroughputUsingFallback = combinedThroughputSeries.Count > 0;
         }
 
-        var groupedWorkerIds = daemonGroups
-            .SelectMany(group => group.WorkerIds)
-            .Distinct()
-            .ToHashSet();
-        var ungroupedWorkers = workerItems
-            .Where(worker => !groupedWorkerIds.Contains(worker.Id))
-            .Select(worker => worker.Id)
+        var groupedWorkerKeys = daemonGroups
+            .SelectMany(group => group.WorkerIds.Select(workerId => $"{NormalizeDaemonId(group.DaemonId)}:{workerId}"))
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+
+        var ungroupedByDaemon = workerItems
+            .Where(worker => !groupedWorkerKeys.Contains($"{NormalizeDaemonId(worker.DaemonId)}:{worker.Id}"))
+            .GroupBy(worker => NormalizeDaemonId(worker.DaemonId), StringComparer.OrdinalIgnoreCase)
             .ToList();
-        if (ungroupedWorkers.Count > 0)
+
+        foreach (var daemonGroup in ungroupedByDaemon)
         {
             daemonGroups.Add(new WorkerGroupSettingsViewModel
             {
                 Id = -1,
-                Name = "Ungrouped Workers",
-                Description = "Workers not assigned to a daemon group yet.",
+                DaemonId = daemonGroup.Key,
+                Name = $"{daemonGroup.Key} :: Ungrouped Workers",
+                Description = $"Workers in daemon {daemonGroup.Key} not assigned to a daemon group yet.",
                 Enabled = true,
-                WorkerIds = ungroupedWorkers,
+                WorkerIds = daemonGroup.Select(worker => worker.Id).Distinct().ToList(),
             });
         }
 
-        if (daemonGroups.Count > 0 && daemonGroups.All(group => !expandedDaemonIds.Contains(group.Id)))
+        if (daemonGroups.Count > 0 && daemonGroups.All(group => !expandedDaemonIds.Contains(GetDaemonExpandKey(group))))
         {
-            expandedDaemonIds.Add(daemonGroups[0].Id);
+            expandedDaemonIds.Add(GetDaemonExpandKey(daemonGroups[0]));
         }
 
-        if (SpawnableDaemons.Count > 0 && SpawnableDaemons.All(group => group.Id != SpawnGroupId))
+        var spawnTargets = SpawnTargets;
+        if (spawnTargets.Count > 0 && spawnTargets.All(target => !string.Equals(target.Key, SpawnTargetKey, StringComparison.OrdinalIgnoreCase)))
         {
-            SpawnGroupId = SpawnableDaemons[0].Id;
+            SpawnTargetKey = spawnTargets[0].Key;
         }
 
         if (daemonStatus == null && !string.IsNullOrWhiteSpace(WorkerService.LastError))
@@ -542,19 +561,19 @@
         }
     }
 
-    private async Task Start(int id)
+    private async Task Start(WorkerViewModel worker)
     {
-        await ExecuteWorkerAction(id, "start", () => WorkerService.StartWorkerAsync(id));
+        await ExecuteWorkerAction(worker, "start", () => WorkerService.StartWorkerAsync(worker.Id, worker.DaemonId));
     }
 
-    private async Task Pause(int id)
+    private async Task Pause(WorkerViewModel worker)
     {
-        await ExecuteWorkerAction(id, "pause", () => WorkerService.PauseWorkerAsync(id));
+        await ExecuteWorkerAction(worker, "pause", () => WorkerService.PauseWorkerAsync(worker.Id, worker.DaemonId));
     }
 
-    private async Task Stop(int id)
+    private async Task Stop(WorkerViewModel worker)
     {
-        await ExecuteWorkerAction(id, "stop", () => WorkerService.StopWorkerAsync(id));
+        await ExecuteWorkerAction(worker, "stop", () => WorkerService.StopWorkerAsync(worker.Id, worker.DaemonId));
     }
 
     private async Task StartAllInDaemon(WorkerGroupSettingsViewModel daemon)
@@ -576,7 +595,7 @@
             return;
         }
 
-        var success = await ExecuteBatchWorkerAction(targets.Select(worker => worker.Id), WorkerService.StartWorkerAsync);
+        var success = await ExecuteBatchWorkerAction(targets, worker => WorkerService.StartWorkerAsync(worker.Id, worker.DaemonId));
 
         actionStatus = $"{daemon.Name}: started {success}/{targets.Count} workers.";
         await RefreshAsync();
@@ -603,7 +622,7 @@
             return;
         }
 
-        var success = await ExecuteBatchWorkerAction(targets.Select(worker => worker.Id), WorkerService.StartWorkerAsync);
+        var success = await ExecuteBatchWorkerAction(targets, worker => WorkerService.StartWorkerAsync(worker.Id, worker.DaemonId));
         actionStatus = $"{daemon.Name}: started {success}/{targets.Count} thread workers.";
         await RefreshAsync();
         daemonBulkInProgress = false;
@@ -628,7 +647,7 @@
             return;
         }
 
-        var success = await ExecuteBatchWorkerAction(targets.Select(worker => worker.Id), WorkerService.StopWorkerAsync);
+        var success = await ExecuteBatchWorkerAction(targets, worker => WorkerService.StopWorkerAsync(worker.Id, worker.DaemonId));
 
         actionStatus = $"{daemon.Name}: stopped {success}/{targets.Count} workers.";
         await RefreshAsync();
@@ -643,7 +662,8 @@
             return;
         }
 
-        if (SpawnGroupId <= 0)
+        var target = SpawnTargets.FirstOrDefault(option => string.Equals(option.Key, SpawnTargetKey, StringComparison.OrdinalIgnoreCase));
+        if (target is null)
         {
             actionStatus = "Select a daemon group before spawning a worker.";
             return;
@@ -657,9 +677,10 @@
         {
             var spawned = await WorkerService.SpawnWorkerAsync(
                 name: $"Worker-{DateTime.Now:HHmmss}-{i + 1}",
-                daemonGroupId: SpawnGroupId,
+                daemonGroupId: target.GroupId,
                 mode: SpawnMode,
-                seedUrls: null);
+                seedUrls: null,
+                daemonId: target.DaemonId);
 
             if (spawned != null)
             {
@@ -677,7 +698,7 @@
 
         actionStatus = success == 0
             ? $"Failed to spawn workers. {WorkerService.LastError}"
-            : $"Spawned {success}/{count} workers in {SpawnMode} mode. Queued seeds: {queuedSeeds}.";
+            : $"Spawned {success}/{count} workers in {SpawnMode} mode for daemon {target.DaemonId}. Queued seeds: {queuedSeeds}.";
 
         if (success > 0)
         {
@@ -695,7 +716,7 @@
         }
 
         daemonBulkInProgress = true;
-        var count = Math.Clamp(GetDaemonSpawnCount(daemon.Id), 1, 20);
+        var count = Math.Clamp(GetDaemonSpawnCount(daemon), 1, 20);
         var seeds = GetSeedUrlsForSpawn();
         var success = 0;
         var queuedSeeds = 0;
@@ -706,7 +727,8 @@
                 name: $"{daemon.Name}-w-{DateTime.Now:HHmmss}-{i + 1}",
                 daemonGroupId: daemon.Id,
                 mode: SpawnMode,
-                seedUrls: null);
+                seedUrls: null,
+                daemonId: daemon.DaemonId);
             if (spawned != null)
             {
                 success++;
@@ -759,8 +781,9 @@
         return seedUrls;
     }
 
-    private async Task ExecuteWorkerAction(int workerId, string actionName, Func<Task<bool>> action)
+    private async Task ExecuteWorkerAction(WorkerViewModel worker, string actionName, Func<Task<bool>> action)
     {
+        var workerId = worker.Id;
         if (workerActionInProgress.Contains(workerId))
         {
             return;
@@ -768,15 +791,15 @@
 
         workerActionInProgress.Add(workerId);
         workerActionTypeInProgress[workerId] = actionName;
-        actionStatus = $"Worker {workerId}: {actionName}...";
+        actionStatus = $"Worker {workerId} ({NormalizeDaemonId(worker.DaemonId)}): {actionName}...";
         StateHasChanged();
 
         try
         {
             var ok = await action();
             actionStatus = ok
-                ? $"Worker {workerId} {actionName} requested successfully."
-                : $"Worker {workerId} {actionName} failed. {WorkerService.LastError}";
+                ? $"Worker {workerId} ({NormalizeDaemonId(worker.DaemonId)}) {actionName} requested successfully."
+                : $"Worker {workerId} ({NormalizeDaemonId(worker.DaemonId)}) {actionName} failed. {WorkerService.LastError}";
             await RefreshAsync();
         }
         finally
@@ -786,15 +809,20 @@
         }
     }
 
-    private async Task<int> ExecuteBatchWorkerAction(IEnumerable<int> workerIds, Func<int, Task<bool>> action)
+    private async Task<int> ExecuteBatchWorkerAction(IEnumerable<WorkerViewModel> workers, Func<WorkerViewModel, Task<bool>> action)
     {
-        var ids = workerIds.Distinct().ToList();
-        var tasks = ids.Select(async id =>
+        var workerList = workers
+            .GroupBy(worker => $"{NormalizeDaemonId(worker.DaemonId)}:{worker.Id}", StringComparer.OrdinalIgnoreCase)
+            .Select(group => group.First())
+            .ToList();
+
+        var tasks = workerList.Select(async worker =>
         {
+            var id = worker.Id;
             workerActionInProgress.Add(id);
             try
             {
-                return await action(id) ? 1 : 0;
+                return await action(worker) ? 1 : 0;
             }
             finally
             {
@@ -814,21 +842,21 @@
         }
     }
 
-    private int GetDaemonSpawnCount(int daemonId)
+    private int GetDaemonSpawnCount(WorkerGroupSettingsViewModel daemon)
     {
-        return daemonSpawnCounts.TryGetValue(daemonId, out var count)
+        return daemonSpawnCounts.TryGetValue(GetDaemonExpandKey(daemon), out var count)
             ? Math.Clamp(count, 1, 20)
             : 1;
     }
 
-    private void OnDaemonSpawnCountChanged(int daemonId, ChangeEventArgs args)
+    private void OnDaemonSpawnCountChanged(WorkerGroupSettingsViewModel daemon, ChangeEventArgs args)
     {
         if (!int.TryParse(args.Value?.ToString(), out var parsed))
         {
             return;
         }
 
-        daemonSpawnCounts[daemonId] = Math.Clamp(parsed, 1, 20);
+        daemonSpawnCounts[GetDaemonExpandKey(daemon)] = Math.Clamp(parsed, 1, 20);
     }
 
     private async Task QuickStartCrawling()
@@ -862,12 +890,16 @@
             return;
         }
 
-        if (SpawnGroupId <= 0 && SpawnableDaemons.Count > 0)
+        if (string.IsNullOrWhiteSpace(SpawnTargetKey) && SpawnTargets.Count > 0)
         {
-            SpawnGroupId = SpawnableDaemons[0].Id;
+            SpawnTargetKey = SpawnTargets[0].Key;
         }
 
-        var selectedDaemon = Daemons.FirstOrDefault(group => group.Id == SpawnGroupId);
+        var selectedTarget = SpawnTargets.FirstOrDefault(option => string.Equals(option.Key, SpawnTargetKey, StringComparison.OrdinalIgnoreCase));
+        var selectedDaemon = selectedTarget is null
+            ? null
+            : Daemons.FirstOrDefault(group => group.Id == selectedTarget.GroupId
+                && string.Equals(NormalizeDaemonId(group.DaemonId), selectedTarget.DaemonId, StringComparison.OrdinalIgnoreCase));
         var seeded = 0;
         foreach (var seed in seeds)
         {
@@ -897,9 +929,10 @@
         {
             spawnedWorker = await WorkerService.SpawnWorkerAsync(
                 name: $"Crawler-{DateTime.Now:HHmmss}",
-                daemonGroupId: SpawnGroupId,
+                daemonGroupId: selectedTarget?.GroupId,
                 mode: "thread",
-                seedUrls: null);
+                seedUrls: null,
+                daemonId: selectedTarget?.DaemonId);
 
             if (spawnedWorker == null)
             {
@@ -907,7 +940,7 @@
                 return;
             }
 
-            var started = await WorkerService.StartWorkerAsync(spawnedWorker.Id);
+            var started = await WorkerService.StartWorkerAsync(spawnedWorker.Id, spawnedWorker.DaemonId);
             if (!started)
             {
                 actionStatus = $"Quick Start spawned worker {spawnedWorker.Id} but failed to start it. {WorkerService.LastError}";
@@ -1021,14 +1054,22 @@
 
     private List<WorkerViewModel> GetFilteredWorkersForDaemon(WorkerGroupSettingsViewModel daemon)
     {
+        var daemonId = NormalizeDaemonId(daemon.DaemonId);
         var ids = daemon.WorkerIds?.ToHashSet() ?? new HashSet<int>();
-        return FilteredWorkers.Where(worker => ids.Contains(worker.Id)).ToList();
+        return FilteredWorkers
+            .Where(worker => string.Equals(NormalizeDaemonId(worker.DaemonId), daemonId, StringComparison.OrdinalIgnoreCase))
+            .Where(worker => ids.Contains(worker.Id))
+            .ToList();
     }
 
     private List<WorkerViewModel> GetAllWorkersForDaemon(WorkerGroupSettingsViewModel daemon)
     {
+        var daemonId = NormalizeDaemonId(daemon.DaemonId);
         var ids = daemon.WorkerIds?.ToHashSet() ?? new HashSet<int>();
-        return workerItems.Where(worker => ids.Contains(worker.Id)).ToList();
+        return workerItems
+            .Where(worker => string.Equals(NormalizeDaemonId(worker.DaemonId), daemonId, StringComparison.OrdinalIgnoreCase))
+            .Where(worker => ids.Contains(worker.Id))
+            .ToList();
     }
 
     private static int CountByStatus(IEnumerable<WorkerViewModel> workers, string status)
@@ -1591,22 +1632,35 @@
 
     private readonly record struct WorkerActivity(string IconClass, string Label, string CssClass, bool IsProcessing);
 
-    private void ToggleDaemonExpand(int daemonId)
+    private void ToggleDaemonExpand(WorkerGroupSettingsViewModel daemon)
     {
-        if (!expandedDaemonIds.Add(daemonId))
+        var key = GetDaemonExpandKey(daemon);
+        if (!expandedDaemonIds.Add(key))
         {
-            expandedDaemonIds.Remove(daemonId);
+            expandedDaemonIds.Remove(key);
         }
     }
 
-    private void OpenWorkerDetail(int workerId)
+    private void OpenWorkerDetail(int workerId, string? daemonId = null)
     {
-        Navigation.NavigateTo($"/workers/{workerId}");
+        var normalizedDaemonId = NormalizeDaemonId(daemonId);
+        Navigation.NavigateTo($"/workers/{workerId}?daemonId={Uri.EscapeDataString(normalizedDaemonId)}");
     }
 
-    private void OpenWorkerSection(int workerId, string section)
+    private void OpenWorkerSection(int workerId, string section, string? daemonId = null)
     {
-        Navigation.NavigateTo($"/workers/{workerId}/{section}");
+        var normalizedDaemonId = NormalizeDaemonId(daemonId);
+        Navigation.NavigateTo($"/workers/{workerId}/{section}?daemonId={Uri.EscapeDataString(normalizedDaemonId)}");
+    }
+
+    private static string NormalizeDaemonId(string? daemonId)
+    {
+        return string.IsNullOrWhiteSpace(daemonId) ? "local-default" : daemonId.Trim();
+    }
+
+    private static string GetDaemonExpandKey(WorkerGroupSettingsViewModel daemon)
+    {
+        return $"{NormalizeDaemonId(daemon.DaemonId)}:{daemon.Id}";
     }
 
     public ValueTask DisposeAsync()

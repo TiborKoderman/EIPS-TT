@@ -146,6 +146,25 @@ DB_NAME=crawldb
 
 This is useful when another local PostgreSQL instance already occupies `5432`.
 
+### Split UI vs external daemon channel URLs
+
+You can keep the UI local-only and publish a separate external URL for daemon websocket/ingest registration.
+
+Example runtime binding (UI local on `5160`, external listener on `5161`):
+
+```bash
+ASPNETCORE_URLS="http://127.0.0.1:5160;http://0.0.0.0:5161" dotnet run --project ManagerApp/ManagerApp.csproj
+```
+
+Then set crawler registration URLs so generated daemon scripts use the external endpoint:
+
+```bash
+CrawlerApi__ManagerBaseUrl="http://<public-host>:5161"
+CrawlerApi__ManagerSocketUrl="ws://<public-host>:5161/api/daemon-channel"
+```
+
+This keeps local UI access on `127.0.0.1:5160` while allowing external daemons to connect to the dedicated published endpoint.
+
 For normal local use, prefer the repo wrapper:
 
 ```bash

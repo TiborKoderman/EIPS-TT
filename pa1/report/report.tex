@@ -193,7 +193,7 @@ This design allows multiple workers to operate in parallel while still respectin
 
 \subsection{Frontier concurrency}
 \textbf{Problem:} multiple workers may claim the same URL.\\
-\textbf{Solution:} The workers don't connect to the database directly, this is also a security design to allow workers to run on seperate machines without exposing the database to the networ. Instead the frontier is implemented on the server. When a worker is in a \texit{idle} state, the server deques the highest priority URL, and locks it by updating it's status in the database, this removes it from the frontier candidates.
+\textbf{Solution:} The workers don't connect to the database directly, this is also a security design to allow workers to run on seperate machines without exposing the database to the networ. Instead the frontier is implemented on the server. When a worker is in a \texit{idle} state, the server deques the highest priority URL, and locks it by updating it's status in the database, this removes it from the frontier candidates. To ensure that the queue is fast and responsive, the server maintains an in-memory queue of the urls in the fronntier. The databae table is also indexed by the frontier\_priority and frontier\_next\_fetch\_time, so that the server can quickly find the next available URL to assign to a worker. If a worker fails to fetch a URL, the server can re-enqueue it by updating its status and frontier\_next\_fetch\_time in the database.
 
 \subsection{Duplicate handling}
 \textbf{Problem:} same content may appear under different URLs.\\

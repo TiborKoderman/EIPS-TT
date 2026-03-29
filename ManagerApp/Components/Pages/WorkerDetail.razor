@@ -50,7 +50,7 @@
                 @foreach (var tab in Tabs)
                 {
                     <a class="worker-detail-tab @(IsTabActive(tab.Key) ? "active" : "")"
-                       href="@($"/workers/{WorkerId}/{tab.Key}")"
+                       href="@BuildTabHref(tab.Key)"
                        role="tab"
                        aria-selected="@IsTabActive(tab.Key)">
                         <span class="mdi @tab.Icon"></span>
@@ -193,6 +193,7 @@
 @code {
     [Parameter] public int WorkerId { get; set; }
     [Parameter] public string? Section { get; set; }
+    [SupplyParameterFromQuery(Name = "daemonId")] public string? DaemonId { get; set; }
 
     private WorkerDetailViewModel? workerDetail;
     private List<WorkerLogEntryViewModel> persistedLogs = new();
@@ -218,7 +219,7 @@
         await RefreshDataAsync();
         if (!Tabs.Any(t => string.Equals(t.Key, CurrentSection, StringComparison.OrdinalIgnoreCase)))
         {
-            Navigation.NavigateTo($"/workers/{WorkerId}/overview", replace: true);
+            Navigation.NavigateTo(BuildTabHref("overview"), replace: true);
         }
         isLoading = false;
 
@@ -242,13 +243,13 @@
 
     private async Task RefreshDataAsync()
     {
-        workerDetail = await WorkerService.GetWorkerDetailAsync(WorkerId);
+        workerDetail = await WorkerService.GetWorkerDetailAsync(WorkerId, DaemonId);
         persistedLogs = await WorkerService.GetPersistedWorkerLogsAsync(WorkerId, limit: 120, severity: LogSeverityFilter, search: LogSearch);
         logsUsingFallback = false;
         if (persistedLogs.Count == 0)
         {
             var events = await WorkerService.GetRecentCrawlerEventsAsync(800);
-            persistedLogs = BuildLogsFromCrawlerEvents(events, WorkerId, 120, LogSeverityFilter, LogSearch);
+            persistedLogs = BuildLogsFromCrawlerEvents(events, WorkerId, workerDetail?.Worker.DaemonId ?? DaemonId, 120, LogSeverityFilter, LogSearch);
             logsUsingFallback = persistedLogs.Count > 0;
         }
 
@@ -264,17 +265,30 @@
 
     private async Task StartWorker()
     {
-        await ExecuteWorkerAction("start", () => WorkerService.StartWorkerAsync(WorkerId));
+        var targetDaemon = workerDetail?.Worker.DaemonId ?? DaemonId;
+        await ExecuteWorkerAction("start", () => WorkerService.StartWorkerAsync(WorkerId, targetDaemon));
     }
 
     private async Task PauseWorker()
     {
-        await ExecuteWorkerAction("pause", () => WorkerService.PauseWorkerAsync(WorkerId));
+        var targetDaemon = workerDetail?.Worker.DaemonId ?? DaemonId;
+        await ExecuteWorkerAction("pause", () => WorkerService.PauseWorkerAsync(WorkerId, targetDaemon));
     }
 
     private async Task StopWorker()
     {
-        await ExecuteWorkerAction("stop", () => WorkerService.StopWorkerAsync(WorkerId));
+        var targetDaemon = workerDetail?.Worker.DaemonId ?? DaemonId;
+        await ExecuteWorkerAction("stop", () => WorkerService.StopWorkerAsync(WorkerId, targetDaemon));
+    }
+
+    private string BuildTabHref(string tabKey)
+    {
+        if (string.IsNullOrWhiteSpace(DaemonId))
+        {
+            return $"/workers/{WorkerId}/{tabKey}";
+        }
+
+        return $"/workers/{WorkerId}/{tabKey}?daemonId={Uri.EscapeDataString(DaemonId)}";
     }
 
     private async Task ExecuteWorkerAction(string actionName, Func<Task<bool>> action)
@@ -305,6 +319,7 @@
     private static List<WorkerLogEntryViewModel> BuildLogsFromCrawlerEvents(
         IReadOnlyList<CrawlerEventViewModel> events,
         int workerId,
+        string? daemonId,
         int limit,
         string? severity,
         string? search)
@@ -316,6 +331,8 @@
 
         return events
             .Where(evt => evt.WorkerId == workerId)
+            .Where(evt => string.IsNullOrWhiteSpace(daemonId)
+                || string.Equals(evt.DaemonId, daemonId, StringComparison.OrdinalIgnoreCase))
             .Select(evt =>
             {
                 var level = string.Equals(evt.Type, "error", StringComparison.OrdinalIgnoreCase) ? "Error" : "Info";

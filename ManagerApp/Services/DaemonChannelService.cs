@@ -424,6 +424,16 @@ public sealed class DaemonChannelService
                 return;
             }
 
+            foreach (var worker in payload.Workers)
+            {
+                worker.DaemonId = daemonId;
+            }
+
+            foreach (var group in payload.Groups)
+            {
+                group.DaemonId = daemonId;
+            }
+
             _snapshots[daemonId] = new DaemonSnapshot
             {
                 DaemonId = daemonId,

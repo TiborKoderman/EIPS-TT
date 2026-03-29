@@ -183,6 +183,7 @@ public class CollectedSiteSummaryDto
 public class WorkerViewModel
 {
     public int Id { get; set; }
+    public string DaemonId { get; set; } = "local-default";
     public string Name { get; set; } = "";
     public string Status { get; set; } = "Idle"; // Active, Idle, Paused, Stopped, Error
     public string? StatusReason { get; set; }
@@ -269,6 +270,7 @@ public class SeedEntryViewModel
 public class WorkerGroupSettingsViewModel
 {
     public int Id { get; set; }
+    public string DaemonId { get; set; } = "local-default";
     public string Name { get; set; } = "";
     public string Description { get; set; } = "";
     public bool Enabled { get; set; } = true;

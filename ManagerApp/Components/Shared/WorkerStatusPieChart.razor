@@ -59,6 +59,11 @@
 
     private static string ArcPath(double startAngle, double endAngle, double radius)
     {
+        if (Math.Abs(endAngle - startAngle) >= 359.999)
+        {
+            return $"M 0 {-radius:F3} A {radius:F3} {radius:F3} 0 1 1 0 {radius:F3} A {radius:F3} {radius:F3} 0 1 1 0 {-radius:F3} Z";
+        }
+
         var startRad = Math.PI * startAngle / 180.0;
         var endRad = Math.PI * endAngle / 180.0;
 

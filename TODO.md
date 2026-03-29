@@ -113,6 +113,7 @@ Last rebuilt: 2026-03-26
 - [x] Added Slovenian default keyword translations across crawler/manager defaults and validated a clean ground-up run with default seed + default keywords at 4 concurrent workers.
 - [x] Added release-grade Docker packaging assets (`docker-compose.yml`, bundled server+crawler Dockerfile, GHCR publish workflow, local release script) and updated install/deploy docs.
 - [x] Removed compose-based devcontainer mode and updated root setup docs for host workflows plus local Docker build/run without GHCR publishing.
+- [x] Fixed multi-daemon worker routing in manager UI/services (daemon-aware worker actions/groups/detail links), stabilized daemon panel expand behavior, and fixed full-slice dashboard worker pie chart rendering.
 
 ## Pending follow-ups
 
