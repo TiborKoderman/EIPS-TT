@@ -22,8 +22,8 @@ Programming Assignment 1: Preferential Web Crawler for MedOverNet}
 \maketitle
 
 \section{Introduction}
-In this project, we built a standalone preferential crawler for the MedOverNet domain (\url{https://medover.zurnal24.si/}). The goal is to crawl relevant pages first, respect robots rules, avoid duplicate content, and store crawl data in PostgreSQL using the required crawldb schema.
-% NOTE (code sync): Current runtime is websocket daemon mode only (standalone mode is disabled in pa1/crawler/src/main.py).
+In this project, we built a preferential crawler for the MedOverNet domain (\url{https://medover.zurnal24.si/}). The goal is to crawl relevant pages first, respect robots rules, avoid duplicate content, and store crawl data in PostgreSQL using the required crawldb schema.
+% FACT-CHECK: previous draft described a standalone runtime; current implementation runs websocket daemons coordinated by the manager service.
 
 The crawler is designed as a multi-worker system with a database-backed frontier. Each worker takes one URL, checks robots and politeness limits, downloads or renders the page, detects duplicates, stores the result, extracts new links and images, scores discovered URLs, and pushes them back to the frontier.
 
@@ -32,7 +32,7 @@ The crawler is designed as a multi-worker system with a database-backed frontier
 The crawler processes each URL in the following order:
 \begin{enumerate}
     \item Claim next URL from the frontier.
-    \item If the canonical URL already exists in \texttt{crawldb.page} as \texttt{HTML/BINARY/DUPLICATE}, do not re-download; only insert the \texttt{link} record (from the source page to the already-known target).
+    \item On ingest, resolve canonical URL and reuse existing page records when available; at minimum, persist the \texttt{link} edge from source to target and avoid duplicate page rows.
     \item Check robots rules and enforce politeness delay.
     \item Download content (or render with headless browser when needed).
     \item Detect exact duplicates using content hash.
@@ -44,16 +44,14 @@ The crawler processes each URL in the following order:
 \subsection{Main components}
 The implementation is split into clear modules:
 \begin{itemize}
-    \item Worker orchestration and crawl loop: \texttt{scheduler.py}, \texttt{run\_crawler.py}.
-    \item Frontier and page persistence: \texttt{frontier\_store.py}, \texttt{page\_store.py}.
-    \item Downloader and renderer: \texttt{downloader.py}, \texttt{renderer.py}.
-    \item Parsing links and images: \texttt{parser.py}.
-    \item Canonicalization and dedup utils: \texttt{url\_canonicalizer.py}, \texttt{dedup.py}.
-    \item Robots and politeness: \texttt{robots.py}, \texttt{politeness.py}.
+    \item Worker orchestration and daemon control plane: \texttt{pa1/crawler/src/api/worker\_service.py}, \texttt{reverse\_channel.py}, \texttt{main.py}.
+    \item Manager-side queue ownership and leases: \texttt{ManagerApp/Services/FrontierService.cs} and authenticated frontier endpoints.
+    \item Crawler ingest and persistence integration: \texttt{ManagerApp/Services/CrawlerRelayService.cs}.
+    \item Downloader and renderer: \texttt{pa1/crawler/src/core/downloader.py}, \texttt{renderer.py}.
+    \item Parsing links and images: \texttt{pa1/crawler/src/core/parser.py}.
+    \item Canonicalization, relevance, and robots/politeness: \texttt{url\_canonicalizer.py}, \texttt{relevance.py}, \texttt{robots.py}.
 \end{itemize}
-% NOTE (code sync): Several file names above are legacy labels (for example scheduler.py, run_crawler.py, frontier_store.py, page_store.py).
-% NOTE (code sync): Current implementation is centered around pa1/crawler/src/api/* (worker_service.py, reverse_channel.py)
-% NOTE (code sync): and pa1/crawler/src/core/* (frontier.py, parser.py, relevance.py, downloader.py, renderer.py, etc.).
+% FACT-CHECK: legacy labels (scheduler.py/frontier_store.py/page_store.py) were removed in favor of api/core modules.
 
 \subsection{Frontier queue semantics}
 The URL frontier is implemented in a dedicated table, \texttt{crawldb.frontier\_queue}, rather than in \texttt{crawldb.page}.
@@ -71,21 +69,31 @@ Completion reports map worker outcomes to terminal states, while retry outcomes 
 in-memory per-daemon/per-site cooldowns (minimum 5\,s), not through a \texttt{frontier\_next\_fetch\_time} column.
 
 \subsection{Division of work}
-\textbf{Implemented in this part of the report draft:}
+We divided the implementation into three balanced workstreams and integrated all parts jointly in the final branch.
+
+\textbf{Tibor Koderman: architecture, database evolution, and manager platform}
 \begin{itemize}
-    \item robots.txt support (\texttt{robots.py}),
-    \item per-IP politeness/rate limiting (\texttt{politeness.py}),
-    \item downloader (\texttt{downloader.py}),
-    \item headless renderer (\texttt{renderer.py}),
-    \item content-type classification and CLI test hooks (\texttt{main.py}, \texttt{config.py}).
+    \item base architecture integration and migration from direct crawler-DB coupling to server-owned queue flow,
+    \item crawldb upgrade/migration work and operational scripts,
+    \item deduplication integration in ingestion/persistence,
+    \item multi-worker upgrade to manager-coordinated server mode,
+    \item manager-side stats, analysis views, and visualization features.
 \end{itemize}
 
-\textbf{Implemented by teammate (integrated architecture context):}
+\textbf{Jerneja Krajcar: parsing/frontier and crawl-strategy stream}
 \begin{itemize}
-    \item DB-backed frontier and worker loop orchestration,
-    \item parser for links/images and URL normalization,
-    \item relevance scoring and preferential URL ordering,
-    \item exact hash dedup integration in persistence layer.
+    \item parsing-dev branch work for link/image extraction and parser integration,
+    \item frontier queue strategy material and related implementation refinements,
+    \item preferential crawling and frontier documentation/validation updates,
+    \item branch-level fixes and consolidation work merged into the final flow.
+\end{itemize}
+
+\textbf{Dino Džaferagić: fetch/render and crawler-runtime stream}
+\begin{itemize}
+    \item downloader and renderer baseline implementation and testing,
+    \item robots/rate-limiting foundations and runtime behavior improvements,
+    \item crawler-side content-type handling and binary metadata handling groundwork,
+    \item report drafting inputs, example collection, and final-text iteration support.
 \end{itemize}
 
 \section{Preferential crawling strategy}
@@ -132,8 +140,6 @@ The implementation uses a thread-safe per-IP limiter. Effective delay is:
 
 This design allows parallel workers while still respecting per-target pacing.
 
-\textbf{PLACEHOLDER (final report):} insert one short robots compliance example from logs (allowed URL, disallowed URL, applied delay).
-
 \section{Downloader, renderer, and content-type handling}
 \subsection{HTTP downloader}
 The downloader uses \texttt{requests} with crawler user-agent and timeout settings from configuration. It follows redirects and stores status code and final URL.
@@ -146,7 +152,7 @@ The crawler distinguishes HTML and binary resources:
 \begin{itemize}
     \item HTML: stored in \texttt{page.html\_content}, \texttt{page\_type = HTML}
     \item PDF: supported as optional binary download, otherwise metadata-only
-    \item DOC/DOCX/PPT/PPTX: metadata listed in \texttt{page\_data}, no binary payload required
+    \item DOC/DOCX/PPT/PPTX: tracked through \texttt{page\_data} metadata (binary payload optional and configuration-gated)
     \item other non-HTML resources: marked as \texttt{BINARY}
 \end{itemize}
 
@@ -176,7 +182,7 @@ If the content hash already exists:
 Crawler behavior is controlled by configuration variables. Main parameters include:
 \begin{itemize}
     \item number of workers,
-    \item crawler user-agent (\texttt{fri-wier-\{GROUP\_NAME\}}),
+    \item crawler user-agent (configured as \texttt{fri-wier-T}),
     \item minimum delay (must remain $\geq 5$ s),
     \item robots timeout,
     \item download timeout,
@@ -184,21 +190,20 @@ Crawler behavior is controlled by configuration variables. Main parameters inclu
     \item optional PDF download flag.
 \end{itemize}
 
-The command-line entry point in \texttt{main.py} was used to test:
+The runtime behavior was validated with integration scripts and manager/crawler service runs:
 \begin{itemize}
     \item robots checks and effective delay behavior,
     \item downloader behavior for HTML/PDF cases,
-    \item renderer output size difference on dynamic pages.
+    \item renderer output differences on dynamic pages,
+    \item frontier claim/complete/requeue and ingest dedupe behavior.
 \end{itemize}
-% NOTE (code sync): Current \texttt{pa1/crawler/src/main.py} is a websocket daemon entrypoint; ad-hoc CLI test hooks should be documented via dedicated scripts/modules if used.
-
-\textbf{PLACEHOLDER (final report):} include final parameter table used for the 5000-page crawl run.
+% FACT-CHECK: \texttt{main.py} is websocket-daemon entrypoint in current code, not a standalone test CLI.
 
 \section{Problems and solutions}
 \subsection{Robots and ethical crawling}
 \textbf{Problem:} parallel workers can violate politeness if delays are not shared.\\
-\textbf{Solution:} server-side per IP locking and queue delagation, the shared queue holds timeouts for the next allowed fetch of each origin, when a worker requests a deque, and the server returns the highest priority URL that is not timed out, and adds it to the timeout list until the next allowed fetch time.
-This design allows multiple workers to operate in parallel while still respecting per-origin crawl delays. The new problem is that workers on different IPs are rate limited by the same delay, but this is a necessary tradeoff for ethical crawling. The other easy solution would just be to just do proxy switching, but this is not ethical.
+\textbf{Solution:} server-side politeness scheduling is applied per crawler/site identity before assigning work. Workers claim URLs through manager APIs, and the manager enforces minimum cooldown (and robots-derived delay when available) before a URL can be leased.
+This design allows parallel workers while preserving ethical pacing for target origins.
 
 \subsection{Dynamic content}
 \textbf{Problem:} some links/content are injected by JavaScript.\\
@@ -206,9 +211,9 @@ This design allows multiple workers to operate in parallel while still respectin
 
 \subsection{Frontier concurrency}
 \textbf{Problem:} multiple workers may claim the same URL.\\
-\textbf{Solution:} The workers don't connect to the database directly, this is also a security design to allow workers to run on seperate machines without exposing the database to the networ. Instead the frontier is implemented on the server. When a worker is in a \textit{idle} state, the server deques the highest priority URL, and locks it by updating it's status in the database, this removes it from the frontier candidates. To ensure that the queue is fast and responsive, the server maintains an in-memory queue of the urls in the fronntier. The databae table is also indexed by the frontier\_priority and frontier\_next\_fetch\_time, so that the server can quickly find the next available URL to assign to a worker. If a worker fails to fetch a URL, the server can re-enqueue it by updating its status and frontier\_next\_fetch\_time in the database.
-% NOTE (code sync): Current DB claim path uses \texttt{FOR UPDATE SKIP LOCKED} and lease fields (\texttt{locked_at}, \texttt{locked_by_worker_id}) in \texttt{crawldb.frontier_queue}.
-% NOTE (code sync): Current primary queue index is state + priority DESC + discovered_at ASC; \texttt{frontier_next_fetch_time} is not part of the schema.
+\textbf{Solution:} workers do not query PostgreSQL directly. They request leases from manager frontier endpoints, while the manager performs atomic claims in \texttt{crawldb.frontier\_queue} using \texttt{FOR UPDATE SKIP LOCKED} and lease columns (\texttt{locked\_at}, \texttt{locked\_by\_worker\_id}).
+On completion/failure, manager updates terminal or retry states via lease token validation.
+% FACT-CHECK: previous text referenced \texttt{frontier_next_fetch_time}/\texttt{frontier_priority}; current schema uses enum state + priority + discovered_at ordering.
 
 \subsection{Duplicate handling}
 \textbf{Problem:} same content may appear under different URLs.\\
@@ -245,10 +250,10 @@ The seed-domain subset below refers to \texttt{medover.zurnal24.si}.
     \begin{tabular}{@{}lll@{}}
         \toprule
         Metric                       & Seed domain (MedOverNet) & Full crawldb \\ \midrule
-        Number of sites              & 1                         & 174 \\
+        Number of sites              & 1                         & 280 \\
         Number of HTML pages         & 36                        & 1001 \\
         Number of duplicates         & 0                         & 27 \\
-        Number of binary pages       & 583                       & 16767 \\
+        Number of binary pages       & 583                       & 16786 \\
         Number of images             & 807                       & 37210 \\
         Average images per HTML page & 22.42                     & 37.17 \\ \bottomrule
     \end{tabular}%
@@ -269,7 +274,7 @@ The seed-domain subset below refers to \texttt{medover.zurnal24.si}.
     \end{tabular}
 \end{table}
 
-In this specific snapshot, document counters are still zero after the fix because the collected binary corpus is dominated by image/media URLs rather than PDF/DOC/DOCX/PPT/PPTX resources.
+In this specific snapshot, document counters are low (PDF=19, other office types currently 0), while the binary corpus remains heavily image/media dominated.
 
 \subsection{Manager dashboard overview}
 Figure~\ref{fig:dashboard_overview} shows the aggregate crawl status and live worker/frontier monitoring.
@@ -302,7 +307,7 @@ Figure~\ref{fig:collected_pages_view} shows collected page entries and metadata 
 \end{figure}
 
 \subsection{Relevance results}
-We calculaculaed the final relevance report by running the crawler overnight and evaluating the top 5000 scored pages in the database. This approach is is not the most accurate way to estimate the results, as it has certain untracked variables, like run time, crawl budget, and the fact that the relevance report is not based on a random sample of the crawled pages, but on the top scored pages. However, it is a good way to get an estimate of the relevance of the collected pages, and to see how well the crawler is able to prioritize relevant content.
+We calculated the final relevance report by evaluating the top 5000 scored pages in the database. This estimate is not a random-sample measurement and depends on crawl budget/runtime, but it provides a practical signal of how well preferential ordering surfaces domain-relevant pages.
 For the Assignment 1 relevance target sample, the manager report shows:
 \begin{itemize}
     \item top scored sample / target: 5000 / 5000,
@@ -330,6 +335,6 @@ The cross-domain link graph is shown in Figure~\ref{fig:link_graph}.
 
 \section{Conclusion}
 We implemented and validated a preferential crawler pipeline with robots compliance, politeness enforcement, deduplication, queue-based worker coordination, and database persistence.
-The final crawl snapshot contains 1001 HTML pages, 27 exact duplicates, and 37210 images across 174 sites, while the relevance report reached the 5000/5000 target sample with 1668 estimated relevant pages (33.4\%).
+The final crawl snapshot contains 1001 HTML pages, 27 exact duplicates, and 37210 images across 280 sites, while the relevance report reached the 5000/5000 target sample with 1668 estimated relevant pages (33.4\%).
 
 \end{document}

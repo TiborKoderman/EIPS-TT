@@ -10,7 +10,7 @@ from dataclasses import dataclass
 class CrawlerConfig:
     """Crawler configuration loaded from environment."""
 
-    user_agent: str = "fri-wier-IME-GRUPE"
+    user_agent: str = "fri-wier-T"
     workers: int = 4
     min_request_interval_seconds: float = 5.0
     robots_timeout_seconds: float = 15.0
@@ -40,7 +40,7 @@ class CrawlerConfig:
 def load_crawler_config() -> CrawlerConfig:
     """Load crawler config from environment variables."""
     return CrawlerConfig(
-        user_agent=os.getenv("CRAWLER_USER_AGENT", "fri-wier-EIPS-TT"),
+        user_agent=os.getenv("CRAWLER_USER_AGENT", "fri-wier-T"),
         workers=int(os.getenv("CRAWLER_WORKERS", "4")),
         min_request_interval_seconds=float(
             os.getenv("CRAWLER_MIN_DELAY", "5")),
