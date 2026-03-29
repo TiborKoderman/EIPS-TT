@@ -71,6 +71,35 @@ cd /home/tibor/Repos/EIPS-TT
 
 5. Open `http://127.0.0.1:5160`.
 
+## Docker Server Setup
+
+Two containerized manager run modes are available:
+
+1. `ManagerApp/Dockerfile`:
+  - manager server only
+2. `ManagerApp/Dockerfile.server-crawler`:
+  - manager server plus bundled crawler runtime (python + `pa1/crawler`)
+
+Recommended deployment uses the bundled mode via compose profile `server`:
+
+```bash
+cd /home/tibor/Repos/EIPS-TT
+docker compose --profile server up -d manager db
+```
+
+The server listens on `http://127.0.0.1:5175` in this mode.
+
+To also run an external crawler container against manager:
+
+```bash
+docker compose --profile server --profile crawler up -d manager crawler db
+```
+
+For GHCR images, the publish workflow writes:
+
+- `ghcr.io/<owner>/eips-tt-server-crawler`
+- `ghcr.io/<owner>/eips-tt-crawler`
+
 ## Recommended VS Code Dev Workflow
 
 Use the dedicated ManagerApp tasks/debug profile to avoid port conflicts and keep one shared dev server:

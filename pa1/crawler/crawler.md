@@ -47,9 +47,15 @@ Queue behavior options (daemon-side):
 ## Default Crawl Presets
 
 - Default seed preset enables `https://medover.zurnal24.si/` and keeps other starter seeds disabled by default.
-- Default relevance keywords keep medical terms and include additional fitness terms (`fitness`, `fitnes`, `exercise`, `training`, `workout`, `wellness`, `nutrition`, `prehrana`, `vadba`).
+- Default relevance keywords include English + Slovenian medical/fitness terms (for example `medicine`, `medicina`, `health`, `zdravje`, `doctor`, `zdravnik`, `hospital`, `bolnisnica`, `fitness`, `fitnes`, `exercise`, `telovadba`, `training`, `trening`, `nutrition`, `prehrana`, `workout`, `vadba`).
 - Manager-generated daemon scripts export both `MANAGER_DAEMON_WS_TOKEN` and `MANAGER_INGEST_API_TOKEN` for consistent authenticated relay.
 - Worker politeness enforces a hard minimum 5s per-IP delay (`max(5s, configured, robots, group-rate)`), and reported robots/effective delay values are relayed to manager ingest.
+
+## Docker Packaging and Release
+
+- Crawler image is built from `pa1/crawler/Dockerfile`.
+- Release target image: `ghcr.io/<owner>/eips-tt-crawler`.
+- GitHub workflow `.github/workflows/docker-release.yml` publishes crawler image on `master` and `v*` tags.
 
 ## Execution Architecture
 

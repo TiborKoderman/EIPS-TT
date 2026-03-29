@@ -1,151 +1,154 @@
-# EIPS-TT - Preferential Crawler (PA1)
+# EIPS-TT
 
-## Manager GUI Docs
+Preferential crawler project with a Blazor manager (`ManagerApp`) and websocket crawler daemon (`pa1/crawler`).
 
-For setup and operation of the Blazor manager app, see [ManagerApp/README.md](ManagerApp/README.md).
+## Components
 
-Single-compose setup with two modes:
-- host mode: local `.venv` + `db` service
-- devcontainer mode: `app` + `db` services
+- `ManagerApp`: server UI + control plane + queue ownership
+- `pa1/crawler`: websocket daemon and worker runtime
+- `db/migrations`: PostgreSQL schema/migrations
 
-`docker-compose.yml` is shared by both modes. If you only want host mode, do not start `app`.
-
-## Recommended Workflow
+## Local Installation (Normal Host Mode)
 
 ```bash
-# restore python env from requirements.txt
-bash scripts/venv-restore.sh
-
-# start postgres and apply migrations
-bash scripts/db-migrate.sh
+cd /home/tibor/Repos/EIPS-TT
+bash scripts/bootstrap.sh
+bash scripts/db-info.sh
+bash scripts/run-manager.sh
 ```
 
-When dependencies change:
+Open the manager at `http://127.0.0.1:5160` (or `ASPNETCORE_URLS` override).
+
+### Manual `.venv` restore
+
+Use this when you need to rebuild Python dependencies manually:
 
 ```bash
-# save current .venv packages back to requirements.txt
-bash scripts/venv-dump.sh
-```
-
-## Host Mode (No Devcontainer)
-
-```bash
+cd /home/tibor/Repos/EIPS-TT
 bash scripts/venv-restore.sh
 source .venv/bin/activate
-docker compose up -d db
-bash scripts/db-migrate.sh
-python pa1/crawler/src/db/pg_connect.py
 ```
 
-## Devcontainer Mode (Optional)
+### Start ManagerApp in dev mode with dotnet
 
-1. Open this repository folder in VS Code.
-2. Run `Dev Containers: Rebuild and Reopen in Container`.
-3. The container uses `/usr/local/bin/python`, while host mode uses `.venv/bin/python`.
-
-Both interpreter paths are only active in their own context.
-
-Non-VS Code equivalent (for quick container checks):
+Using script wrapper (recommended):
 
 ```bash
-docker compose --profile devcontainer up -d app
+cd /home/tibor/Repos/EIPS-TT
+ASPNETCORE_ENVIRONMENT=Development ASPNETCORE_URLS=http://127.0.0.1:5175 bash scripts/run-manager.sh
 ```
 
-## Database Connection
-
-The repo does not assume `5432` is free. On first bootstrap it picks an available host port,
-stores it in `.env.local`, and publishes PostgreSQL there.
-
-The normal local workflow is:
+Direct `dotnet run` command:
 
 ```bash
-./scripts/bootstrap.sh
-./scripts/db-info.sh
-./scripts/run-manager.sh
+cd /home/tibor/Repos/EIPS-TT
+ASPNETCORE_ENVIRONMENT=Development dotnet run --project ManagerApp/ManagerApp.csproj --urls http://127.0.0.1:5175
 ```
 
-`./scripts/db-info.sh` prints the exact `Host`, `Port`, `Database`, `Username`, and `Password`
-to use from DBeaver or any other external DB tool.
-
-On this machine right now the repo DB is on `localhost:5433`, not `5432`, because `5432`
-was already occupied by another local PostgreSQL instance.
-
-## Utility Commands
+## Ground-Up Reset
 
 ```bash
-# full setup shortcut (.venv + db + migrations)
+cd /home/tibor/Repos/EIPS-TT
+bash scripts/reset-db.sh --clean
 bash scripts/bootstrap.sh
-
-# reset schema, then re-apply migrations
-bash scripts/reset-db.sh
-
-# full DB reset (drops compose volumes), then re-apply migrations
-bash scripts/reset-db.sh --clean
-
-# print the exact external PostgreSQL connection settings and verify them
-bash scripts/db-info.sh
-
-# db logs
-docker compose logs -f db
+bash scripts/run-manager.sh
 ```
 
-## Daemon Control Plane
+## Current Crawl Defaults
 
-The current architecture is:
+- default enabled seed: `https://medover.zurnal24.si/`
+- websocket preset/default run target: `4` concurrent workers
+- topic keywords include medical + fitness English and Slovenian translations
+- worker/server politeness enforces minimum 5s and extends via robots-reported delay
 
-- manager server hosts the HTTP and websocket control plane
-- daemons are client-only processes that connect outbound to the manager
-- workers live under a daemon; workers do not host their own web servers
-- local development auto-starts one default local daemon from `ManagerApp`
+## Docker Setup (Local, No Publishing Required)
 
-That means you should not expect a daemon HTTP API on `127.0.0.1:8090`.
-The manager listens on `http://127.0.0.1:5160` by default, and the local daemon connects to:
+`docker-compose.yml` now includes:
 
-- manager websocket endpoint: `/api/daemon-channel`
-- manager ingest endpoint: `/api/crawler/ingest`
-- manager events endpoint: `/api/crawler/events`
+- `db` (always available for host scripts)
+- `manager` profile (`server`): packaged server+crawler image
+- `crawler` profile (`crawler`): standalone crawler image connecting to manager
 
-For normal local development, just run:
+### Build both images locally
 
 ```bash
-./scripts/run-manager.sh
+cd /home/tibor/Repos/EIPS-TT
+docker compose --profile server --profile crawler build manager crawler
 ```
 
-If you need to start a daemon manually for debugging, point it at the manager websocket:
+### Start DB only
 
 ```bash
-CRAWLER_DAEMON_ID=local-default \
-MANAGER_DAEMON_WS_URL=ws://127.0.0.1:5160/api/daemon-channel?daemonId=local-default \
-.venv/bin/python pa1/crawler/src/main.py
+docker compose up -d db
 ```
 
-Because the daemon initiates the connection, the daemon host does not need inbound port forwarding.
-The manager/server side still needs to be reachable.
-
-### Command dispatch path
-
-Manager command actions (`start/pause/stop/reload`) are written to `manager.command` as queued rows.
-A background dispatcher in `ManagerApp` sends queued commands over websocket to connected daemons, then marks them as dispatched.
-
-Control flow:
-
-1. UI/API action inserts queued command in `manager.command`
-2. `CommandDispatchHostedService` polls queue
-3. `DaemonChannelService` pushes command over `/api/daemon-channel`
-4. Daemon executes command and reports via heartbeat/status APIs
-
-## Optional Devcontainer Notes
-
-See `.devcontainer/NOTE.md`.
-
-## Docker Volume Upgrade Note
-
-If `postgres:latest` starts crash-looping with a message about existing data in
-`/var/lib/postgresql`, the repo's Docker volume was created with an older Postgres image layout.
-Run this repo-local reset once:
+### Apply database migrations
 
 ```bash
-bash scripts/reset-db.sh --clean
+cd /home/tibor/Repos/EIPS-TT
+bash scripts/db-migrate.sh
 ```
 
-That recreates only this compose stack's database volume and keeps the project on `postgres:latest`.
+### Start packaged server+crawler locally
+
+```bash
+docker compose --profile server up -d manager db
+```
+
+Server is exposed at `http://127.0.0.1:5175` by default.
+If port `5175` is already in use, set a host override:
+
+```bash
+MANAGER_HOST_PORT=5177 docker compose --profile server up -d manager db
+```
+
+### Start server + external crawler container locally
+
+```bash
+docker compose --profile server --profile crawler up -d manager crawler db
+```
+
+### Inspect status and logs
+
+```bash
+docker compose ps
+docker compose logs --tail=200 manager
+docker compose logs --tail=200 crawler
+```
+
+### Stop local docker runtime
+
+```bash
+docker compose --profile server --profile crawler down
+```
+
+## Docker Images
+
+- crawler image: `ghcr.io/<owner>/eips-tt-crawler`
+- combined server+crawler image: `ghcr.io/<owner>/eips-tt-server-crawler`
+
+## Publishing Docker Images to GitHub (GHCR)
+
+### Automated release
+
+Workflow: `.github/workflows/docker-release.yml`
+
+- pushes on `master`
+- pushes on tags `v*`
+- supports manual `workflow_dispatch`
+
+### Local/manual build and publish
+
+```bash
+cd /home/tibor/Repos/EIPS-TT
+GHCR_OWNER=<github-owner> bash scripts/docker-release.sh v0.1.0
+GHCR_OWNER=<github-owner> PUSH=1 bash scripts/docker-release.sh v0.1.0
+```
+
+If `PUSH=1` is set, the script pushes both images to GHCR.
+
+## Additional Module Docs
+
+- manager details: [ManagerApp/README.md](ManagerApp/README.md)
+- crawler runtime details: [pa1/crawler/crawler.md](pa1/crawler/crawler.md)
+- daemon state semantics: [docs/daemon-worker-runtime.md](docs/daemon-worker-runtime.md)
