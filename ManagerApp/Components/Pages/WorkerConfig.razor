@@ -1,0 +1,649 @@
+@page "/workers/config"
+@using ManagerApp.Models
+@using ManagerApp.Services
+@inject IWorkerService WorkerService
+@inject IConfiguration Configuration
+@inject NavigationManager Navigation
+
+<div class="page-header">
+    <div class="page-header-main">
+        <div>
+            <h1 class="page-title">Worker Global Config</h1>
+            <p class="page-subtitle">Default settings shared across all workers</p>
+        </div>
+        <a class="btn" href="/workers/groups">
+            <span class="mdi mdi-account-group"></span>
+            Daemons
+        </a>
+    </div>
+</div>
+
+<div class="page-body">
+    @if (isLoading)
+    {
+        <div class="card"><p>Loading configuration...</p></div>
+    }
+    else if (config == null)
+    {
+        <div class="card"><p class="text-muted">Unable to load worker configuration.</p></div>
+    }
+    else
+    {
+        <div class="card mb-lg">
+            <h2 class="card-title">Defaults</h2>
+            <div class="flex items-center gap-sm mb-sm">
+                <button class="btn" type="button" @onclick="ApplyWebsocketPreset">
+                    <span class="mdi mdi-flask-outline"></span>
+                    Apply Websocket Daemon Preset
+                </button>
+            </div>
+            <div class="workers-config-grid">
+                <label>
+                    <span class="text-small text-muted">Max Concurrent Workers</span>
+                    <input type="number" min="1" @bind="config.MaxConcurrentWorkers" />
+                </label>
+                <label>
+                    <span class="text-small text-muted">Request Timeout (seconds)</span>
+                    <input type="number" min="1" @bind="config.RequestTimeoutSeconds" />
+                </label>
+                <label>
+                    <span class="text-small text-muted">Crawl Delay (ms)</span>
+                    <input type="number" min="0" @bind="config.CrawlDelayMilliseconds" />
+                </label>
+                <label>
+                    <span class="text-small text-muted">User Agent</span>
+                    <input type="text" @bind="config.UserAgent" />
+                </label>
+                <label>
+                    <span class="text-small text-muted">Queue Mode</span>
+                    <input type="text" value="Server (manager-owned frontier)" readonly />
+                </label>
+                <label>
+                    <span class="text-small text-muted">Strategy Mode</span>
+                    <select @bind="config.StrategyMode">
+                        <option value="balanced">Balanced</option>
+                        <option value="coverage">Coverage</option>
+                        <option value="focused">Focused</option>
+                        <option value="freshness">Freshness</option>
+                    </select>
+                </label>
+                <label>
+                    <span class="text-small text-muted">Max Frontier In-Memory</span>
+                    <input type="number" min="100" step="100" @bind="config.MaxFrontierInMemory" />
+                </label>
+            </div>
+
+            <label class="mt-md">
+                <span class="text-small text-muted">Default Seed URLs (one per line)</span>
+                <textarea rows="5" @bind="config.SeedUrlsText"></textarea>
+            </label>
+
+            <div class="mt-md">
+                <div class="flex items-center justify-between gap-sm mb-sm">
+                    <span class="text-small text-muted">Seed List (enabled rows are active)</span>
+                    <div class="flex gap-sm">
+                        <button class="btn" type="button" @onclick="AddSeedRow">
+                            <span class="mdi mdi-plus"></span> Add Seed
+                        </button>
+                        <button class="btn" type="button" @onclick="GenerateRecommendedSeeds">
+                            <span class="mdi mdi-lightbulb-on-outline"></span> Generate Sensible Seeds
+                        </button>
+                    </div>
+                </div>
+                @if (config.SeedEntries.Count == 0)
+                {
+                    <p class="text-small text-muted">No seed entries configured.</p>
+                }
+                else
+                {
+                    <div class="list">
+                        @for (var i = 0; i < config.SeedEntries.Count; i++)
+                        {
+                            var seed = config.SeedEntries[i];
+                            var index = i;
+                            <div class="list-item">
+                                <div class="workers-config-grid" style="grid-template-columns: 100px 1fr 1fr 42px;">
+                                    <label class="flex items-center gap-sm" style="margin:0;">
+                                        <input type="checkbox" @bind="seed.Enabled" style="width:auto;" />
+                                        <span>Enabled</span>
+                                    </label>
+                                    <label style="margin:0;">
+                                        <span class="text-small text-muted">URL</span>
+                                        <input type="text" @bind="seed.Url" />
+                                    </label>
+                                    <label style="margin:0;">
+                                        <span class="text-small text-muted">Label</span>
+                                        <input type="text" @bind="seed.Label" />
+                                    </label>
+                                    <button class="btn btn-icon" type="button" title="Remove" aria-label="Remove" @onclick="() => RemoveSeedRow(index)">
+                                        <span class="mdi mdi-delete-outline"></span>
+                                    </button>
+                                </div>
+                            </div>
+                        }
+                    </div>
+                }
+            </div>
+
+            <label class="mt-md">
+                <span class="text-small text-muted">Topic Keywords (one per line)</span>
+                <textarea rows="5" @bind="config.TopicKeywordsText"></textarea>
+            </label>
+
+            <div class="workers-config-grid mt-md">
+                <label>
+                    <span class="text-small text-muted">Relevance Same Host Boost</span>
+                    <input type="number" min="0" step="0.1" @bind="config.RelevanceSameHostBoost" />
+                </label>
+                <label>
+                    <span class="text-small text-muted">Relevance Allowed Suffix Boost</span>
+                    <input type="number" min="0" step="0.1" @bind="config.RelevanceAllowedSuffixBoost" />
+                </label>
+                <label>
+                    <span class="text-small text-muted">Relevance Keyword Boost</span>
+                    <input type="number" min="0" step="0.1" @bind="config.RelevanceKeywordBoost" />
+                </label>
+                <label>
+                    <span class="text-small text-muted">Relevance Depth Penalty</span>
+                    <input type="number" min="0" step="0.01" @bind="config.RelevanceDepthPenalty" />
+                </label>
+            </div>
+
+            <label class="mt-md">
+                <span class="text-small text-muted">Allowed Domain Suffixes For Relevance (one per line)</span>
+                <textarea rows="4" @bind="config.RelevanceAllowedDomainSuffixesText"></textarea>
+            </label>
+
+            <label class="mt-md flex items-center gap-sm">
+                <input type="checkbox" @bind="config.RespectRobotsTxt" style="width:auto;" />
+                <span>Respect robots.txt</span>
+            </label>
+
+            <label class="mt-md flex items-center gap-sm">
+                <input type="checkbox" @bind="config.AvoidDuplicatePathsAcrossDaemons" style="width:auto;" />
+                <span>Avoid duplicate paths across daemons</span>
+            </label>
+
+            <div class="mt-md flex gap-sm">
+                <button class="btn btn-primary" @onclick="SaveConfig">
+                    <span class="mdi mdi-content-save"></span>
+                    Save Defaults
+                </button>
+                @if (!string.IsNullOrWhiteSpace(statusMessage))
+                {
+                    <span class="text-small text-muted">@statusMessage</span>
+                }
+            </div>
+        </div>
+
+        <div class="placeholder-note">
+            <div class="placeholder-note-title">
+                <span class="mdi mdi-information-outline"></span> Integration note
+            </div>
+            <ul class="placeholder-note-list">
+                <li>Websocket daemon mode uses manager-owned frontier queueing, scheduling, and command dispatch.</li>
+                <li>Strategy mode tunes crawler behavior for coverage, freshness, focused crawling, or balanced operation.</li>
+            </ul>
+        </div>
+
+        <div class="card mt-md">
+            <h2 class="card-title">Daemon Start/Registration Script</h2>
+            <p class="text-small text-muted mb-sm">
+                Use this script on a worker host to start crawler websocket mode and register with this manager.
+            </p>
+            <div class="workers-config-grid">
+                <label>
+                    <span class="text-small text-muted">Command Format</span>
+                    <select @bind="daemonCommandFormat">
+                        <option value="bash">Bash</option>
+                        <option value="docker">Docker</option>
+                    </select>
+                </label>
+                <label>
+                    <span class="text-small text-muted">Daemon ID</span>
+                    <input type="text" @bind="daemonIdOverride" placeholder="local-default" />
+                </label>
+                <label>
+                    <span class="text-small text-muted">Manager IP / URL</span>
+                    <input type="text" @bind="managerEndpointOverride" placeholder="http://127.0.0.1:5175" />
+                </label>
+                <label>
+                    <span class="text-small text-muted">Channel Token (auto-generated if empty)</span>
+                    <input type="text" @bind="daemonTokenOverride" placeholder="Bearer token configured in manager" />
+                </label>
+            </div>
+            <label>
+                <span class="text-small text-muted">Generated Script</span>
+                <textarea rows="8" readonly>@daemonStartScript</textarea>
+            </label>
+            <div class="mt-sm flex gap-sm">
+                <button class="btn" type="button" @onclick="RefreshDaemonStartScript">
+                    <span class="mdi mdi-refresh"></span> Refresh Script
+                </button>
+            </div>
+        </div>
+    }
+</div>
+
+@code {
+    private WorkerGlobalConfigViewModel? config;
+    private bool isLoading = true;
+    private string? statusMessage;
+    private string daemonStartScript = string.Empty;
+    private string daemonCommandFormat = "bash";
+    private string daemonIdOverride = string.Empty;
+    private string managerEndpointOverride = string.Empty;
+    private string daemonTokenOverride = string.Empty;
+    private string generatedDaemonToken = string.Empty;
+
+    protected override async Task OnInitializedAsync()
+    {
+        config = await WorkerService.GetGlobalConfigAsync();
+        if (config != null)
+        {
+            if (string.IsNullOrWhiteSpace(config.TopicKeywordsText) && config.TopicKeywords.Count > 0)
+            {
+                config.TopicKeywordsText = string.Join("\n", config.TopicKeywords);
+            }
+
+            if (string.IsNullOrWhiteSpace(config.RelevanceAllowedDomainSuffixesText) && config.RelevanceAllowedDomainSuffixes.Count > 0)
+            {
+                config.RelevanceAllowedDomainSuffixesText = string.Join("\n", config.RelevanceAllowedDomainSuffixes);
+            }
+
+            if (config.SeedEntries.Count == 0 && !string.IsNullOrWhiteSpace(config.SeedUrlsText))
+            {
+                config.SeedEntries = config.SeedUrlsText
+                    .Split(new[] { '\r', '\n' }, StringSplitOptions.RemoveEmptyEntries)
+                    .Select(url => new SeedEntryViewModel
+                    {
+                        Url = url.Trim(),
+                        Enabled = true,
+                        Label = string.Empty,
+                    })
+                    .Where(entry => !string.IsNullOrWhiteSpace(entry.Url))
+                    .ToList();
+            }
+        }
+
+        RefreshDaemonStartScript();
+        isLoading = false;
+    }
+
+    private async Task SaveConfig()
+    {
+        if (config == null)
+        {
+            return;
+        }
+
+        config.SeedEntries = config.SeedEntries
+            .Where(entry => !string.IsNullOrWhiteSpace(entry.Url))
+            .Select(entry => new SeedEntryViewModel
+            {
+                Url = entry.Url.Trim(),
+                Enabled = entry.Enabled,
+                Label = entry.Label?.Trim() ?? "",
+            })
+            .ToList();
+
+        config.SeedUrlsText = string.Join("\n", config.SeedEntries
+            .Where(entry => entry.Enabled)
+            .Select(entry => entry.Url));
+
+        config.TopicKeywords = config.TopicKeywordsText
+            .Split(new[] { '\r', '\n' }, StringSplitOptions.RemoveEmptyEntries)
+            .Select(value => value.Trim())
+            .Where(value => !string.IsNullOrWhiteSpace(value))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToList();
+
+        config.RelevanceAllowedDomainSuffixes = config.RelevanceAllowedDomainSuffixesText
+            .Split(new[] { '\r', '\n', ',', ';' }, StringSplitOptions.RemoveEmptyEntries)
+            .Select(value => value.Trim().TrimStart('.').ToLowerInvariant())
+            .Where(value => !string.IsNullOrWhiteSpace(value))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToList();
+
+        config.QueueMode = "server";
+
+        if (!new[] { "balanced", "coverage", "focused", "freshness" }.Contains(config.StrategyMode))
+        {
+            config.StrategyMode = "balanced";
+        }
+
+        if (config.MaxFrontierInMemory < 100)
+        {
+            config.MaxFrontierInMemory = 100;
+        }
+
+        config.RelevanceSameHostBoost = Math.Max(0, config.RelevanceSameHostBoost);
+        config.RelevanceAllowedSuffixBoost = Math.Max(0, config.RelevanceAllowedSuffixBoost);
+        config.RelevanceKeywordBoost = Math.Max(0, config.RelevanceKeywordBoost);
+        config.RelevanceDepthPenalty = Math.Max(0, config.RelevanceDepthPenalty);
+
+        await WorkerService.SaveGlobalConfigAsync(config);
+        statusMessage = "Saved";
+    }
+
+    private void AddSeedRow()
+    {
+        if (config == null)
+        {
+            return;
+        }
+
+        config.SeedEntries.Add(new SeedEntryViewModel
+        {
+            Url = "",
+            Enabled = true,
+            Label = "",
+        });
+    }
+
+    private void RemoveSeedRow(int index)
+    {
+        if (config == null || index < 0 || index >= config.SeedEntries.Count)
+        {
+            return;
+        }
+
+        config.SeedEntries.RemoveAt(index);
+    }
+
+    private void GenerateRecommendedSeeds()
+    {
+        if (config == null)
+        {
+            return;
+        }
+
+        config.SeedEntries = new List<SeedEntryViewModel>
+        {
+            new() { Url = "https://medover.zurnal24.si/", Enabled = true, Label = "Med.Over" },
+            new() { Url = "https://www.gov.si/", Enabled = false, Label = "SI Government" },
+            new() { Url = "https://nijz.si/", Enabled = false, Label = "NIJZ Public Health" },
+            new() { Url = "https://www.kclj.si/", Enabled = false, Label = "UKC Ljubljana" },
+            new() { Url = "https://e-uprava.gov.si/", Enabled = false, Label = "eUprava" },
+            new() { Url = "https://www.who.int/", Enabled = false, Label = "WHO" },
+            new() { Url = "https://www.ema.europa.eu/", Enabled = false, Label = "EMA" },
+        };
+
+        config.SeedUrlsText = string.Join("\n", config.SeedEntries.Where(entry => entry.Enabled).Select(entry => entry.Url));
+    }
+
+    private void ApplyWebsocketPreset()
+    {
+        if (config == null)
+        {
+            return;
+        }
+
+        config.MaxConcurrentWorkers = 4;
+        config.RequestTimeoutSeconds = 20;
+        config.CrawlDelayMilliseconds = 500;
+        config.RespectRobotsTxt = true;
+        config.QueueMode = "server";
+        config.StrategyMode = "focused";
+        config.MaxFrontierInMemory = 5000;
+        config.AvoidDuplicatePathsAcrossDaemons = true;
+        config.TopicKeywordsText = string.Join("\n", new[]
+        {
+            "medicine",
+            "medicina",
+            "health",
+            "zdravje",
+            "clinic",
+            "klinika",
+            "ambulanta",
+            "hospital",
+            "bolnisnica",
+            "doctor",
+            "zdravnik",
+            "treatment",
+            "zdravljenje",
+            "disease",
+            "bolezen",
+            "fitness",
+            "fitnes",
+            "exercise",
+            "telovadba",
+            "training",
+            "trening",
+            "workout",
+            "wellness",
+            "nutrition",
+            "prehrana",
+            "vadba",
+        });
+        config.RelevanceAllowedDomainSuffixesText = string.Join("\n", new[]
+        {
+            "gov.si",
+            "nijz.si",
+            "kclj.si",
+        });
+        config.RelevanceSameHostBoost = 10;
+        config.RelevanceAllowedSuffixBoost = 20;
+        config.RelevanceKeywordBoost = 5;
+        config.RelevanceDepthPenalty = 0.2;
+
+        config.SeedEntries = new List<SeedEntryViewModel>
+        {
+            new() { Url = "https://medover.zurnal24.si/", Enabled = true, Label = "Med.Over" },
+            new() { Url = "https://nijz.si/", Enabled = false, Label = "NIJZ" },
+            new() { Url = "https://www.kclj.si/", Enabled = false, Label = "UKC" },
+            new() { Url = "https://www.gov.si/", Enabled = false, Label = "Gov SI" },
+            new() { Url = "https://www.who.int/", Enabled = false, Label = "WHO" },
+        };
+
+        config.SeedUrlsText = string.Join("\n", config.SeedEntries.Where(entry => entry.Enabled).Select(entry => entry.Url));
+        statusMessage = "Websocket daemon preset applied. Save to persist.";
+    }
+
+    private void RefreshDaemonStartScript()
+    {
+        var daemonId = daemonIdOverride.Trim();
+        if (string.IsNullOrWhiteSpace(daemonId))
+        {
+            daemonId = (Configuration["CrawlerApi:LocalDaemonId"] ?? "local-default").Trim();
+        }
+        if (string.IsNullOrWhiteSpace(daemonId))
+        {
+            daemonId = "local-default";
+        }
+
+        var token = daemonTokenOverride.Trim();
+        if (string.IsNullOrWhiteSpace(token))
+        {
+            token = ResolveConfiguredManagerToken();
+        }
+        if (string.IsNullOrWhiteSpace(token))
+        {
+            token = EnsureGeneratedDaemonToken();
+        }
+
+        var endpointHint = managerEndpointOverride.Trim();
+        var managerSocketUrl = ResolveManagerSocketUrl(daemonId, endpointHint);
+        var managerHttpBaseUrl = ResolveManagerHttpBaseUrl(managerSocketUrl);
+
+        if (string.Equals(daemonCommandFormat, "docker", StringComparison.OrdinalIgnoreCase))
+        {
+            var useHostNetwork = OperatingSystem.IsLinux() && IsLoopbackHost(managerSocketUrl);
+            var dockerSocketUrl = useHostNetwork ? managerSocketUrl : RewriteLoopbackHostForDocker(managerSocketUrl);
+            var dockerManagerHttpBase = useHostNetwork ? managerHttpBaseUrl : RewriteLoopbackHostForDocker(managerHttpBaseUrl);
+            const string lineCont = "\\";
+            var dockerLines = new List<string>
+            {
+                $"docker run --rm {lineCont}",
+                $"  --name crawler-daemon-{SanitizeContainerName(daemonId)} {lineCont}",
+                $"  -e CRAWLER_DAEMON_ID=\"{daemonId}\" {lineCont}",
+                $"  -e MANAGER_DAEMON_WS_URL=\"{dockerSocketUrl}\" {lineCont}",
+                $"  -e MANAGER_HTTP_BASE_URL=\"{dockerManagerHttpBase}\" {lineCont}",
+                $"  -e MANAGER_DAEMON_WS_TOKEN=\"{token}\" {lineCont}",
+                $"  -e MANAGER_INGEST_API_TOKEN=\"{token}\" {lineCont}",
+                $"  -v \"$(pwd)\":/workspace {lineCont}",
+                $"  -w /workspace {lineCont}",
+                $"  python:3.12-slim {lineCont}",
+                "  bash -lc \"pip install -r requirements.txt && python pa1/crawler/src/main.py\"",
+            };
+
+            dockerLines.Insert(2, useHostNetwork
+                ? $"  --network host {lineCont}"
+                : $"  --add-host host.docker.internal:host-gateway {lineCont}");
+
+            daemonStartScript = string.Join("\n", dockerLines);
+            return;
+        }
+
+        daemonStartScript = string.Join("\n", new[]
+        {
+            "#!/usr/bin/env bash",
+            "set -euo pipefail",
+            $"export CRAWLER_DAEMON_ID=\"{daemonId}\"",
+            $"export MANAGER_DAEMON_WS_URL=\"{managerSocketUrl}\"",
+            $"export MANAGER_HTTP_BASE_URL=\"{managerHttpBaseUrl}\"",
+            $"export MANAGER_DAEMON_WS_TOKEN=\"{token}\"",
+            $"export MANAGER_INGEST_API_TOKEN=\"{token}\"",
+            "python pa1/crawler/src/main.py",
+        });
+    }
+
+    private string ResolveConfiguredManagerToken()
+    {
+        var frontierToken = (Configuration["CrawlerApi:FrontierApiToken"] ?? string.Empty).Trim();
+        if (!string.IsNullOrWhiteSpace(frontierToken))
+        {
+            return frontierToken;
+        }
+
+        return (Configuration["CrawlerApi:DaemonChannelToken"] ?? string.Empty).Trim();
+    }
+
+    private string EnsureGeneratedDaemonToken()
+    {
+        if (!string.IsNullOrWhiteSpace(generatedDaemonToken))
+        {
+            return generatedDaemonToken;
+        }
+
+        var bytes = new byte[16];
+        System.Security.Cryptography.RandomNumberGenerator.Fill(bytes);
+        generatedDaemonToken = Convert.ToHexString(bytes).ToLowerInvariant();
+        return generatedDaemonToken;
+    }
+
+    private static string ResolveManagerHttpBaseUrl(string socketUrl)
+    {
+        if (!Uri.TryCreate(socketUrl, UriKind.Absolute, out var parsed))
+        {
+            return "http://127.0.0.1:5160";
+        }
+
+        var scheme = parsed.Scheme.Equals("wss", StringComparison.OrdinalIgnoreCase) ? "https" : "http";
+        return $"{scheme}://{parsed.Authority}";
+    }
+
+    private static string RewriteLoopbackHostForDocker(string url)
+    {
+        if (!Uri.TryCreate(url, UriKind.Absolute, out var parsed))
+        {
+            return url;
+        }
+
+        if (!string.Equals(parsed.Host, "localhost", StringComparison.OrdinalIgnoreCase)
+            && !string.Equals(parsed.Host, "127.0.0.1", StringComparison.OrdinalIgnoreCase)
+            && !string.Equals(parsed.Host, "::1", StringComparison.OrdinalIgnoreCase))
+        {
+            return url;
+        }
+
+        var builder = new UriBuilder(parsed)
+        {
+            Host = "host.docker.internal",
+        };
+        return builder.Uri.ToString().TrimEnd('/');
+    }
+
+    private static bool IsLoopbackHost(string url)
+    {
+        if (!Uri.TryCreate(url, UriKind.Absolute, out var parsed))
+        {
+            return false;
+        }
+
+        return string.Equals(parsed.Host, "localhost", StringComparison.OrdinalIgnoreCase)
+            || string.Equals(parsed.Host, "127.0.0.1", StringComparison.OrdinalIgnoreCase)
+            || string.Equals(parsed.Host, "::1", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static string SanitizeContainerName(string daemonId)
+    {
+        var cleaned = new string(daemonId
+            .Trim()
+            .ToLowerInvariant()
+            .Select(ch => char.IsLetterOrDigit(ch) || ch == '-' || ch == '_' ? ch : '-')
+            .ToArray());
+        return string.IsNullOrWhiteSpace(cleaned) ? "local-default" : cleaned;
+    }
+
+    private string ResolveManagerSocketUrl(string daemonId, string endpointHint)
+    {
+        var configuredSocket = (Configuration["CrawlerApi:ManagerSocketUrl"] ?? string.Empty).Trim();
+        if (!string.IsNullOrWhiteSpace(endpointHint) &&
+            (endpointHint.StartsWith("ws://", StringComparison.OrdinalIgnoreCase)
+             || endpointHint.StartsWith("wss://", StringComparison.OrdinalIgnoreCase)))
+        {
+            var normalizedSocket = endpointHint.TrimEnd('/');
+            if (!normalizedSocket.Contains("/api/daemon-channel", StringComparison.OrdinalIgnoreCase))
+            {
+                normalizedSocket = $"{normalizedSocket}/api/daemon-channel";
+            }
+            return AppendDaemonIdQuery(normalizedSocket, daemonId);
+        }
+
+        if (!string.IsNullOrWhiteSpace(configuredSocket))
+        {
+            return AppendDaemonIdQuery(configuredSocket, daemonId);
+        }
+
+        var configuredBase = endpointHint;
+        if (string.IsNullOrWhiteSpace(configuredBase))
+        {
+            configuredBase = (Configuration["CrawlerApi:ManagerBaseUrl"] ?? string.Empty).Trim();
+        }
+        if (string.IsNullOrWhiteSpace(configuredBase))
+        {
+            configuredBase = Navigation.BaseUri.TrimEnd('/');
+        }
+
+        if (!configuredBase.StartsWith("http://", StringComparison.OrdinalIgnoreCase)
+            && !configuredBase.StartsWith("https://", StringComparison.OrdinalIgnoreCase))
+        {
+            configuredBase = $"http://{configuredBase.TrimStart('/')}";
+        }
+
+        if (configuredBase.StartsWith("https://", StringComparison.OrdinalIgnoreCase))
+        {
+            return $"wss://{configuredBase[8..].TrimEnd('/')}/api/daemon-channel?daemonId={Uri.EscapeDataString(daemonId)}";
+        }
+
+        if (configuredBase.StartsWith("http://", StringComparison.OrdinalIgnoreCase))
+        {
+            return $"ws://{configuredBase[7..].TrimEnd('/')}/api/daemon-channel?daemonId={Uri.EscapeDataString(daemonId)}";
+        }
+
+        return $"ws://127.0.0.1:5160/api/daemon-channel?daemonId={Uri.EscapeDataString(daemonId)}";
+    }
+
+    private static string AppendDaemonIdQuery(string socketUrl, string daemonId)
+    {
+        var encodedDaemonId = Uri.EscapeDataString(daemonId);
+        if (socketUrl.Contains("daemonId=", StringComparison.OrdinalIgnoreCase))
+        {
+            return socketUrl;
+        }
+
+        var separator = socketUrl.Contains('?') ? "&" : "?";
+        return $"{socketUrl}{separator}daemonId={encodedDaemonId}";
+    }
+}

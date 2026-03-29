@@ -30,7 +30,7 @@ class PageClassification:
     """Result of deciding what to do with a newly discovered page."""
 
     status: PageStatus
-    canonical_url: str
+    url: str
     content_hash: str
     existing_page_id: int | None
     duplicate_of_page_id: int | None
@@ -38,18 +38,18 @@ class PageClassification:
 
 def classify_page(
     *,
-    canonical_url: str,
+    url: str,
     html_content: str,
     find_page_id_by_url: Callable[[str], int | None],
     find_page_id_by_content_hash: Callable[[str], int | None],
     hasher: ContentHasher,
 ) -> PageClassification:
     """Classify incoming page as known URL, new HTML, or duplicate content."""
-    existing_page_id = find_page_id_by_url(canonical_url)
+    existing_page_id = find_page_id_by_url(url)
     if existing_page_id is not None:
         return PageClassification(
             status="known_url",
-            canonical_url=canonical_url,
+            url=url,
             content_hash="",
             existing_page_id=existing_page_id,
             duplicate_of_page_id=None,
@@ -60,7 +60,7 @@ def classify_page(
     if duplicate_of_page_id is not None:
         return PageClassification(
             status="duplicate_content",
-            canonical_url=canonical_url,
+            url=url,
             content_hash=content_hash,
             existing_page_id=None,
             duplicate_of_page_id=duplicate_of_page_id,
@@ -68,7 +68,7 @@ def classify_page(
 
     return PageClassification(
         status="new_html",
-        canonical_url=canonical_url,
+        url=url,
         content_hash=content_hash,
         existing_page_id=None,
         duplicate_of_page_id=None,

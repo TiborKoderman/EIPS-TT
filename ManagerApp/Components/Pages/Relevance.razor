@@ -1,0 +1,114 @@
+@page "/relevance"
+@using ManagerApp.Models
+@using ManagerApp.Services
+@inject IPageService PageService
+
+<div class="page-header">
+    <h1 class="page-title">Relevance Report</h1>
+    <p class="page-subtitle">Classifier-free relevance scoring over collected pages</p>
+</div>
+
+<div class="page-body">
+    <div class="card mb-lg">
+        <div class="card-header-inline">
+            <h2 class="card-title">Summary</h2>
+            <span class="live-pill"><span class="live-dot"></span> Live</span>
+        </div>
+        <div class="grid grid-cols-4">
+            <div>
+                <div class="stat-label">Top scored sample / target</div>
+                <div class="stat-value">@summary.EvaluatedPages / @summary.TargetPageCount</div>
+            </div>
+            <div>
+                <div class="stat-label">Estimated relevant</div>
+                <div class="stat-value">@summary.EstimatedRelevantPages (@Percent(summary.EstimatedRelevantPages, summary.EvaluatedPages))</div>
+            </div>
+            <div>
+                <div class="stat-label">Keyword evidence</div>
+                <div class="stat-value">@summary.KeywordEvidencePages</div>
+            </div>
+            <div>
+                <div class="stat-label">Avg / median / top</div>
+                <div class="stat-value">@summary.AverageScore.ToString("0.00") / @summary.MedianScore.ToString("0.00") / @summary.TopScore.ToString("0.00")</div>
+            </div>
+        </div>
+    </div>
+
+    <div class="card mb-lg workers-observability-toolbar">
+        <input type="search" placeholder="Filter URL or content..." @bind="SearchTerm" @bind:event="oninput" />
+        <button class="btn btn-primary" @onclick="ReloadAsync">
+            <span class="mdi mdi-refresh"></span>
+            Refresh
+        </button>
+    </div>
+
+    <div class="card">
+        <h2 class="card-title">Top Scored Pages (@rows.Count)</h2>
+        @if (rows.Count == 0)
+        {
+            <p class="text-small text-muted">No pages matched current filter.</p>
+        }
+        else
+        {
+            <div class="workers-log-table-wrap">
+                <table class="workers-log-table">
+                    <thead>
+                        <tr>
+                            <th>TS</th>
+                            <th>Score</th>
+                            <th>Evidence</th>
+                            <th>URL</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        @foreach (var row in rows)
+                        {
+                            <tr>
+                                <td class="workers-log-ts">@(row.AccessedTime?.ToLocalTime().ToString("HH:mm:ss") ?? "-")</td>
+                                <td>@row.RelevanceScore.ToString("0.00")</td>
+                                <td>
+                                    <span class="text-small text-muted">
+                                        @(row.HasKeywordEvidence ? "kw " : "")
+                                        @(row.HasAllowedSuffixEvidence ? "suffix " : "")
+                                        @(row.HasSameHostEvidence ? "host " : "")
+                                        @(row.FrontierDepth.HasValue ? $"d={row.FrontierDepth.Value}" : "")
+                                    </span>
+                                </td>
+                                <td>
+                                    <a href="@row.Url" target="_blank" rel="noopener noreferrer">@row.Url</a>
+                                </td>
+                            </tr>
+                        }
+                    </tbody>
+                </table>
+            </div>
+        }
+    </div>
+</div>
+
+@code {
+    private string SearchTerm { get; set; } = "";
+    private PageEvaluationSummaryDto summary = new();
+    private List<RelevanceReportRowDto> rows = new();
+
+    protected override async Task OnInitializedAsync()
+    {
+        await ReloadAsync();
+    }
+
+    private async Task ReloadAsync()
+    {
+        summary = await PageService.GetEvaluationSummaryAsync();
+        rows = await PageService.GetRelevanceReportAsync(SearchTerm, skip: 0, take: 250);
+    }
+
+    private static string Percent(int part, int whole)
+    {
+        if (whole <= 0)
+        {
+            return "0%";
+        }
+
+        return $"{(part * 100.0 / whole):0.0}%";
+    }
+}

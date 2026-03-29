@@ -1,0 +1,502 @@
+@page "/workers/{WorkerId:int}"
+@page "/workers/{WorkerId:int}/{Section}"
+@implements IAsyncDisposable
+@using System.Text.Json
+@using ManagerApp.Models
+@using ManagerApp.Services
+@inject IWorkerService WorkerService
+@inject NavigationManager Navigation
+
+<div class="page-header">
+    <div class="page-header-main">
+        <div>
+            <h1 class="page-title">Worker Details</h1>
+            <p class="page-subtitle">Runtime detail, config snapshot, and recent logs</p>
+        </div>
+        <a class="btn" href="/workers">
+            <span class="mdi mdi-arrow-left"></span>
+            Back to Workers
+        </a>
+    </div>
+</div>
+
+<div class="page-body">
+    @if (isLoading)
+    {
+        <div class="card"><p>Loading worker details...</p></div>
+    }
+    else if (workerDetail == null)
+    {
+        <div class="card"><p class="text-muted">Worker not found.</p></div>
+    }
+    else
+    {
+        @if (!string.IsNullOrWhiteSpace(actionStatus))
+        {
+            <div class="card mb-lg">
+                <p class="text-small text-muted">@actionStatus</p>
+            </div>
+        }
+
+        <div class="grid grid-cols-4 mb-lg">
+            <StatCard Label="Worker" Value="@workerDetail.Worker.Name" Footnote="@workerDetail.Worker.Status" />
+            <StatCard Label="Pages" Value="@workerDetail.Worker.PagesProcessed.ToString()" Footnote="Processed" />
+            <StatCard Label="Errors" Value="@workerDetail.Worker.ErrorCount.ToString()" Footnote="Observed failures" />
+            <StatCard Label="Daemon" Value="@(workerDetail.GroupName ?? "Unassigned")" Footnote="@GetDaemonFootnote()" />
+        </div>
+
+        <div class="card mb-lg worker-detail-tabs-card">
+            <div class="worker-detail-tabs" role="tablist" aria-label="Worker detail sections">
+                @foreach (var tab in Tabs)
+                {
+                    <a class="worker-detail-tab @(IsTabActive(tab.Key) ? "active" : "")"
+                       href="@BuildTabHref(tab.Key)"
+                       role="tab"
+                       aria-selected="@IsTabActive(tab.Key)">
+                        <span class="mdi @tab.Icon"></span>
+                        <span>@tab.Label</span>
+                    </a>
+                }
+            </div>
+        </div>
+
+        @if (IsTabActive("overview"))
+        {
+            <div class="grid grid-cols-2 mb-lg">
+                <div class="card">
+                    <div class="card-header-inline mb-md">
+                        <h2 class="card-title mb-0">Live Status</h2>
+                        <span class="badge @GetStatusBadgeClass(workerDetail.Worker.Status)">@workerDetail.Worker.Status</span>
+                    </div>
+                    <div class="text-small text-muted mb-sm">Current URL</div>
+                    <div>@(workerDetail.Worker.CurrentUrl ?? "Waiting for next page...")</div>
+
+                    <div class="mt-md text-small text-muted">Started</div>
+                    <div>@(workerDetail.Worker.StartedAt?.ToString("yyyy-MM-dd HH:mm:ss UTC") ?? "N/A")</div>
+
+                    <div class="mt-md flex gap-sm">
+                        <button class="btn btn-primary" @onclick="StartWorker" disabled="@workerActionInProgress">
+                            <span class="mdi mdi-play"></span> Start
+                        </button>
+                        <button class="btn" @onclick="PauseWorker" disabled="@workerActionInProgress">
+                            <span class="mdi mdi-pause"></span> Pause
+                        </button>
+                        <button class="btn" @onclick="StopWorker" disabled="@workerActionInProgress">
+                            <span class="mdi mdi-stop"></span> Stop
+                        </button>
+                    </div>
+                </div>
+
+                <div class="card">
+                    <h2 class="card-title">Quick Runtime Snapshot</h2>
+                    <ul class="list">
+                        <li class="list-item worker-config-row">
+                            <span class="text-muted">Group</span>
+                            <strong>@(workerDetail.GroupName ?? "Unassigned")</strong>
+                        </li>
+                        <li class="list-item worker-config-row">
+                            <span class="text-muted">Pages Processed</span>
+                            <strong>@workerDetail.Worker.PagesProcessed</strong>
+                        </li>
+                        <li class="list-item worker-config-row">
+                            <span class="text-muted">Error Count</span>
+                            <strong>@workerDetail.Worker.ErrorCount</strong>
+                        </li>
+                    </ul>
+                </div>
+            </div>
+        }
+
+        @if (IsTabActive("logs"))
+        {
+            <div class="card">
+                <div class="card-header-inline mb-sm">
+                    <h2 class="card-title mb-0">Recent Logs</h2>
+                    <span class="text-small text-muted">@(logsUsingFallback ? "source: live event fallback" : "source: persisted worker_log")</span>
+                </div>
+                <div class="workers-observability-toolbar mb-sm">
+                    <select @bind="LogSeverityFilter">
+                        <option value="all">All severities</option>
+                        <option value="Info">Info</option>
+                        <option value="Warning">Warning</option>
+                        <option value="Error">Error</option>
+                        <option value="Debug">Debug</option>
+                    </select>
+                    <input type="search" placeholder="Search log message..." @bind="LogSearch" @bind:event="oninput" />
+                </div>
+
+                <div class="workers-log-table-wrap">
+                    <table class="workers-log-table">
+                        <thead>
+                            <tr>
+                                <th>SEV</th>
+                                <th>TS</th>
+                                <th>Message</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            @if (persistedLogs.Count == 0)
+                            {
+                                <tr>
+                                    <td colspan="3" class="text-small text-muted">No logs available in selected filter.</td>
+                                </tr>
+                            }
+                            else
+                            {
+                                @foreach (var log in persistedLogs)
+                                {
+                                    <tr>
+                                        <td><span class="badge @GetLogBadgeClass(log.Level)">@ToShortSeverity(log.Level)</span></td>
+                                        <td class="workers-log-ts">@log.TimestampUtc.ToLocalTime().ToString("HH:mm:ss")</td>
+                                        <td>@log.Message</td>
+                                    </tr>
+                                }
+                            }
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        }
+
+        @if (IsTabActive("metrics"))
+        {
+            <div class="grid grid-cols-3 mb-lg">
+                <StatCard Label="Success Rate" Value="@GetSuccessRate()" Footnote="Processed vs errors" />
+                <StatCard Label="Recent Throughput" Value="@GetRecentThroughput()" Footnote="pages/30s" />
+                <StatCard Label="Uptime" Value="@GetUptime()" Footnote="Since started" />
+            </div>
+
+            <div class="card mb-lg">
+                <h2 class="card-title">Throughput Trend (Last Hour)</h2>
+                @if (throughputSeries.Count == 0)
+                {
+                    <p class="text-small text-muted">No persisted throughput points yet.</p>
+                }
+                else
+                {
+                    <ThroughputLineChart Points="throughputSeries" BucketSeconds="30" />
+                }
+            </div>
+
+            <div class="card">
+                <h2 class="card-title">Metrics Notes</h2>
+                <ul class="placeholder-note-list">
+                    <li>Current metrics come from daemon telemetry and persisted runtime counters.</li>
+                    <li>Frontier claim/lease/prune events are visible in the Worker Strategy page.</li>
+                    <li>Per-daemon aggregate metrics are available on the Daemons page.</li>
+                </ul>
+            </div>
+        }
+    }
+</div>
+
+@code {
+    [Parameter] public int WorkerId { get; set; }
+    [Parameter] public string? Section { get; set; }
+    [SupplyParameterFromQuery(Name = "daemonId")] public string? DaemonId { get; set; }
+
+    private WorkerDetailViewModel? workerDetail;
+    private List<WorkerLogEntryViewModel> persistedLogs = new();
+    private List<WorkerThroughputPointViewModel> throughputSeries = new();
+    private bool isLoading = true;
+    private bool workerActionInProgress;
+    private bool logsUsingFallback;
+    private PeriodicTimer? _refreshTimer;
+    private CancellationTokenSource? _refreshCts;
+    private string? actionStatus;
+    private string LogSeverityFilter { get; set; } = "all";
+    private string LogSearch { get; set; } = "";
+    private static readonly (string Key, string Label, string Icon)[] Tabs =
+    [
+        ("overview", "Overview", "mdi-view-dashboard-outline"),
+        ("logs", "Logs", "mdi-text-box-search-outline"),
+        ("metrics", "Metrics", "mdi-chart-line")
+    ];
+
+    protected override async Task OnParametersSetAsync()
+    {
+        isLoading = true;
+        await RefreshDataAsync();
+        if (!Tabs.Any(t => string.Equals(t.Key, CurrentSection, StringComparison.OrdinalIgnoreCase)))
+        {
+            Navigation.NavigateTo(BuildTabHref("overview"), replace: true);
+        }
+        isLoading = false;
+
+        if (_refreshTimer == null)
+        {
+            _refreshCts = new CancellationTokenSource();
+            _refreshTimer = new PeriodicTimer(TimeSpan.FromSeconds(3));
+            _ = Task.Run(async () =>
+            {
+                while (_refreshTimer is not null && await _refreshTimer.WaitForNextTickAsync(_refreshCts.Token))
+                {
+                    await InvokeAsync(async () =>
+                    {
+                        await RefreshDataAsync();
+                        StateHasChanged();
+                    });
+                }
+            }, _refreshCts.Token);
+        }
+    }
+
+    private async Task RefreshDataAsync()
+    {
+        workerDetail = await WorkerService.GetWorkerDetailAsync(WorkerId, DaemonId);
+        persistedLogs = await WorkerService.GetPersistedWorkerLogsAsync(WorkerId, limit: 120, severity: LogSeverityFilter, search: LogSearch);
+        logsUsingFallback = false;
+        if (persistedLogs.Count == 0)
+        {
+            var events = await WorkerService.GetRecentCrawlerEventsAsync(800);
+            persistedLogs = BuildLogsFromCrawlerEvents(events, WorkerId, workerDetail?.Worker.DaemonId ?? DaemonId, 120, LogSeverityFilter, LogSearch);
+            logsUsingFallback = persistedLogs.Count > 0;
+        }
+
+        throughputSeries = await WorkerService.GetThroughputSeriesAsync(WorkerId, windowMinutes: 60, bucketSeconds: 30);
+    }
+
+    private string CurrentSection => string.IsNullOrWhiteSpace(Section) ? "overview" : Section.ToLowerInvariant();
+
+    private bool IsTabActive(string key)
+    {
+        return string.Equals(CurrentSection, key, StringComparison.OrdinalIgnoreCase);
+    }
+
+    private async Task StartWorker()
+    {
+        var targetDaemon = workerDetail?.Worker.DaemonId ?? DaemonId;
+        await ExecuteWorkerAction("start", () => WorkerService.StartWorkerAsync(WorkerId, targetDaemon));
+    }
+
+    private async Task PauseWorker()
+    {
+        var targetDaemon = workerDetail?.Worker.DaemonId ?? DaemonId;
+        await ExecuteWorkerAction("pause", () => WorkerService.PauseWorkerAsync(WorkerId, targetDaemon));
+    }
+
+    private async Task StopWorker()
+    {
+        var targetDaemon = workerDetail?.Worker.DaemonId ?? DaemonId;
+        await ExecuteWorkerAction("stop", () => WorkerService.StopWorkerAsync(WorkerId, targetDaemon));
+    }
+
+    private string BuildTabHref(string tabKey)
+    {
+        if (string.IsNullOrWhiteSpace(DaemonId))
+        {
+            return $"/workers/{WorkerId}/{tabKey}";
+        }
+
+        return $"/workers/{WorkerId}/{tabKey}?daemonId={Uri.EscapeDataString(DaemonId)}";
+    }
+
+    private async Task ExecuteWorkerAction(string actionName, Func<Task<bool>> action)
+    {
+        if (workerActionInProgress)
+        {
+            return;
+        }
+
+        workerActionInProgress = true;
+        actionStatus = $"Worker {WorkerId}: {actionName}...";
+        StateHasChanged();
+
+        try
+        {
+            var ok = await action();
+            actionStatus = ok
+                ? $"Worker {WorkerId} {actionName} requested successfully."
+                : $"Worker {WorkerId} {actionName} failed. {WorkerService.LastError}";
+            await RefreshDataAsync();
+        }
+        finally
+        {
+            workerActionInProgress = false;
+        }
+    }
+
+    private static List<WorkerLogEntryViewModel> BuildLogsFromCrawlerEvents(
+        IReadOnlyList<CrawlerEventViewModel> events,
+        int workerId,
+        string? daemonId,
+        int limit,
+        string? severity,
+        string? search)
+    {
+        var normalizedSeverity = string.IsNullOrWhiteSpace(severity) || string.Equals(severity, "all", StringComparison.OrdinalIgnoreCase)
+            ? null
+            : severity.Trim();
+        var normalizedSearch = string.IsNullOrWhiteSpace(search) ? null : search.Trim();
+
+        return events
+            .Where(evt => evt.WorkerId == workerId)
+            .Where(evt => string.IsNullOrWhiteSpace(daemonId)
+                || string.Equals(evt.DaemonId, daemonId, StringComparison.OrdinalIgnoreCase))
+            .Select(evt =>
+            {
+                var level = string.Equals(evt.Type, "error", StringComparison.OrdinalIgnoreCase) ? "Error" : "Info";
+                var message = $"[{evt.Type}]";
+
+                if (!string.IsNullOrWhiteSpace(evt.PayloadJson))
+                {
+                    try
+                    {
+                        using var json = JsonDocument.Parse(evt.PayloadJson);
+                        var root = json.RootElement;
+                        if (root.ValueKind == JsonValueKind.Object)
+                        {
+                            if (root.TryGetProperty("level", out var levelNode) && levelNode.ValueKind == JsonValueKind.String)
+                            {
+                                level = levelNode.GetString() ?? level;
+                            }
+
+                            if (root.TryGetProperty("message", out var messageNode) && messageNode.ValueKind == JsonValueKind.String)
+                            {
+                                message = messageNode.GetString() ?? message;
+                            }
+                            else
+                            {
+                                message = root.GetRawText();
+                            }
+                        }
+                        else
+                        {
+                            message = root.GetRawText();
+                        }
+                    }
+                    catch
+                    {
+                        message = evt.PayloadJson;
+                    }
+                }
+
+                return new WorkerLogEntryViewModel
+                {
+                    TimestampUtc = evt.TimestampUtc,
+                    Level = level,
+                    Message = message,
+                    DaemonId = evt.DaemonId,
+                    WorkerId = evt.WorkerId,
+                };
+            })
+            .Where(log => normalizedSeverity is null || string.Equals(log.Level, normalizedSeverity, StringComparison.OrdinalIgnoreCase))
+            .Where(log => normalizedSearch is null || log.Message.Contains(normalizedSearch, StringComparison.OrdinalIgnoreCase))
+            .OrderByDescending(log => log.TimestampUtc)
+            .Take(Math.Clamp(limit, 1, 400))
+            .ToList();
+    }
+
+    private static string GetStatusBadgeClass(string status)
+    {
+        return status.ToLowerInvariant() switch
+        {
+            "active" => "badge-success",
+            "error" => "badge-error",
+            "idle" => "badge-info",
+            "paused" => "badge-warning",
+            _ => "badge-info"
+        };
+    }
+
+    private static string GetLogBadgeClass(string level)
+    {
+        return level.ToLowerInvariant() switch
+        {
+            "error" => "badge-error",
+            "warning" => "badge-warning",
+            "debug" => "badge-info",
+            _ => "badge-success"
+        };
+    }
+
+    private static string ToShortSeverity(string level)
+    {
+        return level.ToUpperInvariant() switch
+        {
+            "WARNING" => "WRN",
+            "INFORMATION" => "INF",
+            "DEBUG" => "DBG",
+            _ => level.ToUpperInvariant() switch
+            {
+                var text when text.Length >= 3 => text[..3],
+                var text => text,
+            }
+        };
+    }
+
+    private string GetSuccessRate()
+    {
+        if (workerDetail == null)
+        {
+            return "0%";
+        }
+
+        var total = workerDetail.Worker.PagesProcessed + workerDetail.Worker.ErrorCount;
+        if (total == 0)
+        {
+            return "100%";
+        }
+
+        var success = workerDetail.Worker.PagesProcessed * 100.0 / total;
+        return $"{Math.Round(success, 1)}%";
+    }
+
+    private string GetRecentThroughput()
+    {
+        if (throughputSeries.Count == 0)
+        {
+            return "0";
+        }
+
+        return Math.Round(throughputSeries.Average(point => point.Value), 2).ToString();
+    }
+
+    private string GetUptime()
+    {
+        if (workerDetail?.Worker.StartedAt == null)
+        {
+            return "N/A";
+        }
+
+        var span = DateTime.UtcNow - workerDetail.Worker.StartedAt.Value;
+        if (span.TotalHours >= 1)
+        {
+            return $"{(int)span.TotalHours}h {span.Minutes}m";
+        }
+
+        if (span.TotalMinutes >= 1)
+        {
+            return $"{(int)span.TotalMinutes}m {span.Seconds}s";
+        }
+
+        return $"{Math.Max(0, span.Seconds)}s";
+    }
+
+    private string GetDaemonFootnote()
+    {
+        var reason = workerDetail?.Worker.StatusReason;
+        if (string.IsNullOrWhiteSpace(reason))
+        {
+            return "Current owner process";
+        }
+
+        return $"Current owner process · {reason}";
+    }
+
+    public ValueTask DisposeAsync()
+    {
+        try
+        {
+            _refreshCts?.Cancel();
+        }
+        catch
+        {
+            // ignore cancellation races
+        }
+
+        _refreshTimer?.Dispose();
+        _refreshCts?.Dispose();
+        return ValueTask.CompletedTask;
+    }
+}

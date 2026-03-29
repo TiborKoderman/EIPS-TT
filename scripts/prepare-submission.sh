@@ -4,15 +4,20 @@ set -euo pipefail
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT_DIR"
 
-if [[ "${1:-}" != "--inside" ]] && [[ ! -f /.dockerenv ]]; then
-  COMPOSE_FILE=".devcontainer/docker-compose.yml"
-  REPO_NAME="$(basename "$ROOT_DIR")"
-  docker compose -f "$COMPOSE_FILE" exec -T --user vscode app bash -lc "cd /workspaces/$REPO_NAME && bash scripts/prepare-submission.sh --inside"
-  exit 0
+if [[ "${1:-}" == "--inside" ]]; then
+  shift
+fi
+
+if ! command -v latexmk >/dev/null 2>&1; then
+  echo "latexmk is required to build pa1/report/report.pdf."
+  echo "Install a TeX distribution that provides latexmk (for example texlive-full)."
+  exit 1
 fi
 
 cd pa1/report
-latexmk -pdf -interaction=nonstopmode -file-line-error -outdir=.out report.tex
+if ! latexmk -pdf -interaction=nonstopmode -file-line-error -outdir=.out report.tex; then
+  echo "latexmk reported errors; continuing to verify whether pa1/report/.out/report.pdf was produced."
+fi
 cd "$ROOT_DIR"
 
 if [ ! -f pa1/report/.out/report.pdf ]; then

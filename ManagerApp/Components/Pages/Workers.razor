@@ -1,0 +1,1681 @@
+@page "/workers"
+@using System.Text.Json
+@using ManagerApp.Models
+@using ManagerApp.Services
+@implements IAsyncDisposable
+@inject IWorkerService WorkerService
+@inject DaemonChannelService DaemonChannel
+@inject NavigationManager Navigation
+
+<div class="page-header">
+    <div class="page-header-main">
+        <div>
+            <h1 class="page-title">Workers</h1>
+            <p class="page-subtitle">Manage workers inside crawler daemons (one daemon process can run multiple workers)</p>
+        </div>
+        <div class="flex items-center gap-sm">
+            <a class="btn btn-icon" href="/workers/strategy" title="Worker strategy" aria-label="Worker strategy">
+                <span class="mdi mdi-vector-polyline"></span>
+            </a>
+            <a class="btn btn-icon" href="/workers/config" title="Global worker config" aria-label="Global worker config">
+                <span class="mdi mdi-cog-outline"></span>
+            </a>
+            <a class="btn btn-icon" href="/workers/groups" title="Daemon config" aria-label="Daemon config">
+                <span class="mdi mdi-server-cog"></span>
+            </a>
+            <div class="header-updated-pill">
+                <span class="mdi mdi-server"></span>
+                <span>Daemon: @(daemonStatus?.Running == true ? "Running" : "Stopped")</span>
+            </div>
+            <div class="header-updated-pill">
+                <span class="mdi mdi-robot"></span>
+                <span>@workerItems.Count workers</span>
+            </div>
+        </div>
+    </div>
+</div>
+
+<div class="page-body">
+    <div class="card mb-lg workers-filter-card">
+        <div class="flex items-center justify-between gap-md workers-filter-row">
+            <div class="flex items-center gap-md">
+                <input type="search" placeholder="Filter workers by name or URL..." @bind="SearchTerm" @bind:event="oninput" />
+                <select @bind="StatusFilter">
+                    <option value="ALL">All statuses</option>
+                    @foreach (var status in Statuses)
+                    {
+                        <option value="@status">@status</option>
+                    }
+                </select>
+                <select @bind="SpawnTargetKey">
+                    @foreach (var daemon in SpawnTargets)
+                    {
+                        <option value="@daemon.Key">@daemon.Label</option>
+                    }
+                </select>
+                <select @bind="SpawnMode">
+                    <option value="thread">OS Thread</option>
+                    <option value="local">Local Process</option>
+                </select>
+            </div>
+            <div class="flex items-center gap-sm">
+                <button class="btn btn-primary" @onclick="QuickStartCrawling">
+                    <span class="mdi mdi-rocket-launch-outline"></span> Quick Start
+                </button>
+                <div class="workers-inline-spawn">
+                    <label class="text-small text-muted" for="spawn-count-input">Count</label>
+                    <input id="spawn-count-input" type="number" min="1" max="20" value="@SpawnCount" @onchange="OnSpawnCountChanged" />
+                </div>
+                <button class="btn btn-primary" @onclick="SpawnWorker" disabled="@(daemonStatus?.Running != true || daemonBulkInProgress)">
+                    <span class="mdi mdi-plus"></span> Spawn
+                </button>
+                <button class="btn" @onclick="ReloadDaemon" disabled="@(daemonStatus?.Running != true || daemonBulkInProgress)">
+                    <span class="mdi mdi-refresh"></span> Reload
+                </button>
+            </div>
+        </div>
+        @if (!string.IsNullOrWhiteSpace(actionStatus))
+        {
+            <p class="text-small text-muted mt-sm">@actionStatus</p>
+        }
+        <textarea class="spawn-seed-textarea mt-sm" rows="3" placeholder="Seed URLs (one per line)" @bind="SpawnSeedUrlsText"></textarea>
+    </div>
+
+    <div class="card mb-lg">
+        <div class="card-header-inline mb-sm">
+            <h2 class="card-title mb-0">Daemon Channel Diagnostics</h2>
+            <div class="flex items-center gap-sm">
+                <button class="btn btn-icon"
+                        type="button"
+                        title="Start daemon"
+                        aria-label="Start daemon"
+                        @onclick="StartDaemonFromDiagnostics"
+                        disabled="@(daemonActionInProgress || daemonStatus?.Running == true)">
+                    <span class="mdi @(daemonActionInProgress && daemonActionType == "start" ? "mdi-loading mdi-spin" : "mdi-play-circle-outline")"></span>
+                </button>
+                <button class="btn btn-icon"
+                        type="button"
+                        title="Stop daemon"
+                        aria-label="Stop daemon"
+                        @onclick="StopDaemonFromDiagnostics"
+                        disabled="@(daemonActionInProgress || daemonStatus?.Running != true)">
+                    <span class="mdi @(daemonActionInProgress && daemonActionType == "stop" ? "mdi-loading mdi-spin" : "mdi-stop-circle-outline")"></span>
+                </button>
+            </div>
+        </div>
+        <div class="grid grid-cols-4 mb-md">
+            <StatCard Label="Connected Daemons" Value="@daemonConnections.Count.ToString()" Footnote="WebSocket channel" />
+            <StatCard Label="Queued" Value="@commandDiagnostics.Queued.ToString()" Footnote="Awaiting dispatch" />
+            <StatCard Label="In Flight" Value="@((commandDiagnostics.Dispatched + commandDiagnostics.Acknowledged).ToString())" Footnote="Dispatched/acknowledged" />
+            <StatCard Label="Failed" Value="@commandDiagnostics.Failed.ToString()" Footnote="@($"Command failures ({commandDiagnostics.RecentWindowMinutes}m)")" />
+        </div>
+
+        @if (daemonConnections.Count == 0)
+        {
+            <p class="text-small text-muted">No daemons are connected to the reverse channel.</p>
+        }
+        else
+        {
+            <ul class="list">
+                @foreach (var connection in daemonConnections)
+                {
+                    <li class="list-item">
+                        <div class="flex items-center justify-between gap-sm">
+                            <strong>@connection.DaemonId</strong>
+                            <span class="badge @(connection.IsOpen ? "badge-success" : "badge-warning")">
+                                @(connection.IsOpen ? "Open" : "Closed")
+                            </span>
+                        </div>
+                        <div class="text-small text-muted">Last seen: @connection.LastSeenUtc.ToLocalTime().ToString("yyyy-MM-dd HH:mm:ss")</div>
+                    </li>
+                }
+            </ul>
+        }
+
+        @if (!string.IsNullOrWhiteSpace(commandDiagnostics.LastFailure))
+        {
+            <p class="text-small text-muted mt-sm">Last queue failure: @commandDiagnostics.LastFailure</p>
+        }
+    </div>
+
+    <div class="card mb-lg">
+        <h2 class="card-title">Daemons</h2>
+        @if (Daemons.Count == 0)
+        {
+            <p class="text-muted">No daemon groups configured.</p>
+        }
+        else
+        {
+            <ul class="list daemon-list">
+                @foreach (var daemon in Daemons)
+                {
+                    var daemonWorkers = GetFilteredWorkersForDaemon(daemon);
+                    var expanded = expandedDaemonIds.Contains(GetDaemonExpandKey(daemon));
+                    <li class="list-item daemon-item">
+                        <div class="daemon-header-shell">
+                            <button class="daemon-header" type="button" @onclick="() => ToggleDaemonExpand(daemon)">
+                                <div class="daemon-header-title">
+                                    <span class="mdi @(expanded ? "mdi-chevron-down" : "mdi-chevron-right")"></span>
+                                    <strong>@daemon.Name</strong>
+                                </div>
+                                <div class="daemon-header-stats">
+                                    <span class="badge badge-info">@daemonWorkers.Count total</span>
+                                    <span class="badge badge-success">@CountByStatus(daemonWorkers, "Active") active</span>
+                                    <span class="badge badge-warning">@CountByStatus(daemonWorkers, "Paused") paused</span>
+                                    <span class="badge badge-error">@CountByStatus(daemonWorkers, "Error") errors</span>
+                                </div>
+                            </button>
+                            @if (daemonWorkers.Count > 0)
+                            {
+                                <div class="flex items-center gap-sm">
+                                    <button class="btn btn-icon" @onclick="() => StartAllInDaemon(daemon)" type="button" title="Start all workers in this daemon" aria-label="Start all workers in this daemon" disabled="@daemonBulkInProgress">
+                                        <span class="mdi mdi-play-network"></span>
+                                    </button>
+                                    <button class="btn btn-icon" @onclick="() => StartAllThreadsInDaemon(daemon)" type="button" title="Start all thread workers in this daemon" aria-label="Start all thread workers in this daemon" disabled="@daemonBulkInProgress">
+                                        <span class="mdi mdi-play-box-multiple-outline"></span>
+                                    </button>
+                                    <button class="btn btn-icon" @onclick="() => StopAllInDaemon(daemon)" type="button" title="Stop all workers in this daemon" aria-label="Stop all workers in this daemon" disabled="@daemonBulkInProgress">
+                                        <span class="mdi mdi-stop-circle-outline"></span>
+                                    </button>
+                                    <div class="daemon-inline-spawn">
+                                        <input type="number"
+                                               min="1"
+                                               max="20"
+                                               value="@GetDaemonSpawnCount(daemon)"
+                                               @onchange="(e) => OnDaemonSpawnCountChanged(daemon, e)"
+                                               aria-label="Spawn count" />
+                                        <button class="btn btn-icon"
+                                                type="button"
+                                                @onclick="() => SpawnWorkersForDaemon(daemon)"
+                                                title="Spawn workers in this daemon"
+                                                aria-label="Spawn workers in this daemon"
+                                                disabled="@(daemonStatus?.Running != true || daemonBulkInProgress)">
+                                            <span class="mdi mdi-plus-circle-outline"></span>
+                                        </button>
+                                    </div>
+                                </div>
+                            }
+                            @if (daemon.Id > 0)
+                            {
+                                <a class="btn btn-icon daemon-gear"
+                                              href="@($"/workers/groups?daemonId={Uri.EscapeDataString(NormalizeDaemonId(daemon.DaemonId))}&groupId={daemon.Id}")"
+                                   title="Configure daemon"
+                                   aria-label="Configure daemon">
+                                    <span class="mdi mdi-cog"></span>
+                                </a>
+                            }
+                        </div>
+
+                        @if (expanded)
+                        {
+                            if (daemonWorkers.Count == 0)
+                            {
+                                <p class="text-small text-muted mt-sm">No workers in this daemon match current filters.</p>
+                            }
+                            else
+                            {
+                                <ul class="list daemon-worker-list">
+                                    @foreach (var worker in daemonWorkers)
+                                    {
+                                        <li class="list-item worker-row worker-list-clickable" @onclick="() => OpenWorkerDetail(worker.Id, worker.DaemonId)">
+                                            <div class="worker-row-main">
+                                                <div class="worker-title">@worker.Name</div>
+                                                @{
+                                                    var activity = GetWorkerActivity(worker);
+                                                }
+                                                <div class="text-small text-muted worker-url-row">
+                                                    <HoverTooltip Text="@activity.Label" Class="worker-activity-tooltip-wrap">
+                                                        <span class="mdi @activity.IconClass worker-activity-icon @activity.CssClass"></span>
+                                                    </HoverTooltip>
+                                                    <span class="worker-url-processing @(activity.IsProcessing ? "is-processing" : "")">
+                                                        @(string.IsNullOrWhiteSpace(worker.CurrentUrl) ? "Waiting for next page..." : worker.CurrentUrl)
+                                                    </span>
+                                                    @if (activity.IsProcessing)
+                                                    {
+                                                        <span class="processing-ellipsis" aria-hidden="true">
+                                                            <span></span><span></span><span></span>
+                                                        </span>
+                                                    }
+                                                </div>
+                                                <div class="text-small">Processed: @worker.PagesProcessed | Errors: @worker.ErrorCount</div>
+                                                @if (!string.IsNullOrWhiteSpace(worker.StatusReason))
+                                                {
+                                                    <div class="text-small text-muted">Reason: @worker.StatusReason</div>
+                                                }
+                                            </div>
+                                            <div class="worker-row-actions" @onclick:stopPropagation="true">
+                                                <span class="badge @GetStatusBadgeClass(worker.Status)">@worker.Status</span>
+                                                <span class="badge @GetStatusBadgeClass(worker.Status) state-badge-short" title="@BuildWorkerStateTooltip(worker)">
+                                                    <span class="mdi @GetStatusIcon(worker.Status)"></span>
+                                                </span>
+                                                <button class="btn btn-icon" title="Logs" aria-label="Logs" @onclick='() => OpenWorkerSection(worker.Id, "logs", worker.DaemonId)' type="button">
+                                                    <span class="mdi mdi-text-box-search-outline"></span>
+                                                </button>
+                                                <button class="btn btn-icon" title="Metrics" aria-label="Metrics" @onclick='() => OpenWorkerSection(worker.Id, "metrics", worker.DaemonId)' type="button">
+                                                    <span class="mdi mdi-chart-line"></span>
+                                                </button>
+                                                @if (workerActionInProgress.Contains(worker.Id))
+                                                {
+                                                    <span class="badge badge-info">@GetWorkerProgressLabel(worker.Id)</span>
+                                                }
+                                                <button class="btn btn-icon" title="Start" aria-label="Start" @onclick="() => Start(worker)" type="button" disabled="@workerActionInProgress.Contains(worker.Id)">
+                                                    <span class="mdi mdi-play"></span>
+                                                </button>
+                                                <button class="btn btn-icon" title="Pause" aria-label="Pause" @onclick="() => Pause(worker)" type="button" disabled="@workerActionInProgress.Contains(worker.Id)">
+                                                    <span class="mdi mdi-pause"></span>
+                                                </button>
+                                                <button class="btn btn-icon" title="Stop" aria-label="Stop" @onclick="() => Stop(worker)" type="button" disabled="@workerActionInProgress.Contains(worker.Id)">
+                                                    <span class="mdi mdi-stop"></span>
+                                                </button>
+                                            </div>
+                                        </li>
+                                    }
+                                </ul>
+                            }
+                        }
+                    </li>
+                }
+            </ul>
+        }
+    </div>
+
+    <div class="card mb-lg">
+        <div class="card-header-inline mb-sm">
+            <h2 class="card-title mb-0">Daemon Combined Logs and Metrics</h2>
+            <div class="flex items-center gap-sm">
+                <span class="live-pill"><span class="live-dot"></span> Live</span>
+                <span class="text-small text-muted">@GetCombinedLogSourceLabel()</span>
+                <span class="text-small text-muted">@GetChannelStatusLabel()</span>
+            </div>
+        </div>
+        <div class="workers-observability-toolbar mb-sm">
+            <select @bind="CombinedSeverityFilter">
+                <option value="all">All severities</option>
+                <option value="Info">Info</option>
+                <option value="Warning">Warning</option>
+                <option value="Error">Error</option>
+                <option value="Debug">Debug</option>
+            </select>
+            <input type="search" placeholder="Search log message..." @bind="CombinedLogSearch" @bind:event="oninput" />
+        </div>
+
+        <div class="grid grid-cols-3 mb-md">
+            <StatCard Label="Throughput (1h)" Value="@GetCombinedThroughputTotal()" Footnote="sum of pages/30s buckets" />
+            <StatCard Label="Logs (filtered)" Value="@combinedLogs.Count.ToString()" Footnote="recent rows" />
+            <StatCard Label="Warnings+Errors" Value="@combinedLogs.Count(log => IsWarnOrError(log.Level)).ToString()" Footnote="recent rows" />
+        </div>
+
+        <div class="mb-md">
+            <div class="card-header-inline mb-xs">
+                <h3 class="card-title mb-0">Throughput Trend</h3>
+                <span class="text-small text-muted">@GetCombinedThroughputSourceLabel()</span>
+            </div>
+            @if (combinedThroughputSeries.Count == 0)
+            {
+                <p class="text-small text-muted">No throughput points yet.</p>
+            }
+            else
+            {
+                <ThroughputLineChart Points="combinedThroughputSeries" BucketSeconds="30" />
+            }
+        </div>
+
+        <div class="workers-log-table-wrap">
+            <table class="workers-log-table">
+                <thead>
+                    <tr>
+                        <th>SEV</th>
+                        <th>TS</th>
+                        <th>Message</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    @if (combinedLogs.Count == 0)
+                    {
+                        <tr>
+                            <td colspan="3" class="text-small text-muted">No logs in selected filter.</td>
+                        </tr>
+                    }
+                    else
+                    {
+                        @foreach (var log in combinedLogs.Take(80))
+                        {
+                            <tr>
+                                <td><span class="badge severity-badge @GetLogBadgeClass(log.Level)">@ToShortSeverity(log.Level)</span></td>
+                                <td class="workers-log-ts">@log.TimestampUtc.ToLocalTime().ToString("HH:mm:ss")</td>
+                                <td>
+                                    @if (log.WorkerId.HasValue)
+                                    {
+                                        <span class="text-small text-muted">@($"w{log.WorkerId} · ")</span>
+                                    }
+                                    <span class="event-icon mdi @GetEventIcon(log.Message)" aria-hidden="true"></span>
+                                    @if (TryRenderStatusTransition(log.Message, out var fromState, out var toState, out var details))
+                                    {
+                                        <span class="badge @GetStatusBadgeClass(fromState) state-badge-short" title="@details"><span class="mdi @GetStatusIcon(fromState)"></span></span>
+                                        <span class="mdi mdi-arrow-right-thin"></span>
+                                        <span class="badge @GetStatusBadgeClass(toState) state-badge-short" title="@details"><span class="mdi @GetStatusIcon(toState)"></span></span>
+                                    }
+                                    else
+                                    {
+                                        <span>@log.Message</span>
+                                    }
+                                </td>
+                            </tr>
+                        }
+                    }
+                </tbody>
+            </table>
+        </div>
+    </div>
+
+    <div class="placeholder-note">
+        <div class="placeholder-note-title">
+            <span class="mdi mdi-server-network"></span> Daemon-based control model
+        </div>
+        <ul class="placeholder-note-list">
+            @foreach (var item in WorkerApiPending)
+            {
+                <li>@item</li>
+            }
+        </ul>
+    </div>
+</div>
+
+@code {
+    private List<WorkerViewModel> workerItems = new();
+    private List<WorkerGroupSettingsViewModel> daemonGroups = new();
+    private List<DaemonChannelService.DaemonConnectionInfo> daemonConnections = new();
+    private CommandQueueDiagnosticsViewModel commandDiagnostics = new();
+    private List<WorkerLogEntryViewModel> combinedLogs = new();
+    private List<WorkerThroughputPointViewModel> combinedThroughputSeries = new();
+    private WorkerGlobalConfigViewModel? globalConfig;
+    private DaemonStatusViewModel? daemonStatus;
+    private string? actionStatus;
+    private readonly HashSet<string> expandedDaemonIds = new(StringComparer.OrdinalIgnoreCase);
+    private PeriodicTimer? _refreshTimer;
+    private CancellationTokenSource? _refreshCts;
+    private string SearchTerm { get; set; } = "";
+    private string StatusFilter { get; set; } = "ALL";
+    private string SpawnTargetKey { get; set; } = string.Empty;
+    private string SpawnMode { get; set; } = "thread";
+    private int SpawnCount { get; set; } = 1;
+    private string SpawnSeedUrlsText { get; set; } = "";
+    private string CombinedSeverityFilter { get; set; } = "all";
+    private string CombinedLogSearch { get; set; } = "";
+    private bool combinedLogsUsingFallback;
+    private bool combinedThroughputUsingFallback;
+    private bool daemonActionInProgress;
+    private string? daemonActionType;
+    private bool daemonBulkInProgress;
+    private readonly HashSet<int> workerActionInProgress = new();
+    private readonly Dictionary<int, string> workerActionTypeInProgress = new();
+    private readonly Dictionary<string, int> daemonSpawnCounts = new(StringComparer.OrdinalIgnoreCase);
+
+    private sealed record SpawnTargetOption(string Key, int GroupId, string DaemonId, string Label);
+
+    private IReadOnlyList<string> WorkerApiPending =>
+    [
+        "One daemon API controls many workers; workers do not host nested APIs.",
+        "Start daemon first, then spawn/start workers under that daemon.",
+        "Use daemon-scoped config as defaults; worker config can override when needed.",
+        "Expose API externally for remote workers; local worker coordination can stay in-process."
+    ];
+
+    private IReadOnlyList<string> Statuses => workerItems
+        .Select(w => w.Status)
+        .Distinct(StringComparer.OrdinalIgnoreCase)
+        .OrderBy(s => s)
+        .ToList();
+
+    private List<WorkerGroupSettingsViewModel> Daemons => daemonGroups
+        .OrderBy(group => group.Name)
+        .ToList();
+
+    private List<WorkerGroupSettingsViewModel> SpawnableDaemons => daemonGroups
+        .Where(group => group.Id > 0)
+        .OrderBy(group => group.Name)
+        .ToList();
+
+    private List<SpawnTargetOption> SpawnTargets => daemonGroups
+        .Where(group => group.Id > 0)
+        .Select(group =>
+        {
+            var daemonId = NormalizeDaemonId(group.DaemonId);
+            return new SpawnTargetOption(
+                Key: $"{daemonId}:{group.Id}",
+                GroupId: group.Id,
+                DaemonId: daemonId,
+                Label: $"{group.Name} ({daemonId})");
+        })
+        .OrderBy(option => option.Label, StringComparer.OrdinalIgnoreCase)
+        .ToList();
+
+    private List<WorkerViewModel> FilteredWorkers => workerItems
+        .Where(w => StatusFilter == "ALL" || string.Equals(w.Status, StatusFilter, StringComparison.OrdinalIgnoreCase))
+        .Where(w => string.IsNullOrWhiteSpace(SearchTerm)
+            || w.Name.Contains(SearchTerm, StringComparison.OrdinalIgnoreCase)
+            || (w.CurrentUrl?.Contains(SearchTerm, StringComparison.OrdinalIgnoreCase) ?? false))
+        .OrderBy(w => w.Name)
+        .ToList();
+
+    protected override async Task OnInitializedAsync()
+    {
+        await RefreshAsync();
+        globalConfig = await WorkerService.GetGlobalConfigAsync();
+
+        _refreshCts = new CancellationTokenSource();
+        _refreshTimer = new PeriodicTimer(TimeSpan.FromSeconds(3));
+        _ = Task.Run(async () =>
+        {
+            while (_refreshTimer is not null && await _refreshTimer.WaitForNextTickAsync(_refreshCts.Token))
+            {
+                await InvokeAsync(async () =>
+                {
+                    await RefreshAsync();
+                    StateHasChanged();
+                });
+            }
+        }, _refreshCts.Token);
+    }
+
+    private async Task RefreshAsync()
+    {
+        var daemonStatusTask = WorkerService.GetDaemonStatusAsync();
+        var workersTask = WorkerService.GetAllWorkersAsync();
+        var daemonGroupsTask = WorkerService.GetWorkerGroupsAsync();
+        var recentEventsTask = WorkerService.GetRecentCrawlerEventsAsync(2000);
+        var diagnosticsTask = WorkerService.GetCommandQueueDiagnosticsAsync();
+        var persistedLogsTask = WorkerService.GetPersistedWorkerLogsAsync(
+            workerId: null,
+            limit: 160,
+            severity: CombinedSeverityFilter,
+            search: CombinedLogSearch);
+        var throughputTask = WorkerService.GetThroughputSeriesAsync(workerId: null, windowMinutes: 60, bucketSeconds: 30);
+
+        await Task.WhenAll(
+            daemonStatusTask,
+            workersTask,
+            daemonGroupsTask,
+            recentEventsTask,
+            diagnosticsTask,
+            persistedLogsTask,
+            throughputTask);
+
+        daemonStatus = daemonStatusTask.Result;
+        workerItems = workersTask.Result;
+        daemonGroups = daemonGroupsTask.Result;
+        var recentEvents = recentEventsTask.Result;
+        daemonConnections = DaemonChannel.GetConnectionInfos().ToList();
+        commandDiagnostics = diagnosticsTask.Result;
+        combinedLogs = persistedLogsTask.Result;
+        combinedLogsUsingFallback = false;
+        if (combinedLogs.Count == 0)
+        {
+            combinedLogs = BuildLogsFromCrawlerEvents(recentEvents, 160, CombinedSeverityFilter, CombinedLogSearch);
+            combinedLogsUsingFallback = true;
+        }
+        combinedThroughputSeries = throughputTask.Result;
+        combinedThroughputUsingFallback = false;
+        if (combinedThroughputSeries.Count == 0)
+        {
+            combinedThroughputSeries = BuildThroughputSeriesFromCrawlerEvents(recentEvents, windowMinutes: 60, bucketSeconds: 30);
+            combinedThroughputUsingFallback = combinedThroughputSeries.Count > 0;
+        }
+
+        var groupedWorkerKeys = daemonGroups
+            .SelectMany(group => group.WorkerIds.Select(workerId => $"{NormalizeDaemonId(group.DaemonId)}:{workerId}"))
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+
+        var ungroupedByDaemon = workerItems
+            .Where(worker => !groupedWorkerKeys.Contains($"{NormalizeDaemonId(worker.DaemonId)}:{worker.Id}"))
+            .GroupBy(worker => NormalizeDaemonId(worker.DaemonId), StringComparer.OrdinalIgnoreCase)
+            .ToList();
+
+        foreach (var daemonGroup in ungroupedByDaemon)
+        {
+            daemonGroups.Add(new WorkerGroupSettingsViewModel
+            {
+                Id = -1,
+                DaemonId = daemonGroup.Key,
+                Name = $"{daemonGroup.Key} :: Ungrouped Workers",
+                Description = $"Workers in daemon {daemonGroup.Key} not assigned to a daemon group yet.",
+                Enabled = true,
+                WorkerIds = daemonGroup.Select(worker => worker.Id).Distinct().ToList(),
+            });
+        }
+
+        if (daemonGroups.Count > 0 && daemonGroups.All(group => !expandedDaemonIds.Contains(GetDaemonExpandKey(group))))
+        {
+            expandedDaemonIds.Add(GetDaemonExpandKey(daemonGroups[0]));
+        }
+
+        var spawnTargets = SpawnTargets;
+        if (spawnTargets.Count > 0 && spawnTargets.All(target => !string.Equals(target.Key, SpawnTargetKey, StringComparison.OrdinalIgnoreCase)))
+        {
+            SpawnTargetKey = spawnTargets[0].Key;
+        }
+
+        if (daemonStatus == null && !string.IsNullOrWhiteSpace(WorkerService.LastError))
+        {
+            actionStatus = $"Daemon API unavailable: {WorkerService.LastError} Run: python pa1/crawler/src/daemon/main.py";
+        }
+    }
+
+    private async Task Start(WorkerViewModel worker)
+    {
+        await ExecuteWorkerAction(worker, "start", () => WorkerService.StartWorkerAsync(worker.Id, worker.DaemonId));
+    }
+
+    private async Task Pause(WorkerViewModel worker)
+    {
+        await ExecuteWorkerAction(worker, "pause", () => WorkerService.PauseWorkerAsync(worker.Id, worker.DaemonId));
+    }
+
+    private async Task Stop(WorkerViewModel worker)
+    {
+        await ExecuteWorkerAction(worker, "stop", () => WorkerService.StopWorkerAsync(worker.Id, worker.DaemonId));
+    }
+
+    private async Task StartAllInDaemon(WorkerGroupSettingsViewModel daemon)
+    {
+        if (daemonBulkInProgress)
+        {
+            return;
+        }
+
+        daemonBulkInProgress = true;
+        var targets = GetAllWorkersForDaemon(daemon)
+            .Where(worker => !string.Equals(worker.Status, "Active", StringComparison.OrdinalIgnoreCase))
+            .ToList();
+
+        if (targets.Count == 0)
+        {
+            actionStatus = $"{daemon.Name}: no workers needed start.";
+            daemonBulkInProgress = false;
+            return;
+        }
+
+        var success = await ExecuteBatchWorkerAction(targets, worker => WorkerService.StartWorkerAsync(worker.Id, worker.DaemonId));
+
+        actionStatus = $"{daemon.Name}: started {success}/{targets.Count} workers.";
+        await RefreshAsync();
+        daemonBulkInProgress = false;
+    }
+
+    private async Task StartAllThreadsInDaemon(WorkerGroupSettingsViewModel daemon)
+    {
+        if (daemonBulkInProgress)
+        {
+            return;
+        }
+
+        daemonBulkInProgress = true;
+        var targets = GetAllWorkersForDaemon(daemon)
+            .Where(worker => string.Equals(worker.Mode, "thread", StringComparison.OrdinalIgnoreCase))
+            .Where(worker => !string.Equals(worker.Status, "Active", StringComparison.OrdinalIgnoreCase))
+            .ToList();
+
+        if (targets.Count == 0)
+        {
+            actionStatus = $"{daemon.Name}: no thread workers needed start.";
+            daemonBulkInProgress = false;
+            return;
+        }
+
+        var success = await ExecuteBatchWorkerAction(targets, worker => WorkerService.StartWorkerAsync(worker.Id, worker.DaemonId));
+        actionStatus = $"{daemon.Name}: started {success}/{targets.Count} thread workers.";
+        await RefreshAsync();
+        daemonBulkInProgress = false;
+    }
+
+    private async Task StopAllInDaemon(WorkerGroupSettingsViewModel daemon)
+    {
+        if (daemonBulkInProgress)
+        {
+            return;
+        }
+
+        daemonBulkInProgress = true;
+        var targets = GetAllWorkersForDaemon(daemon)
+            .Where(worker => !string.Equals(worker.Status, "Stopped", StringComparison.OrdinalIgnoreCase))
+            .ToList();
+
+        if (targets.Count == 0)
+        {
+            actionStatus = $"{daemon.Name}: no workers needed stop.";
+            daemonBulkInProgress = false;
+            return;
+        }
+
+        var success = await ExecuteBatchWorkerAction(targets, worker => WorkerService.StopWorkerAsync(worker.Id, worker.DaemonId));
+
+        actionStatus = $"{daemon.Name}: stopped {success}/{targets.Count} workers.";
+        await RefreshAsync();
+        daemonBulkInProgress = false;
+    }
+
+    private async Task SpawnWorker()
+    {
+        if (daemonStatus?.Running != true)
+        {
+            actionStatus = "Start daemon first, then spawn workers.";
+            return;
+        }
+
+        var target = SpawnTargets.FirstOrDefault(option => string.Equals(option.Key, SpawnTargetKey, StringComparison.OrdinalIgnoreCase));
+        if (target is null)
+        {
+            actionStatus = "Select a daemon group before spawning a worker.";
+            return;
+        }
+
+        var count = Math.Clamp(SpawnCount, 1, 20);
+        var success = 0;
+        var seeds = GetSeedUrlsForSpawn();
+        var queuedSeeds = 0;
+        for (var i = 0; i < count; i++)
+        {
+            var spawned = await WorkerService.SpawnWorkerAsync(
+                name: $"Worker-{DateTime.Now:HHmmss}-{i + 1}",
+                daemonGroupId: target.GroupId,
+                mode: SpawnMode,
+                seedUrls: null,
+                daemonId: target.DaemonId);
+
+            if (spawned != null)
+            {
+                success++;
+            }
+        }
+
+        foreach (var seed in seeds)
+        {
+            if (await WorkerService.AddSeedAsync(seed, null))
+            {
+                queuedSeeds++;
+            }
+        }
+
+        actionStatus = success == 0
+            ? $"Failed to spawn workers. {WorkerService.LastError}"
+            : $"Spawned {success}/{count} workers in {SpawnMode} mode for daemon {target.DaemonId}. Queued seeds: {queuedSeeds}.";
+
+        if (success > 0)
+        {
+            SpawnSeedUrlsText = "";
+        }
+
+        await RefreshAsync();
+    }
+
+    private async Task SpawnWorkersForDaemon(WorkerGroupSettingsViewModel daemon)
+    {
+        if (daemonStatus?.Running != true || daemonBulkInProgress)
+        {
+            return;
+        }
+
+        daemonBulkInProgress = true;
+        var count = Math.Clamp(GetDaemonSpawnCount(daemon), 1, 20);
+        var seeds = GetSeedUrlsForSpawn();
+        var success = 0;
+        var queuedSeeds = 0;
+
+        for (var i = 0; i < count; i++)
+        {
+            var spawned = await WorkerService.SpawnWorkerAsync(
+                name: $"{daemon.Name}-w-{DateTime.Now:HHmmss}-{i + 1}",
+                daemonGroupId: daemon.Id,
+                mode: SpawnMode,
+                seedUrls: null,
+                daemonId: daemon.DaemonId);
+            if (spawned != null)
+            {
+                success++;
+            }
+        }
+
+        foreach (var seed in seeds)
+        {
+            if (await WorkerService.AddSeedAsync(seed, null))
+            {
+                queuedSeeds++;
+            }
+        }
+
+        actionStatus = success == 0
+            ? $"{daemon.Name}: spawn failed. {WorkerService.LastError}"
+            : $"{daemon.Name}: spawned {success}/{count} worker(s), queued seeds: {queuedSeeds}.";
+        await RefreshAsync();
+        daemonBulkInProgress = false;
+    }
+
+    private List<string> GetSeedUrlsForSpawn()
+    {
+        var seedUrls = SpawnSeedUrlsText
+            .Split(new[] { '\r', '\n' }, StringSplitOptions.RemoveEmptyEntries)
+            .Select(url => url.Trim())
+            .Where(url => !string.IsNullOrWhiteSpace(url))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToList();
+
+        if (seedUrls.Count == 0 && !string.IsNullOrWhiteSpace(globalConfig?.SeedUrlsText))
+        {
+            seedUrls = globalConfig.SeedUrlsText
+                .Split(new[] { '\r', '\n' }, StringSplitOptions.RemoveEmptyEntries)
+                .Select(url => url.Trim())
+                .Where(url => !string.IsNullOrWhiteSpace(url))
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .ToList();
+        }
+
+        if (seedUrls.Count == 0 && globalConfig?.SeedEntries?.Count > 0)
+        {
+            seedUrls = globalConfig.SeedEntries
+                .Where(entry => entry.Enabled && !string.IsNullOrWhiteSpace(entry.Url))
+                .Select(entry => entry.Url.Trim())
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .ToList();
+        }
+
+        return seedUrls;
+    }
+
+    private async Task ExecuteWorkerAction(WorkerViewModel worker, string actionName, Func<Task<bool>> action)
+    {
+        var workerId = worker.Id;
+        if (workerActionInProgress.Contains(workerId))
+        {
+            return;
+        }
+
+        workerActionInProgress.Add(workerId);
+        workerActionTypeInProgress[workerId] = actionName;
+        actionStatus = $"Worker {workerId} ({NormalizeDaemonId(worker.DaemonId)}): {actionName}...";
+        StateHasChanged();
+
+        try
+        {
+            var ok = await action();
+            actionStatus = ok
+                ? $"Worker {workerId} ({NormalizeDaemonId(worker.DaemonId)}) {actionName} requested successfully."
+                : $"Worker {workerId} ({NormalizeDaemonId(worker.DaemonId)}) {actionName} failed. {WorkerService.LastError}";
+            await RefreshAsync();
+        }
+        finally
+        {
+            workerActionInProgress.Remove(workerId);
+            workerActionTypeInProgress.Remove(workerId);
+        }
+    }
+
+    private async Task<int> ExecuteBatchWorkerAction(IEnumerable<WorkerViewModel> workers, Func<WorkerViewModel, Task<bool>> action)
+    {
+        var workerList = workers
+            .GroupBy(worker => $"{NormalizeDaemonId(worker.DaemonId)}:{worker.Id}", StringComparer.OrdinalIgnoreCase)
+            .Select(group => group.First())
+            .ToList();
+
+        var tasks = workerList.Select(async worker =>
+        {
+            var id = worker.Id;
+            workerActionInProgress.Add(id);
+            try
+            {
+                return await action(worker) ? 1 : 0;
+            }
+            finally
+            {
+                workerActionInProgress.Remove(id);
+            }
+        }).ToList();
+
+        var results = await Task.WhenAll(tasks);
+        return results.Sum();
+    }
+
+    private void OnSpawnCountChanged(ChangeEventArgs args)
+    {
+        if (int.TryParse(args.Value?.ToString(), out var parsed))
+        {
+            SpawnCount = Math.Clamp(parsed, 1, 20);
+        }
+    }
+
+    private int GetDaemonSpawnCount(WorkerGroupSettingsViewModel daemon)
+    {
+        return daemonSpawnCounts.TryGetValue(GetDaemonExpandKey(daemon), out var count)
+            ? Math.Clamp(count, 1, 20)
+            : 1;
+    }
+
+    private void OnDaemonSpawnCountChanged(WorkerGroupSettingsViewModel daemon, ChangeEventArgs args)
+    {
+        if (!int.TryParse(args.Value?.ToString(), out var parsed))
+        {
+            return;
+        }
+
+        daemonSpawnCounts[GetDaemonExpandKey(daemon)] = Math.Clamp(parsed, 1, 20);
+    }
+
+    private async Task QuickStartCrawling()
+    {
+        if (globalConfig == null)
+        {
+            globalConfig = await WorkerService.GetGlobalConfigAsync();
+        }
+
+        if (daemonStatus?.Running != true)
+        {
+            var daemonStarted = await WorkerService.StartDaemonAsync();
+            if (!daemonStarted)
+            {
+                actionStatus = $"Quick Start failed to start daemon. {WorkerService.LastError}";
+                return;
+            }
+        }
+
+        await RefreshAsync();
+
+        var seeds = (globalConfig?.SeedEntries ?? new List<SeedEntryViewModel>())
+            .Where(entry => entry.Enabled && !string.IsNullOrWhiteSpace(entry.Url))
+            .Select(entry => entry.Url.Trim())
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToList();
+
+        if (seeds.Count == 0)
+        {
+            actionStatus = "Quick Start needs at least one enabled seed in Global Config.";
+            return;
+        }
+
+        if (string.IsNullOrWhiteSpace(SpawnTargetKey) && SpawnTargets.Count > 0)
+        {
+            SpawnTargetKey = SpawnTargets[0].Key;
+        }
+
+        var selectedTarget = SpawnTargets.FirstOrDefault(option => string.Equals(option.Key, SpawnTargetKey, StringComparison.OrdinalIgnoreCase));
+        var selectedDaemon = selectedTarget is null
+            ? null
+            : Daemons.FirstOrDefault(group => group.Id == selectedTarget.GroupId
+                && string.Equals(NormalizeDaemonId(group.DaemonId), selectedTarget.DaemonId, StringComparison.OrdinalIgnoreCase));
+        var seeded = 0;
+        foreach (var seed in seeds)
+        {
+            if (await WorkerService.AddSeedAsync(seed, null))
+            {
+                seeded++;
+            }
+        }
+
+        var activeWorkerInSelectedDaemon = selectedDaemon is null
+            ? null
+            : workerItems.FirstOrDefault(worker =>
+                selectedDaemon.WorkerIds.Contains(worker.Id)
+                && string.Equals(worker.Status, "Active", StringComparison.OrdinalIgnoreCase));
+
+        if (activeWorkerInSelectedDaemon is not null)
+        {
+            await RefreshAsync();
+            actionStatus = seeded > 0
+                ? $"Quick Start complete: queued {seeded} seed URL(s); worker {activeWorkerInSelectedDaemon.Id} is active."
+                : $"Quick Start could not queue seeds. {WorkerService.LastError}";
+            return;
+        }
+
+        WorkerViewModel? spawnedWorker = null;
+        if (activeWorkerInSelectedDaemon is null)
+        {
+            spawnedWorker = await WorkerService.SpawnWorkerAsync(
+                name: $"Crawler-{DateTime.Now:HHmmss}",
+                daemonGroupId: selectedTarget?.GroupId,
+                mode: "thread",
+                seedUrls: null,
+                daemonId: selectedTarget?.DaemonId);
+
+            if (spawnedWorker == null)
+            {
+                actionStatus = $"Quick Start failed to spawn worker. {WorkerService.LastError}";
+                return;
+            }
+
+            var started = await WorkerService.StartWorkerAsync(spawnedWorker.Id, spawnedWorker.DaemonId);
+            if (!started)
+            {
+                actionStatus = $"Quick Start spawned worker {spawnedWorker.Id} but failed to start it. {WorkerService.LastError}";
+                await RefreshAsync();
+                return;
+            }
+        }
+
+        await RefreshAsync();
+        actionStatus = spawnedWorker is not null
+            ? $"Quick Start complete: queued {seeded} seed URL(s); worker {spawnedWorker.Id} started and waiting on queue claims."
+            : $"Quick Start complete: queued {seeded} seed URL(s); daemon running and workers active.";
+    }
+
+    private async Task StartDaemonFromDiagnostics()
+    {
+        await SetDaemonRunningAsync(shouldRun: true);
+    }
+
+    private async Task StopDaemonFromDiagnostics()
+    {
+        await SetDaemonRunningAsync(shouldRun: false);
+    }
+
+    private async Task SetDaemonRunningAsync(bool shouldRun)
+    {
+        daemonActionInProgress = true;
+        daemonActionType = shouldRun ? "start" : "stop";
+
+        try
+        {
+            bool ok;
+            try
+            {
+                var operation = shouldRun
+                    ? WorkerService.StartDaemonAsync()
+                    : WorkerService.StopDaemonAsync();
+                ok = await operation.WaitAsync(TimeSpan.FromSeconds(12));
+            }
+            catch (TimeoutException)
+            {
+                actionStatus = shouldRun
+                    ? "Starting daemon timed out. Please retry and verify daemon logs."
+                    : "Stopping daemon timed out. Please retry and verify daemon logs.";
+                return;
+            }
+
+            actionStatus = shouldRun
+                ? (ok
+                    ? "Daemon started."
+                    : $"Failed to start daemon. {WorkerService.LastError ?? "Ensure crawler API server is running."}")
+                : (ok
+                    ? "Daemon stopped."
+                    : $"Failed to stop daemon. {WorkerService.LastError}");
+
+            await RefreshAsync();
+        }
+        finally
+        {
+            daemonActionInProgress = false;
+            daemonActionType = null;
+        }
+    }
+
+    private async Task ReloadDaemon()
+    {
+        var ok = await WorkerService.ReloadDaemonAsync();
+        actionStatus = ok ? "Daemon reloaded." : $"Failed to reload daemon. {WorkerService.LastError}";
+        await RefreshAsync();
+    }
+
+    private string GetStatusBadgeClass(string status)
+    {
+        var normalized = (status ?? string.Empty).Trim().ToLowerInvariant();
+        return normalized switch
+        {
+            "active" or "running" or "processing" or "fetching" or "parsing" or "claiming" => "badge-success",
+            "error" or "failed" => "badge-error",
+            "paused" or "locked" or "duplicate" => "badge-warning",
+            "stopped" or "completed" or "done" => "badge-secondary",
+            "idle" or "ready" or "waiting" or "queued" or "in_memory" => "badge-info",
+            _ => "badge-secondary"
+        };
+    }
+
+    private static string GetStatusIcon(string status)
+    {
+        return (status ?? string.Empty).Trim().ToLowerInvariant() switch
+        {
+            "active" or "running" => "mdi-play-circle",
+            "processing" => "mdi-cog-play-outline",
+            "fetching" => "mdi-download-circle-outline",
+            "parsing" => "mdi-file-tree-outline",
+            "claiming" => "mdi-key-link",
+            "idle" or "ready" or "waiting" => "mdi-timer-sand",
+            "queued" or "in_memory" => "mdi-playlist-plus",
+            "paused" => "mdi-pause-circle",
+            "locked" => "mdi-lock-outline",
+            "stopped" => "mdi-stop-circle",
+            "completed" or "done" => "mdi-check-circle",
+            "duplicate" => "mdi-content-duplicate",
+            "error" or "failed" => "mdi-alert-circle",
+            _ => "mdi-help-circle",
+        };
+    }
+
+    private static string BuildWorkerStateTooltip(WorkerViewModel worker)
+    {
+        return $"{worker.Status} | reason={worker.StatusReason ?? "n/a"} | url={(string.IsNullOrWhiteSpace(worker.CurrentUrl) ? "n/a" : worker.CurrentUrl)}";
+    }
+
+    private List<WorkerViewModel> GetFilteredWorkersForDaemon(WorkerGroupSettingsViewModel daemon)
+    {
+        var daemonId = NormalizeDaemonId(daemon.DaemonId);
+        var ids = daemon.WorkerIds?.ToHashSet() ?? new HashSet<int>();
+        return FilteredWorkers
+            .Where(worker => string.Equals(NormalizeDaemonId(worker.DaemonId), daemonId, StringComparison.OrdinalIgnoreCase))
+            .Where(worker => ids.Contains(worker.Id))
+            .ToList();
+    }
+
+    private List<WorkerViewModel> GetAllWorkersForDaemon(WorkerGroupSettingsViewModel daemon)
+    {
+        var daemonId = NormalizeDaemonId(daemon.DaemonId);
+        var ids = daemon.WorkerIds?.ToHashSet() ?? new HashSet<int>();
+        return workerItems
+            .Where(worker => string.Equals(NormalizeDaemonId(worker.DaemonId), daemonId, StringComparison.OrdinalIgnoreCase))
+            .Where(worker => ids.Contains(worker.Id))
+            .ToList();
+    }
+
+    private static int CountByStatus(IEnumerable<WorkerViewModel> workers, string status)
+    {
+        return workers.Count(worker => string.Equals(worker.Status, status, StringComparison.OrdinalIgnoreCase));
+    }
+
+    private static WorkerActivity GetWorkerActivity(WorkerViewModel worker)
+    {
+        var status = worker.Status.ToLowerInvariant();
+        var reason = (worker.StatusReason ?? string.Empty).ToLowerInvariant();
+
+        if (status == "error")
+        {
+            return new WorkerActivity("mdi-alert-circle-outline", string.IsNullOrWhiteSpace(worker.StatusReason) ? "Issue" : worker.StatusReason, "activity-error", false);
+        }
+
+        if (status is "idle" or "stopped")
+        {
+            var label = string.IsNullOrWhiteSpace(worker.StatusReason) ? "Waiting" : worker.StatusReason;
+            return new WorkerActivity("mdi-sleep", label, "activity-waiting", false);
+        }
+
+        if (status == "paused")
+        {
+            var label = string.IsNullOrWhiteSpace(worker.StatusReason) ? "Paused" : worker.StatusReason;
+            return new WorkerActivity("mdi-pause-circle-outline", label, "activity-paused", false);
+        }
+
+        if (status == "active")
+        {
+            if (reason.Contains("waiting"))
+            {
+                return new WorkerActivity("mdi-timer-sand", "Waiting for queue", "activity-waiting", false);
+            }
+
+            if (reason.Contains("processing") || reason.Contains("fetch"))
+            {
+                return new WorkerActivity("mdi-file-code-outline", "Parsing", "activity-parsing", true);
+            }
+
+            return new WorkerActivity("mdi-magnify", "Searching", "activity-searching", true);
+        }
+
+        return new WorkerActivity("mdi-cog-outline", "Processing", "activity-processing", true);
+    }
+
+    private string GetCombinedThroughputTotal()
+    {
+        return Math.Round(combinedThroughputSeries.Sum(point => point.Value), 1).ToString();
+    }
+
+    private static bool IsWarnOrError(string level)
+    {
+        return level.Equals("Warning", StringComparison.OrdinalIgnoreCase)
+            || level.Equals("Error", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private string GetWorkerProgressLabel(int workerId)
+    {
+        if (!workerActionTypeInProgress.TryGetValue(workerId, out var actionName))
+        {
+            return "Working...";
+        }
+
+        return actionName.ToLowerInvariant() switch
+        {
+            "start" => "Starting...",
+            "pause" => "Pausing...",
+            "stop" => "Stopping...",
+            _ => "Working...",
+        };
+    }
+
+    private static string ToShortSeverity(string level)
+    {
+        return level.ToUpperInvariant() switch
+        {
+            "WARNING" => "WRN",
+            "INFORMATION" => "INF",
+            "DEBUG" => "DBG",
+            _ => level.ToUpperInvariant() switch
+            {
+                var text when text.Length >= 3 => text[..3],
+                var text => text,
+            }
+        };
+    }
+
+    private static string GetLogBadgeClass(string level)
+    {
+        return level.ToLowerInvariant() switch
+        {
+            "error" => "badge-error",
+            "warning" => "badge-warning",
+            "debug" => "badge-info",
+            _ => "badge-success",
+        };
+    }
+
+    private static string GetEventIcon(string message)
+    {
+        var text = (message ?? string.Empty).ToLowerInvariant();
+        if (text.Contains("frontier-prune", StringComparison.Ordinal)) return "mdi-content-cut";
+        if (text.Contains("frontier-lease", StringComparison.Ordinal)) return "mdi-key-outline";
+        if (text.Contains("frontier-complete", StringComparison.Ordinal)) return "mdi-check-circle-outline";
+        if (text.Contains("worker-metric", StringComparison.Ordinal)) return "mdi-chart-line";
+        if (text.Contains("page-reported", StringComparison.Ordinal)) return "mdi-file-check-outline";
+        if (text.Contains("status-change", StringComparison.Ordinal)) return "mdi-swap-horizontal";
+        if (text.Contains("queue-change", StringComparison.Ordinal)) return "mdi-tray-arrow-down";
+        return "mdi-dots-horizontal-circle-outline";
+    }
+
+    private static bool TryRenderStatusTransition(string message, out string fromState, out string toState, out string details)
+    {
+        fromState = "Idle";
+        toState = "Idle";
+        details = message ?? string.Empty;
+        if (string.IsNullOrWhiteSpace(message) || !message.Contains("[status-change]", StringComparison.OrdinalIgnoreCase))
+        {
+            return false;
+        }
+
+        var text = message;
+        var prevToken = "previousStatus=";
+        var statusToken = "status=";
+        var prevIdx = text.IndexOf(prevToken, StringComparison.OrdinalIgnoreCase);
+        var statusIdx = text.IndexOf(statusToken, StringComparison.OrdinalIgnoreCase);
+        if (statusIdx < 0)
+        {
+            return false;
+        }
+
+        if (prevIdx >= 0)
+        {
+            var prevStart = prevIdx + prevToken.Length;
+            var prevEnd = text.IndexOf('|', prevStart);
+            fromState = (prevEnd >= 0 ? text[prevStart..prevEnd] : text[prevStart..]).Trim();
+        }
+
+        var nextStart = statusIdx + statusToken.Length;
+        var nextEnd = text.IndexOf('|', nextStart);
+        toState = (nextEnd >= 0 ? text[nextStart..nextEnd] : text[nextStart..]).Trim();
+        if (string.IsNullOrWhiteSpace(fromState))
+        {
+            fromState = "Idle";
+        }
+        if (string.IsNullOrWhiteSpace(toState))
+        {
+            toState = "Idle";
+        }
+
+        return true;
+    }
+
+    private string GetCombinedLogSourceLabel()
+    {
+        return combinedLogsUsingFallback ? "source: live event fallback" : "source: persisted worker_log";
+    }
+
+    private string GetCombinedThroughputSourceLabel()
+    {
+        return combinedThroughputUsingFallback ? "source: live event fallback" : "source: persisted worker_metric";
+    }
+
+    private string GetChannelStatusLabel()
+    {
+        return daemonConnections.Count > 0 ? "channel: connected" : "channel: disconnected";
+    }
+
+    private static List<WorkerLogEntryViewModel> BuildLogsFromCrawlerEvents(
+        IReadOnlyList<CrawlerEventViewModel> events,
+        int limit,
+        string? severity,
+        string? search)
+    {
+        var normalizedSeverity = string.IsNullOrWhiteSpace(severity)
+            || string.Equals(severity, "all", StringComparison.OrdinalIgnoreCase)
+            ? null
+            : severity.Trim();
+        var normalizedSearch = string.IsNullOrWhiteSpace(search) ? null : search.Trim();
+
+        var rows = events
+            .OrderByDescending(evt => evt.TimestampUtc)
+            .Select(evt => new WorkerLogEntryViewModel
+            {
+                TimestampUtc = evt.TimestampUtc,
+                Level = ResolveEventLevel(evt.Type, evt.PayloadJson),
+                Message = FormatEventMessage(evt.Type, evt.PayloadJson),
+                DaemonId = string.IsNullOrWhiteSpace(evt.DaemonId) ? "local-default" : evt.DaemonId,
+                WorkerId = evt.WorkerId,
+            });
+
+        if (!string.IsNullOrWhiteSpace(normalizedSeverity))
+        {
+            rows = rows.Where(log => string.Equals(log.Level, normalizedSeverity, StringComparison.OrdinalIgnoreCase));
+        }
+
+        if (!string.IsNullOrWhiteSpace(normalizedSearch))
+        {
+            rows = rows.Where(log => log.Message.Contains(normalizedSearch, StringComparison.OrdinalIgnoreCase));
+        }
+
+        return rows.Take(Math.Clamp(limit, 1, 400)).ToList();
+    }
+
+    private static string InferLevelFromEventType(string eventType)
+    {
+        var normalized = (eventType ?? string.Empty).Trim().ToLowerInvariant();
+        if (normalized.Contains("error") || normalized.Contains("failed"))
+        {
+            return "Error";
+        }
+
+        if (normalized.Contains("warn"))
+        {
+            return "Warning";
+        }
+
+        return "Info";
+    }
+
+    private static string ResolveEventLevel(string eventType, string payloadJson)
+    {
+        try
+        {
+            using var document = JsonDocument.Parse(payloadJson);
+            if (document.RootElement.ValueKind == JsonValueKind.Object
+                && document.RootElement.TryGetProperty("level", out var levelElement)
+                && levelElement.ValueKind == JsonValueKind.String)
+            {
+                var level = levelElement.GetString();
+                if (!string.IsNullOrWhiteSpace(level))
+                {
+                    return level.Trim();
+                }
+            }
+        }
+        catch
+        {
+            // fall back to event type inference below
+        }
+
+        return InferLevelFromEventType(eventType);
+    }
+
+    private static string FormatEventMessage(string eventType, string payloadJson)
+    {
+        try
+        {
+            using var document = JsonDocument.Parse(payloadJson);
+            if (document.RootElement.ValueKind != JsonValueKind.Object)
+            {
+                return $"[{eventType}] {payloadJson}";
+            }
+
+            if (document.RootElement.TryGetProperty("message", out var messageElement)
+                && messageElement.ValueKind == JsonValueKind.String)
+            {
+                var message = messageElement.GetString();
+                if (!string.IsNullOrWhiteSpace(message))
+                {
+                    if ((string.Equals(eventType, "worker-metric", StringComparison.OrdinalIgnoreCase)
+                        || (string.Equals(eventType, "worker-log", StringComparison.OrdinalIgnoreCase)
+                            && message.Contains("[worker-metric]", StringComparison.OrdinalIgnoreCase)))
+                        && TryFormatMetricMessage(message.Trim(), out var metricMessage))
+                    {
+                        return metricMessage;
+                    }
+
+                    return string.Equals(eventType, "worker-log", StringComparison.OrdinalIgnoreCase)
+                        ? message.Trim()
+                        : $"[{eventType}] {message.Trim()}";
+                }
+            }
+
+            var parts = new List<string>();
+            AppendPayloadPart(parts, document.RootElement, "previousStatus");
+            AppendPayloadPart(parts, document.RootElement, "status");
+            AppendPayloadPart(parts, document.RootElement, "reason");
+            AppendPayloadPart(parts, document.RootElement, "url");
+            AppendPayloadPart(parts, document.RootElement, "name");
+            AppendPayloadPart(parts, document.RootElement, "inMemoryQueued");
+            AppendPayloadPart(parts, document.RootElement, "localQueued");
+            AppendPayloadPart(parts, document.RootElement, "activeLeases");
+            AppendPayloadPart(parts, document.RootElement, "knownUrls");
+            AppendPayloadPart(parts, document.RootElement, "error");
+            AppendPayloadPart(parts, document.RootElement, "pages_processed_total");
+            AppendPayloadPart(parts, document.RootElement, "errors_total");
+            AppendPayloadPart(parts, document.RootElement, "page_processed");
+            AppendPayloadPart(parts, document.RootElement, "page_error");
+
+            if (parts.Count > 0)
+            {
+                return $"[{eventType}] {string.Join(" | ", parts)}";
+            }
+        }
+        catch
+        {
+            // keep raw payload if parsing fails
+        }
+
+        return $"[{eventType}] {payloadJson}";
+    }
+
+    private static void AppendPayloadPart(List<string> parts, JsonElement root, string key)
+    {
+        if (!root.TryGetProperty(key, out var value))
+        {
+            return;
+        }
+
+        var text = value.ValueKind switch
+        {
+            JsonValueKind.String => value.GetString(),
+            JsonValueKind.Number => value.GetRawText(),
+            JsonValueKind.True => "true",
+            JsonValueKind.False => "false",
+            _ => null,
+        };
+
+        if (!string.IsNullOrWhiteSpace(text))
+        {
+            parts.Add($"{key}={text}");
+        }
+    }
+
+    private static List<WorkerThroughputPointViewModel> BuildThroughputSeriesFromCrawlerEvents(
+        IReadOnlyList<CrawlerEventViewModel> events,
+        int windowMinutes,
+        int bucketSeconds)
+    {
+        var windowStart = DateTime.UtcNow.AddMinutes(-Math.Clamp(windowMinutes, 5, 24 * 60));
+        var boundedBucket = Math.Clamp(bucketSeconds, 10, 600);
+        var bucketSums = new Dictionary<DateTime, double>();
+
+        foreach (var evt in events)
+        {
+            if (evt.TimestampUtc < windowStart)
+            {
+                continue;
+            }
+
+            if (!TryParseMetricIncrement(evt.PayloadJson, out var increment) || increment <= 0)
+            {
+                continue;
+            }
+
+            var bucket = FloorToBucketUtc(evt.TimestampUtc, boundedBucket);
+            bucketSums[bucket] = bucketSums.TryGetValue(bucket, out var current) ? current + increment : increment;
+        }
+
+        return bucketSums
+            .OrderBy(item => item.Key)
+            .Select(item => new WorkerThroughputPointViewModel
+            {
+                TimestampUtc = item.Key,
+                Value = item.Value,
+            })
+            .ToList();
+    }
+
+    private static bool TryParseMetricIncrement(string payloadJson, out double value)
+    {
+        value = 0;
+
+        if (string.IsNullOrWhiteSpace(payloadJson))
+        {
+            return false;
+        }
+
+        try
+        {
+            using var document = JsonDocument.Parse(payloadJson);
+            if (document.RootElement.ValueKind != JsonValueKind.Object)
+            {
+                return false;
+            }
+
+            if (document.RootElement.TryGetProperty("type", out var typeElement)
+                && typeElement.ValueKind == JsonValueKind.String
+                && string.Equals(typeElement.GetString(), "page-reported", StringComparison.OrdinalIgnoreCase))
+            {
+                value = 1;
+                return true;
+            }
+
+            if (document.RootElement.TryGetProperty("page_processed", out var pageProcessed)
+                && TryReadNumericValue(pageProcessed, out var parsedIncrement))
+            {
+                value = parsedIncrement;
+                return true;
+            }
+
+            if (document.RootElement.TryGetProperty("metric_value", out var metricValue)
+                && TryReadNumericValue(metricValue, out var parsedMetricValue))
+            {
+                value = parsedMetricValue;
+                return true;
+            }
+
+            if (document.RootElement.TryGetProperty("event_type", out var eventType)
+                && eventType.ValueKind == JsonValueKind.String
+                && string.Equals(eventType.GetString(), "page-reported", StringComparison.OrdinalIgnoreCase))
+            {
+                value = 1;
+                return true;
+            }
+
+            if (document.RootElement.TryGetProperty("status", out var statusElement)
+                && statusElement.ValueKind == JsonValueKind.String
+                && string.Equals(statusElement.GetString(), "Active", StringComparison.OrdinalIgnoreCase)
+                && document.RootElement.TryGetProperty("url", out var urlElement)
+                && urlElement.ValueKind == JsonValueKind.String)
+            {
+                value = 1;
+                return true;
+            }
+
+            if (document.RootElement.TryGetProperty("message", out var messageElement)
+                && messageElement.ValueKind == JsonValueKind.String)
+            {
+                return TryParseMetricIncrementFromString(messageElement.GetString(), out value);
+            }
+        }
+        catch
+        {
+            return false;
+        }
+
+        return false;
+    }
+
+    private static bool TryParseMetricIncrementFromString(string? metricText, out double value)
+    {
+        value = 0;
+        if (string.IsNullOrWhiteSpace(metricText))
+        {
+            return false;
+        }
+
+        var candidate = metricText.Trim();
+        var firstBrace = candidate.IndexOf('{');
+        if (firstBrace >= 0)
+        {
+            candidate = candidate[firstBrace..];
+        }
+
+        try
+        {
+            using var nestedDoc = JsonDocument.Parse(candidate);
+            if (nestedDoc.RootElement.ValueKind != JsonValueKind.Object)
+            {
+                return false;
+            }
+
+            if (nestedDoc.RootElement.TryGetProperty("page_processed", out var pageProcessed)
+                && TryReadNumericValue(pageProcessed, out var parsedIncrement))
+            {
+                value = parsedIncrement;
+                return true;
+            }
+
+            if (nestedDoc.RootElement.TryGetProperty("metric_value", out var metricValue)
+                && TryReadNumericValue(metricValue, out var parsedMetricValue))
+            {
+                value = parsedMetricValue;
+                return true;
+            }
+
+            if (nestedDoc.RootElement.TryGetProperty("type", out var typeElement)
+                && typeElement.ValueKind == JsonValueKind.String
+                && string.Equals(typeElement.GetString(), "page-reported", StringComparison.OrdinalIgnoreCase))
+            {
+                value = 1;
+                return true;
+            }
+
+            if (nestedDoc.RootElement.TryGetProperty("event_type", out var eventType)
+                && eventType.ValueKind == JsonValueKind.String
+                && string.Equals(eventType.GetString(), "page-reported", StringComparison.OrdinalIgnoreCase))
+            {
+                value = 1;
+                return true;
+            }
+        }
+        catch
+        {
+            return false;
+        }
+
+        return false;
+    }
+
+    private static bool TryReadNumericValue(JsonElement element, out double value)
+    {
+        value = 0;
+        if (element.ValueKind == JsonValueKind.Number)
+        {
+            return element.TryGetDouble(out value);
+        }
+
+        if (element.ValueKind == JsonValueKind.String)
+        {
+            return double.TryParse(element.GetString(), out value);
+        }
+
+        return false;
+    }
+
+    private static bool TryFormatMetricMessage(string metricText, out string formatted)
+    {
+        formatted = string.Empty;
+        var candidate = metricText;
+        var firstBrace = candidate.IndexOf('{');
+        if (firstBrace >= 0)
+        {
+            candidate = candidate[firstBrace..];
+        }
+
+        try
+        {
+            using var document = JsonDocument.Parse(candidate);
+            if (document.RootElement.ValueKind != JsonValueKind.Object)
+            {
+                return false;
+            }
+
+            var parts = new List<string>();
+            AppendPayloadPart(parts, document.RootElement, "pages_processed_total");
+            AppendPayloadPart(parts, document.RootElement, "errors_total");
+            AppendPayloadPart(parts, document.RootElement, "page_processed");
+            AppendPayloadPart(parts, document.RootElement, "page_error");
+            AppendPayloadPart(parts, document.RootElement, "frontier_in_memory");
+            AppendPayloadPart(parts, document.RootElement, "frontier_leases");
+
+            if (parts.Count == 0)
+            {
+                return false;
+            }
+
+            formatted = $"[worker-metric] {string.Join(" | ", parts)}";
+            return true;
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
+    private static DateTime FloorToBucketUtc(DateTime timestampUtc, int bucketSeconds)
+    {
+        var normalized = timestampUtc.Kind == DateTimeKind.Utc
+            ? timestampUtc
+            : DateTime.SpecifyKind(timestampUtc, DateTimeKind.Utc);
+        var ticksPerBucket = TimeSpan.FromSeconds(bucketSeconds).Ticks;
+        var flooredTicks = normalized.Ticks - (normalized.Ticks % ticksPerBucket);
+        return new DateTime(flooredTicks, DateTimeKind.Utc);
+    }
+
+    private readonly record struct WorkerActivity(string IconClass, string Label, string CssClass, bool IsProcessing);
+
+    private void ToggleDaemonExpand(WorkerGroupSettingsViewModel daemon)
+    {
+        var key = GetDaemonExpandKey(daemon);
+        if (!expandedDaemonIds.Add(key))
+        {
+            expandedDaemonIds.Remove(key);
+        }
+    }
+
+    private void OpenWorkerDetail(int workerId, string? daemonId = null)
+    {
+        var normalizedDaemonId = NormalizeDaemonId(daemonId);
+        Navigation.NavigateTo($"/workers/{workerId}?daemonId={Uri.EscapeDataString(normalizedDaemonId)}");
+    }
+
+    private void OpenWorkerSection(int workerId, string section, string? daemonId = null)
+    {
+        var normalizedDaemonId = NormalizeDaemonId(daemonId);
+        Navigation.NavigateTo($"/workers/{workerId}/{section}?daemonId={Uri.EscapeDataString(normalizedDaemonId)}");
+    }
+
+    private static string NormalizeDaemonId(string? daemonId)
+    {
+        return string.IsNullOrWhiteSpace(daemonId) ? "local-default" : daemonId.Trim();
+    }
+
+    private static string GetDaemonExpandKey(WorkerGroupSettingsViewModel daemon)
+    {
+        return $"{NormalizeDaemonId(daemon.DaemonId)}:{daemon.Id}";
+    }
+
+    public ValueTask DisposeAsync()
+    {
+        try
+        {
+            _refreshCts?.Cancel();
+        }
+        catch
+        {
+            // ignore shutdown cancellation race
+        }
+
+        _refreshTimer?.Dispose();
+        _refreshCts?.Dispose();
+        return ValueTask.CompletedTask;
+    }
+}

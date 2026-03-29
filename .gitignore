@@ -2,6 +2,7 @@
 .out
 data
 .venv
+.env.local
 __pycache__/
 *.pyc
 pa1/report/.out/*
@@ -10,3 +11,6 @@ Preferential crawling.ipynb
 Remote crawler database (client).ipynb
 Remote crawler database (server).ipynb
 Web crawling - basic tools.ipynb
+ManagerApp/bin
+ManagerApp/obj
+.github

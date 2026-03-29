@@ -1,0 +1,90 @@
+@namespace ManagerApp.Components.Shared
+
+<svg viewBox="0 0 220 220" class="piechart" role="img" aria-label="Worker status distribution">
+    <g transform="translate(110,110)">
+        @if (Total == 0)
+        {
+            <circle cx="0" cy="0" r="90" fill="var(--color-border-light)" />
+        }
+        else
+        {
+            @foreach (var slice in Slices)
+            {
+                <path d="@slice.Path"
+                      fill="@slice.Color"
+                      class="pie-slice @(SelectedStatus == slice.Status ? "selected" : "")"
+                      @onclick="(() => OnSliceClick.InvokeAsync(slice.Status))">
+                </path>
+            }
+        }
+        <circle cx="0" cy="0" r="48" fill="var(--color-bg-base)" />
+        <text x="0" y="0" text-anchor="middle" dominant-baseline="middle" class="pie-total">@Total</text>
+    </g>
+</svg>
+
+@code {
+    private sealed record PieSlice(string Status, string Path, string Color);
+
+    [Parameter] public Dictionary<string, int> StatusCounts { get; set; } = new();
+    [Parameter] public string? SelectedStatus { get; set; }
+    [Parameter] public EventCallback<string> OnSliceClick { get; set; }
+
+    private int Total => StatusCounts.Values.Where(value => value > 0).Sum();
+
+    private IEnumerable<PieSlice> Slices
+    {
+        get
+        {
+            if (Total == 0)
+            {
+                yield break;
+            }
+
+            var start = -90.0;
+            foreach (var (status, value) in StatusCounts.OrderByDescending(kv => kv.Value))
+            {
+                if (value <= 0)
+                {
+                    continue;
+                }
+
+                var angle = 360.0 * value / Total;
+                var end = start + angle;
+                var normalizedStatus = string.IsNullOrWhiteSpace(status) ? "Unknown" : status;
+                yield return new PieSlice(normalizedStatus, ArcPath(start, end, 90), StatusColor(normalizedStatus));
+                start = end;
+            }
+        }
+    }
+
+    private static string ArcPath(double startAngle, double endAngle, double radius)
+    {
+        if (Math.Abs(endAngle - startAngle) >= 359.999)
+        {
+            return $"M 0 {-radius:F3} A {radius:F3} {radius:F3} 0 1 1 0 {radius:F3} A {radius:F3} {radius:F3} 0 1 1 0 {-radius:F3} Z";
+        }
+
+        var startRad = Math.PI * startAngle / 180.0;
+        var endRad = Math.PI * endAngle / 180.0;
+
+        var x1 = radius * Math.Cos(startRad);
+        var y1 = radius * Math.Sin(startRad);
+        var x2 = radius * Math.Cos(endRad);
+        var y2 = radius * Math.Sin(endRad);
+
+        var largeArc = endAngle - startAngle > 180 ? 1 : 0;
+        return $"M 0 0 L {x1:F3} {y1:F3} A {radius:F3} {radius:F3} 0 {largeArc} 1 {x2:F3} {y2:F3} Z";
+    }
+
+    private static string StatusColor(string status)
+    {
+        return status.ToLowerInvariant() switch
+        {
+            "active" => "var(--color-success)",
+            "error" => "var(--color-error)",
+            "paused" => "var(--color-warning)",
+            "idle" => "var(--color-info)",
+            _ => "var(--color-text-tertiary)"
+        };
+    }
+}
