@@ -16,7 +16,7 @@
 \title{\vspace{0ex}
 Programming Assignment 1: Preferential Web Crawler for MedOverNet}
 
-\author{Tibor Koderman, Jerneja Krajcar, Dino Džaferagić}\vspace{-4.0ex}
+\author{ Dino Džaferagić, Tibor Koderman, Jerneja Krajcar}\vspace{-4.0ex}
 
 \begin{document}
 \maketitle
@@ -66,7 +66,7 @@ and tagged with lease metadata (\texttt{locked\_at}, \texttt{locked\_by\_worker\
 
 Queue state is enum-driven (\texttt{QUEUED}, \texttt{LOCKED}, \texttt{PROCESSING}, \texttt{COMPLETED}, \texttt{DUPLICATE}, \texttt{FAILED}).
 Completion reports map worker outcomes to terminal states, while retry outcomes map back to \texttt{QUEUED}. Politeness timing is enforced server-side through
-in-memory per-daemon/per-site cooldowns (minimum 5\,s), not through a \texttt{frontier\_next\_fetch\_time} column.
+in-memory per-ip cooldowns (minimum 5\,s).
 
 \subsection{Division of work}
 We divided the implementation into three balanced workstreams and integrated all parts jointly in the final branch.
