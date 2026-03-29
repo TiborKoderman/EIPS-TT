@@ -116,6 +116,10 @@ Last rebuilt: 2026-03-26
 - [x] Fixed multi-daemon worker routing in manager UI/services (daemon-aware worker actions/groups/detail links), stabilized daemon panel expand behavior, and fixed full-slice dashboard worker pie chart rendering.
 - [x] Removed remaining crawler direct-DB code paths and deleted unused compatibility modules (`src/db/*`, `src/core/crawl_processor.py`, `src/daemon/persistence_router.py`, `src/api_server.py`), keeping Python websocket entrypoint startup intact.
 - [x] Updated `scripts/prepare-submission.sh` to run without the removed `app` compose service (host execution with explicit `latexmk` prerequisite check).
+- [x] Restored collected binary type breakdown (PDF/DOC/DOCX/PPT/PPTX) with zero-safe rendering and binary-page URL fallback classification.
+- [x] Moved collected binary type top bar from Dashboard to Collected Pages tab.
+- [x] Added collected image type breakdown (JPG/PNG/WEBP/GIF/SVG/BMP/TIFF/ICO/AVIF/OTHER) to Collected Pages.
+- [x] Hardened crawler document type detection to include query filename hints and `Content-Disposition` filenames.
 
 ## Pending follow-ups
 

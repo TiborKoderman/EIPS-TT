@@ -33,6 +33,11 @@ public interface IStatisticsService
     Task<Dictionary<string, int>> GetBinaryFileCountsAsync();
 
     /// <summary>
+    /// Get count of binary image files by type (JPG, PNG, WEBP, GIF, SVG, BMP, TIFF, ICO, AVIF, OTHER)
+    /// </summary>
+    Task<Dictionary<string, int>> GetImageFileCountsAsync();
+
+    /// <summary>
     /// Calculate average number of images per HTML page
     /// </summary>
     Task<double> GetAverageImagesPerPageAsync();

@@ -39,22 +39,6 @@
             <StatCard Label="Images" Value="@stats.TotalImages.ToString()" Footnote="@($"Avg: {stats.AverageImagesPerPage} per page")" />
         </div>
 
-        @if (stats.BinaryFileCounts.Any())
-        {
-            <div class="card mb-lg">
-                <h2 class="card-title">Binary Files</h2>
-                <div class="grid grid-cols-4">
-                    @foreach (var (type, count) in stats.BinaryFileCounts)
-                    {
-                        <div>
-                            <div class="text-small text-muted">@type</div>
-                            <div style="font-size: 20px; font-weight: 600;">@count</div>
-                        </div>
-                    }
-                </div>
-            </div>
-        }
-
         <div class="dashboard-main-grid mb-lg">
             <div class="dashboard-worker-column">
                 <div class="card dashboard-worker-status-card">

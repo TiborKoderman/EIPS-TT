@@ -218,6 +218,19 @@ This design allows multiple workers to operate in parallel while still respectin
 \textbf{Problem:} repeated navigation patterns and low-value loops can waste crawl budget.\\
 \textbf{Solution:} canonical URL uniqueness in DB, relevance scoring, and robots compliance constraints.
 
+\subsection{Binary type accounting bug and correction}
+\textbf{Problem:} during validation we found an unnoticed accounting bug in the per-type binary statistics. The dashboard/report path originally relied on \texttt{page\_data.data\_type\_code} and strict file-suffix checks on URL path only. In practice, many collected binary resources had no \texttt{page\_data} row (metadata-only ingest), and some file-type hints appeared in query parameters or response headers rather than the URL path. This made part of the binary corpus look "ignored" in type breakdowns.
+
+\textbf{Solution:} we corrected the pipeline in two steps:
+\begin{itemize}
+    \item online counting now classifies all \texttt{BINARY} rows from \texttt{crawldb.page} (not only \texttt{page\_data}),
+    \item type detection now uses content-type plus filename hints from URL path, query parameters, and \texttt{Content-Disposition} when available.
+\end{itemize}
+
+We also added a separate image-type breakdown (JPG/PNG/WEBP/GIF/SVG/BMP/TIFF/ICO/AVIF/OTHER), which matches the current crawl profile much better.
+
+\textbf{Recovery without full recrawl:} yes, this can be fixed without crawling from scratch. Existing \texttt{BINARY} URLs already stored in \texttt{crawldb.page} can be reclassified offline with the improved rules (plus optional targeted \texttt{HEAD} checks only for unresolved \texttt{OTHER} entries). A full crawl restart is not required for corrected aggregate statistics.
+
 \section{Results, statistics, and visualization}
 This section summarizes the final crawl snapshot and includes screenshots from the manager UI.
 All numeric values below were extracted from the project PostgreSQL database (\texttt{crawldb}) after the run.
@@ -255,6 +268,8 @@ The seed-domain subset below refers to \texttt{medover.zurnal24.si}.
         PPTX      & 0 \\ \bottomrule
     \end{tabular}
 \end{table}
+
+In this specific snapshot, document counters are still zero after the fix because the collected binary corpus is dominated by image/media URLs rather than PDF/DOC/DOCX/PPT/PPTX resources.
 
 \subsection{Manager dashboard overview}
 Figure~\ref{fig:dashboard_overview} shows the aggregate crawl status and live worker/frontier monitoring.

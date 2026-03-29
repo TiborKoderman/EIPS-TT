@@ -23,6 +23,7 @@ The manager serves two critical roles:
 
 - Expose websocket daemon controls and daemon configuration from the UI
 - Surface crawl statistics, frontier queue state, and worker health metrics
+- Surface crawl statistics, including collected binary file type counters (PDF, DOC, DOCX, PPT, PPTX)
 - Provide an operator-facing workflow to inspect pages, workers, and graph relationships
 - Maintain authenticated WebSocket channels for:
   - Reverse channel: daemon → manager (heartbeat, state changes, snapshots)
@@ -84,6 +85,8 @@ All transitions are logged with timestamp and reason.
 ## Queue Management Features
 
 - **Live frontier stats:** explicit In queue / In memory / Leased counters with completion/failure context
+- **Binary type visibility:** Collected Pages shows PDF/DOC/DOCX/PPT/PPTX counters (zero-safe) using collected `BINARY` pages and known type metadata
+- **Image type visibility:** Collected Pages shows JPG/PNG/WEBP/GIF/SVG/BMP/TIFF/ICO/AVIF/OTHER counters inferred from collected binary URLs
 - **Duplicate detection:** Identify and link duplicate URLs
 - **Terminal duplicate handling:** manager-side enqueue upsert keeps `DUPLICATE` rows terminal instead of re-queuing them
 - **Lease management:** Automatic requeue on worker timeout/failure

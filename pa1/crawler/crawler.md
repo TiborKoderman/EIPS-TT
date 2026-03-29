@@ -12,6 +12,7 @@ The crawler module runs a websocket-controlled daemon that executes worker crawl
 - Parse links from `href` and JavaScript redirect patterns.
 - Detect image references from `img[src]`.
 - Classify content handling (`HTML`, binary, duplicate handling).
+- Detect binary document types (PDF/DOC/DOCX/PPT/PPTX) via content-type, URL/query filename hints, and `Content-Disposition` filenames.
 - Apply preferential relevance scoring to discovered URLs.
 
 ## Entrypoint

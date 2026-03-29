@@ -3,8 +3,9 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+import re
 from typing import Mapping
-from urllib.parse import urlparse
+from urllib.parse import unquote, urlparse
 
 import requests
 
@@ -75,7 +76,7 @@ class Downloader:
         response = self._session.get(url, timeout=self.timeout_seconds, allow_redirects=True)
         final_url = response.url
         normalized_content_type = _normalize_content_type(response.headers)
-        data_type = _detect_data_type(final_url, normalized_content_type)
+        data_type = _detect_data_type(final_url, normalized_content_type, response.headers)
         content_length = _detect_content_length(response)
         is_html = _is_html_response(final_url, normalized_content_type, response.text)
 
@@ -141,15 +142,71 @@ def _normalize_content_type(headers: Mapping[str, str]) -> str | None:
     return value.split(";", 1)[0].strip().lower()
 
 
-def _detect_data_type(url: str, content_type: str | None) -> str | None:
+def _detect_data_type(
+    url: str,
+    content_type: str | None,
+    headers: Mapping[str, str] | None = None,
+) -> str | None:
     if content_type in DATA_TYPE_BY_CONTENT_TYPE:
         return DATA_TYPE_BY_CONTENT_TYPE[content_type]
 
-    path = urlparse(url).path.lower()
-    for extension, data_type in DATA_TYPE_BY_EXTENSION.items():
-        if path.endswith(extension):
-            return data_type
+    content_disposition = ""
+    if headers:
+        content_disposition = headers.get("Content-Disposition") or headers.get("content-disposition") or ""
+
+    for candidate in _extract_type_candidates(url, content_disposition):
+        normalized = candidate.strip().strip("\"'()[]{}<>").lower()
+        normalized = normalized.split("#", 1)[0].split("?", 1)[0]
+        for extension, data_type in sorted(
+            DATA_TYPE_BY_EXTENSION.items(),
+            key=lambda item: len(item[0]),
+            reverse=True,
+        ):
+            if normalized.endswith(extension):
+                return data_type
+
     return None
+
+
+def _extract_type_candidates(url: str, content_disposition: str) -> list[str]:
+    candidates: list[str] = []
+
+    parsed = urlparse(url)
+    if parsed.path:
+        candidates.append(parsed.path)
+        candidates.append(parsed.path.rsplit("/", 1)[-1])
+
+    if parsed.query:
+        for token in parsed.query.split("&"):
+            if not token:
+                continue
+
+            _, _, value = token.partition("=")
+            raw = value or token
+            decoded = unquote(raw.replace("+", " ")).strip()
+            if not decoded:
+                continue
+
+            candidates.append(decoded)
+            candidates.append(decoded.rsplit("/", 1)[-1])
+
+    disposition_filename = _extract_filename_from_content_disposition(content_disposition)
+    if disposition_filename:
+        candidates.append(disposition_filename)
+
+    return candidates
+
+
+def _extract_filename_from_content_disposition(content_disposition: str) -> str | None:
+    if not content_disposition:
+        return None
+
+    match = re.search(r"filename\*?=(?:UTF-8''|\")?([^\";]+)", content_disposition, re.IGNORECASE)
+    if not match:
+        return None
+
+    filename = unquote(match.group(1).strip().strip("\"'"))
+    return filename or None
 
 
 def _is_html_response(url: str, content_type: str | None, text_body: str | None) -> bool:
