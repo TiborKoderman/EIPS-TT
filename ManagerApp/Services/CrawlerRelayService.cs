@@ -896,8 +896,6 @@ public sealed class CrawlerRelayService
             sourcePage,
             discoveredImageUrls,
             cancellationToken,
-            insertedPageTypeCode: "BINARY",
-            promoteExistingFrontier: true,
             queueFrontierOnly: false);
 
         var normalizedImages = discoveredImageUrls
@@ -977,8 +975,6 @@ public sealed class CrawlerRelayService
         Page sourcePage,
         IReadOnlyCollection<string>? discoveredUrls,
         CancellationToken cancellationToken,
-        string insertedPageTypeCode = "FRONTIER",
-        bool promoteExistingFrontier = false,
         bool queueFrontierOnly = true)
     {
         if (discoveredUrls is null || discoveredUrls.Count == 0)
@@ -1008,90 +1004,7 @@ public sealed class CrawlerRelayService
             .Where(page => page.Url != null && filteredUrls.Contains(page.Url))
             .ToDictionaryAsync(page => page.Url!, cancellationToken);
 
-        if (promoteExistingFrontier
-            && !string.Equals(insertedPageTypeCode, "FRONTIER", StringComparison.OrdinalIgnoreCase)
-            && knownTargets.Count > 0)
-        {
-            var changed = false;
-            foreach (var existing in knownTargets.Values)
-            {
-                if (!string.Equals(existing.PageTypeCode, "FRONTIER", StringComparison.OrdinalIgnoreCase))
-                {
-                    continue;
-                }
-
-                existing.PageTypeCode = insertedPageTypeCode;
-                existing.HtmlContent = null;
-                existing.ContentHash = null;
-                existing.DuplicateOfPageId = null;
-                changed = true;
-            }
-
-            if (changed)
-            {
-                await context.SaveChangesAsync(cancellationToken);
-            }
-        }
-
-        var missingUrls = filteredUrls
-            .Where(discoveredUrl => !knownTargets.ContainsKey(discoveredUrl))
-            .ToList();
-
-        if (missingUrls.Count > 0)
-        {
-            var siteIdCache = new Dictionary<string, int?>(StringComparer.OrdinalIgnoreCase);
-            var insertedTargets = new List<Page>(missingUrls.Count);
-            foreach (var discoveredUrl in missingUrls)
-            {
-                var siteId = await ResolveSiteIdAsync(context, discoveredUrl, null, cancellationToken, siteIdCache);
-                insertedTargets.Add(new Page
-                {
-                    SiteId = siteId,
-                    PageTypeCode = insertedPageTypeCode,
-                    Url = discoveredUrl,
-                    HtmlContent = null,
-                    HttpStatusCode = null,
-                    AccessedTime = null,
-                    ContentHash = null,
-                    DuplicateOfPageId = null,
-                });
-            }
-
-            context.Pages.AddRange(insertedTargets);
-            try
-            {
-                await context.SaveChangesAsync(cancellationToken);
-            }
-            catch (DbUpdateException)
-            {
-                // Another ingest worker inserted some of the same URLs concurrently.
-                foreach (var insertedTarget in insertedTargets)
-                {
-                    var entry = context.Entry(insertedTarget);
-                    if (entry.State != EntityState.Detached)
-                    {
-                        entry.State = EntityState.Detached;
-                    }
-                }
-            }
-
-            knownTargets = await context.Pages
-                .Where(page => page.Url != null && filteredUrls.Contains(page.Url))
-                .ToDictionaryAsync(page => page.Url!, cancellationToken);
-
-            var unresolvedUrls = missingUrls
-                .Where(discoveredUrl => !knownTargets.ContainsKey(discoveredUrl))
-                .ToList();
-            if (unresolvedUrls.Count > 0)
-            {
-                throw new InvalidOperationException(
-                    $"Failed to upsert discovered frontier URLs: {string.Join(", ", unresolvedUrls.Take(5))}");
-            }
-        }
-
-        var targetPages = filteredUrls
-            .Where(knownTargets.ContainsKey)
-            .Select(discoveredUrl => knownTargets[discoveredUrl])
+        var targetPages = knownTargets.Values
             .ToList();
 
         var targetIds = targetPages
@@ -1130,11 +1043,16 @@ public sealed class CrawlerRelayService
             return new List<string>();
         }
 
-        return targetPages
-            .Where(targetPage =>
-                string.Equals(targetPage.PageTypeCode, "FRONTIER", StringComparison.OrdinalIgnoreCase)
-                && !string.IsNullOrWhiteSpace(targetPage.Url))
-            .Select(targetPage => targetPage.Url!)
+        return filteredUrls
+            .Where(discoveredUrl =>
+            {
+                if (!knownTargets.TryGetValue(discoveredUrl, out var targetPage))
+                {
+                    return true;
+                }
+
+                return string.Equals(targetPage.PageTypeCode, "FRONTIER", StringComparison.OrdinalIgnoreCase);
+            })
             .Distinct(StringComparer.Ordinal)
             .ToList();
     }
