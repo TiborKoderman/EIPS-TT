@@ -16,7 +16,21 @@ from urllib import error, request
 import json
 from dataclasses import dataclass
 from typing import Any
-from urllib.parse import urlparse, urlsplit
+from urllib.parse import unquote, urlparse, urlsplit
+
+
+TRAP_REDIRECT_QUERY_KEYS = {
+    "returnurl",
+    "return_url",
+    "return",
+    "redirect",
+    "redirect_uri",
+    "next",
+    "continue",
+    "dest",
+    "destination",
+    "url",
+}
 
 from api.contracts import (
     GlobalWorkerConfig,
@@ -1406,6 +1420,21 @@ class DaemonWorkerService(WorkerControlService):
             )
             return None
 
+        if self._is_likely_trap_url(candidate):
+            payload = {
+                "url": candidate,
+                "reason": "trap-pattern",
+                "pattern": "recursive-redirect-login",
+            }
+            if worker_id is not None:
+                payload["workerId"] = worker_id
+            self._emit_manager_event(
+                "frontier-prune",
+                worker_id=worker_id,
+                payload=payload,
+            )
+            return None
+
         priority_value = explicit_priority
         if priority_value is None:
             policy = self._build_relevance_policy()
@@ -1417,6 +1446,84 @@ class DaemonWorkerService(WorkerControlService):
             )))
 
         return candidate, priority_value
+
+    @staticmethod
+    def _decode_percent_encoded_value(value: str, max_rounds: int = 6) -> tuple[int, str]:
+        depth = 0
+        current = value
+        for _ in range(max_rounds):
+            decoded = unquote(current)
+            if decoded == current:
+                break
+            depth += 1
+            current = decoded
+        return depth, current
+
+    @staticmethod
+    def _is_auth_like_path(path: str) -> bool:
+        lowered = (path or "").lower()
+        return any(token in lowered for token in ("/login", "/signin", "/sign-in", "/auth"))
+
+    def _is_likely_trap_url(self, candidate: str) -> bool:
+        try:
+            parsed = urlsplit(candidate)
+        except Exception:
+            return False
+
+        query = (parsed.query or "").strip()
+        if not query:
+            return False
+
+        if len(query) >= 1500:
+            return True
+
+        path = parsed.path.lower()
+        lower_query = query.lower()
+        login_like_path = self._is_auth_like_path(path)
+
+        if "%252525" in lower_query:
+            return True
+
+        for part in query.split("&"):
+            if not part:
+                continue
+
+            key, _, value = part.partition("=")
+            if not value:
+                continue
+
+            if len(value) >= 1200:
+                return True
+
+            value_lower = value.lower()
+            if value_lower.count("%25") >= 6:
+                return True
+
+            normalized_key = unquote(key).strip().lower()
+            if normalized_key not in TRAP_REDIRECT_QUERY_KEYS:
+                continue
+
+            decode_depth, decoded_value = self._decode_percent_encoded_value(value, max_rounds=6)
+            if normalized_key in {"returnurl", "return_url"}:
+                return True
+
+            if login_like_path:
+                return True
+
+            if decode_depth >= 3:
+                return True
+
+            if decode_depth >= 2 and ("//" in decoded_value or decoded_value.startswith("/")):
+                return True
+
+            if "returnurl=" in decoded_value.lower():
+                return True
+
+            lowered_decoded = decoded_value.lower()
+            if "redirect=" in lowered_decoded or "redirect_uri=" in lowered_decoded or "next=" in lowered_decoded:
+                return True
+
+        return False
 
     def _enqueue_frontier_url(
         self,
@@ -1603,6 +1710,21 @@ class DaemonWorkerService(WorkerControlService):
             idx, candidate, metadata = best
             del self._frontier_queue[idx]
 
+            if self._is_likely_trap_url(candidate):
+                self._frontier_metadata.pop(candidate, None)
+                self._known_frontier_urls.discard(candidate)
+                self._mark_tombstone(candidate)
+                self._emit_manager_event(
+                    "frontier-prune",
+                    worker_id=worker_id,
+                    payload={
+                        "url": candidate,
+                        "reason": "trap-pattern",
+                        "workerId": worker_id,
+                    },
+                )
+                continue
+
             if self._is_tombstoned(candidate):
                 self._frontier_metadata.pop(candidate, None)
                 continue
@@ -1653,6 +1775,21 @@ class DaemonWorkerService(WorkerControlService):
 
             idx, candidate, metadata = best
             del queue[idx]
+
+            if self._is_likely_trap_url(candidate):
+                self._worker_local_known_urls[worker_id].discard(candidate)
+                self._worker_local_metadata[worker_id].pop(candidate, None)
+                self._mark_tombstone(candidate)
+                self._emit_manager_event(
+                    "frontier-prune",
+                    worker_id=worker_id,
+                    payload={
+                        "url": candidate,
+                        "reason": "trap-pattern",
+                        "workerId": worker_id,
+                    },
+                )
+                continue
 
             if self._is_tombstoned(candidate):
                 self._worker_local_known_urls[worker_id].discard(candidate)
@@ -1768,7 +1905,7 @@ class DaemonWorkerService(WorkerControlService):
         self._frontier_metadata.pop(url, None)
         self._worker_local_metadata[worker_id].pop(url, None)
 
-        self._completed_tombstones[url] = time.monotonic() + self._tombstone_ttl_seconds
+        self._mark_tombstone(url)
         self._emit_manager_event(
             "frontier-complete",
             worker_id=worker_id,
@@ -2009,6 +2146,9 @@ class DaemonWorkerService(WorkerControlService):
             self._completed_tombstones.pop(url, None)
             return False
         return True
+
+    def _mark_tombstone(self, url: str) -> None:
+        self._completed_tombstones[url] = time.monotonic() + self._tombstone_ttl_seconds
 
     def _claim_frontier_url_from_manager(self, worker_id: int) -> FrontierLease | None:
         if self._frontier_claim_url is None:
