@@ -5,6 +5,9 @@ from __future__ import annotations
 from dataclasses import dataclass
 from urllib.parse import urlsplit
 
+AUTH_PATH_SIGNALS = ("/login", "/signin", "/sign-in", "/auth")
+REDIRECT_QUERY_KEYS = ("returnurl=", "return_url=", "redirect=", "redirect_uri=", "next=", "continue=")
+
 
 @dataclass(frozen=True)
 class RelevancePolicy:
@@ -54,11 +57,22 @@ def score_url(
             score += policy.allowed_suffix_boost
             break
 
-    haystack = (parsed.path + "?" + (parsed.query or "")).lower()
+    path = parsed.path.lower()
+    query = (parsed.query or "").lower()
+    haystack = path
     for keyword in policy.keywords:
         key = keyword.strip().lower()
         if key and key in haystack:
             score += policy.keyword_boost
+
+    has_auth_path = any(token in path for token in AUTH_PATH_SIGNALS)
+    has_redirect_query = any(token in query for token in REDIRECT_QUERY_KEYS)
+    if has_auth_path:
+        score -= 15.0
+    if has_redirect_query:
+        score -= 20.0
+    if has_auth_path and has_redirect_query:
+        score -= 15.0
 
     score -= policy.depth_penalty * max(depth, 0)
     return score

@@ -8,6 +8,20 @@ namespace ManagerApp.Services;
 
 public sealed class FrontierService
 {
+    private static readonly HashSet<string> TrapRedirectQueryKeys = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "returnurl",
+        "return_url",
+        "return",
+        "redirect",
+        "redirect_uri",
+        "next",
+        "continue",
+        "dest",
+        "destination",
+        "url",
+    };
+
     private const string EnqueueSql = """
         INSERT INTO crawldb.frontier_queue (
             url,
@@ -106,6 +120,12 @@ public sealed class FrontierService
         }
         var normalizedUrl = normalized.Trim();
 
+        if (IsLikelyCrawlerTrapUrl(normalizedUrl))
+        {
+            _logger.LogDebug("Skipping likely trap URL during enqueue: {Url}", normalizedUrl);
+            return false;
+        }
+
         var normalizedSource = NormalizeUrl(sourceUrl);
 
         await using var connection = await OpenConnectionAsync(cancellationToken);
@@ -126,11 +146,18 @@ public sealed class FrontierService
         }
 
         var mergedByUrl = new Dictionary<string, FrontierEnqueueCandidate>(StringComparer.Ordinal);
+        var skippedTrapCandidates = 0;
         foreach (var candidate in candidates)
         {
             var normalized = NormalizeUrl(candidate.Url);
             if (string.IsNullOrWhiteSpace(normalized))
             {
+                continue;
+            }
+
+            if (IsLikelyCrawlerTrapUrl(normalized))
+            {
+                skippedTrapCandidates += 1;
                 continue;
             }
 
@@ -161,7 +188,16 @@ public sealed class FrontierService
 
         if (mergedByUrl.Count == 0)
         {
+            if (skippedTrapCandidates > 0)
+            {
+                _logger.LogDebug("Skipped {Count} likely trap frontier candidates in enqueue batch.", skippedTrapCandidates);
+            }
             return 0;
+        }
+
+        if (skippedTrapCandidates > 0)
+        {
+            _logger.LogDebug("Skipped {Count} likely trap frontier candidates in enqueue batch.", skippedTrapCandidates);
         }
 
         await using var connection = await OpenConnectionAsync(cancellationToken);
@@ -262,13 +298,26 @@ public sealed class FrontierService
 
             var now = DateTime.UtcNow;
             (long Id, string Url, int Priority, string? SourceUrl, int Depth)? selected = null;
+            var trapIds = new List<long>();
             foreach (var item in candidates)
             {
+                if (IsLikelyCrawlerTrapUrl(item.Url))
+                {
+                    trapIds.Add(item.Id);
+                    continue;
+                }
+
                 if (await IsSiteReadyAsync(crawlerKey, item.Url, now, cancellationToken))
                 {
                     selected = item;
                     break;
                 }
+            }
+
+            if (trapIds.Count > 0)
+            {
+                await MarkQueuedCandidatesFailedAsync(connection, tx, trapIds, cancellationToken);
+                _logger.LogDebug("Pruned {Count} likely trap URLs while claiming frontier rows.", trapIds.Count);
             }
 
             if (selected is null)
@@ -833,6 +882,182 @@ public sealed class FrontierService
             Fragment = string.Empty,
         };
         return builder.Uri.AbsoluteUri;
+    }
+
+    private static bool IsLikelyCrawlerTrapUrl(string normalizedUrl)
+    {
+        if (!Uri.TryCreate(normalizedUrl, UriKind.Absolute, out var parsed))
+        {
+            return false;
+        }
+
+        var query = parsed.Query;
+        if (string.IsNullOrWhiteSpace(query))
+        {
+            return false;
+        }
+
+        var queryText = query.TrimStart('?');
+        if (queryText.Length >= 1500)
+        {
+            return true;
+        }
+
+        var lowerQuery = queryText.ToLowerInvariant();
+        if (lowerQuery.Contains("%252525", StringComparison.Ordinal))
+        {
+            return true;
+        }
+
+        var path = parsed.AbsolutePath.ToLowerInvariant();
+        var loginLikePath = IsAuthLikePath(path);
+
+        var parts = queryText.Split('&', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+        foreach (var part in parts)
+        {
+            var separatorIndex = part.IndexOf('=');
+            if (separatorIndex <= 0 || separatorIndex >= part.Length - 1)
+            {
+                continue;
+            }
+
+            var keyRaw = part[..separatorIndex];
+            var valueRaw = part[(separatorIndex + 1)..];
+            if (string.IsNullOrWhiteSpace(valueRaw))
+            {
+                continue;
+            }
+
+            if (valueRaw.Length >= 1200)
+            {
+                return true;
+            }
+
+            if (CountTokenOccurrences(valueRaw, "%25") >= 6)
+            {
+                return true;
+            }
+
+            var key = WebUtility.UrlDecode(keyRaw)?.Trim() ?? string.Empty;
+            if (!TrapRedirectQueryKeys.Contains(key))
+            {
+                continue;
+            }
+
+            var (decodeDepth, decodedValue) = DecodePercentEncodedDepth(valueRaw, maxRounds: 6);
+            if (string.Equals(key, "returnurl", StringComparison.OrdinalIgnoreCase)
+                || string.Equals(key, "return_url", StringComparison.OrdinalIgnoreCase))
+            {
+                return true;
+            }
+
+            if (loginLikePath)
+            {
+                return true;
+            }
+
+            if (decodeDepth >= 3)
+            {
+                return true;
+            }
+
+            if (decodeDepth >= 2
+                && (decodedValue.Contains("://", StringComparison.OrdinalIgnoreCase)
+                    || decodedValue.StartsWith("/", StringComparison.Ordinal)))
+            {
+                return true;
+            }
+
+            if (decodedValue.Contains("returnurl=", StringComparison.OrdinalIgnoreCase))
+            {
+                return true;
+            }
+
+            if (decodedValue.Contains("redirect=", StringComparison.OrdinalIgnoreCase)
+                || decodedValue.Contains("redirect_uri=", StringComparison.OrdinalIgnoreCase)
+                || decodedValue.Contains("next=", StringComparison.OrdinalIgnoreCase))
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    private static bool IsAuthLikePath(string path)
+    {
+        if (string.IsNullOrWhiteSpace(path))
+        {
+            return false;
+        }
+
+        return path.Contains("/login", StringComparison.Ordinal)
+            || path.Contains("/signin", StringComparison.Ordinal)
+            || path.Contains("/sign-in", StringComparison.Ordinal)
+            || path.Contains("/auth", StringComparison.Ordinal);
+    }
+
+    private static (int Depth, string Value) DecodePercentEncodedDepth(string value, int maxRounds)
+    {
+        var depth = 0;
+        var current = value;
+        for (var index = 0; index < maxRounds; index += 1)
+        {
+            var decoded = WebUtility.UrlDecode(current) ?? current;
+            if (string.Equals(decoded, current, StringComparison.Ordinal))
+            {
+                break;
+            }
+
+            depth += 1;
+            current = decoded;
+        }
+
+        return (depth, current);
+    }
+
+    private static int CountTokenOccurrences(string value, string token)
+    {
+        if (string.IsNullOrEmpty(value) || string.IsNullOrEmpty(token))
+        {
+            return 0;
+        }
+
+        var count = 0;
+        var index = 0;
+        while ((index = value.IndexOf(token, index, StringComparison.OrdinalIgnoreCase)) >= 0)
+        {
+            count += 1;
+            index += token.Length;
+        }
+
+        return count;
+    }
+
+    private static async Task MarkQueuedCandidatesFailedAsync(
+        NpgsqlConnection connection,
+        NpgsqlTransaction transaction,
+        IReadOnlyCollection<long> ids,
+        CancellationToken cancellationToken)
+    {
+        if (ids.Count == 0)
+        {
+            return;
+        }
+
+        const string sql = """
+            UPDATE crawldb.frontier_queue
+            SET state = 'FAILED'::crawldb.frontier_queue_state,
+                finished_at = NOW(),
+                locked_at = NULL,
+                locked_by_worker_id = NULL
+            WHERE state = 'QUEUED'::crawldb.frontier_queue_state
+              AND id = ANY(@ids);
+            """;
+
+        await using var cmd = new NpgsqlCommand(sql, connection, transaction);
+        cmd.Parameters.AddWithValue("ids", ids.ToArray());
+        await cmd.ExecuteNonQueryAsync(cancellationToken);
     }
 
 }
