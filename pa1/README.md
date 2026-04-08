@@ -92,7 +92,7 @@ docker run -d --name pa1-pgadmin-restore-test \
 	-e POSTGRES_DB=crawldb \
 	-p 55432:5432 \
 	-v pa1_pgadmin_restore_test_data:/var/lib/postgresql/data \
-	postgres:latest
+	pgvector/pgvector:pg18
 ```
 
 ### pgAdmin restore steps

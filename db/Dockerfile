@@ -1,4 +1,4 @@
-FROM postgres:latest
+FROM pgvector/pgvector:pg18
 
 # Optional initialization scripts for first-time container bootstrap.
 # Existing project migration flow can still be used for upgrades.

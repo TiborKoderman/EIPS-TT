@@ -1,6 +1,6 @@
 services:
   db:
-    image: postgres:latest
+    image: pgvector/pgvector:pg18
     environment:
       POSTGRES_DB: crawldb
       POSTGRES_USER: postgres
