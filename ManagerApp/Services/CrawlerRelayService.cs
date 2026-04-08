@@ -4,6 +4,7 @@ using System.Text;
 using System.Text.Json;
 using System.Xml.Linq;
 using ManagerApp.Data;
+using ManagerApp.Models;
 using Microsoft.EntityFrameworkCore;
 using Npgsql;
 
@@ -26,6 +27,13 @@ public sealed class CrawlerRelayService
     private readonly int _sitemapIngestMaxUrls;
     private readonly int _sitemapIngestMaxDocuments;
     private readonly int _sitemapFetchTimeoutSeconds;
+    private readonly bool _imageStorageEnabled;
+    private readonly int _imageFetchTimeoutSeconds;
+    private readonly int _imageMaxBytes;
+    private readonly JsonSerializerOptions _jsonOptions = new()
+    {
+        PropertyNameCaseInsensitive = true,
+    };
     private DateTime _lastCleanupUtc = DateTime.MinValue;
     private const int MaxRecentEvents = 5000;
 
@@ -47,6 +55,9 @@ public sealed class CrawlerRelayService
         _sitemapIngestMaxUrls = Math.Clamp(_configuration.GetValue("CrawlerApi:SitemapIngestMaxUrls", 1000), 20, 20000);
         _sitemapIngestMaxDocuments = Math.Clamp(_configuration.GetValue("CrawlerApi:SitemapIngestMaxDocuments", 30), 1, 200);
         _sitemapFetchTimeoutSeconds = Math.Clamp(_configuration.GetValue("CrawlerApi:SitemapFetchTimeoutSeconds", 10), 2, 60);
+        _imageStorageEnabled = _configuration.GetValue("CrawlerApi:ImageStorageEnabled", true);
+        _imageFetchTimeoutSeconds = Math.Clamp(_configuration.GetValue("CrawlerApi:ImageFetchTimeoutSeconds", 10), 2, 60);
+        _imageMaxBytes = Math.Clamp(_configuration.GetValue("CrawlerApi:ImageMaxBytes", 2_000_000), 1_024, 25_000_000);
     }
 
     public async Task<CrawlerIngestResponse> IngestAsync(CrawlerIngestRequest request, CancellationToken cancellationToken)
@@ -77,6 +88,7 @@ public sealed class CrawlerRelayService
         var pageDataBytes = binaryPayloadBytes ?? parsedPayloadBytes;
 
         await using var context = await _contextFactory.CreateDbContextAsync(cancellationToken);
+        var allowedScopeHosts = await ResolveAllowedScopeHostsAsync(context, url, cancellationToken);
 
         var existingPage = await context.Pages
             .FirstOrDefaultAsync(page => page.Url == url, cancellationToken);
@@ -275,14 +287,41 @@ public sealed class CrawlerRelayService
         }
         discoveredImageUrls.AddRange(ExtractParsedImageUrls(request.DownloadResult?.ParsedPayload));
 
-        if (discoveredImageUrls.Count > 0)
+        var inScopeImageUrls = FilterUrlsByScope(discoveredImageUrls, allowedScopeHosts);
+        var droppedImageCount = Math.Max(0, discoveredImageUrls.Count - inScopeImageUrls.Count);
+        if (droppedImageCount > 0)
+        {
+            _logger.LogInformation(
+                "Dropped {Count} out-of-scope discovered image URLs during ingest for {Url}.",
+                droppedImageCount,
+                url);
+        }
+
+        if (inScopeImageUrls.Count > 0)
         {
             await UpsertDiscoveredImagesAsync(
                 context,
                 targetPage,
-                discoveredImageUrls,
+                inScopeImageUrls,
                 accessedTime,
+                cancellationToken,
+                allowedScopeHosts);
+
+            await StoreDiscoveredImageDataAsync(
+                context,
+                targetPage,
+                inScopeImageUrls,
                 cancellationToken);
+        }
+
+        var inScopeDiscoveredUrls = FilterUrlsByScope(request.DiscoveredUrls ?? new List<string>(), allowedScopeHosts);
+        var droppedDiscoveredCount = Math.Max(0, (request.DiscoveredUrls?.Count ?? 0) - inScopeDiscoveredUrls.Count);
+        if (droppedDiscoveredCount > 0)
+        {
+            _logger.LogInformation(
+                "Dropped {Count} out-of-scope discovered page URLs during ingest for {Url}.",
+                droppedDiscoveredCount,
+                url);
         }
 
         var discoveredQueueCandidates = await UpsertDiscoveredLinksAsync(
@@ -290,8 +329,9 @@ public sealed class CrawlerRelayService
             targetPage.DuplicateOfPageId.HasValue
                 ? await context.Pages.FirstAsync(page => page.Id == targetPage.DuplicateOfPageId.Value, cancellationToken)
                 : targetPage,
-            request.DiscoveredUrls,
-            cancellationToken);
+            inScopeDiscoveredUrls,
+            cancellationToken,
+            allowedScopeHosts: allowedScopeHosts);
 
         if (discoveredQueueCandidates.Count > 0)
         {
@@ -310,7 +350,7 @@ public sealed class CrawlerRelayService
 
         if (sitemapCandidates.Count > 0)
         {
-            _ = await EnqueueSitemapDiscoveredUrlsAsync(sitemapCandidates, url, cancellationToken);
+            _ = await EnqueueSitemapDiscoveredUrlsAsync(sitemapCandidates, url, allowedScopeHosts, cancellationToken);
         }
 
         return new CrawlerIngestResponse
@@ -884,7 +924,8 @@ public sealed class CrawlerRelayService
         Page sourcePage,
         IReadOnlyCollection<string> discoveredImageUrls,
         DateTime accessedTime,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        IReadOnlySet<string>? allowedScopeHosts = null)
     {
         if (discoveredImageUrls.Count == 0)
         {
@@ -896,7 +937,8 @@ public sealed class CrawlerRelayService
             sourcePage,
             discoveredImageUrls,
             cancellationToken,
-            queueFrontierOnly: false);
+            queueFrontierOnly: false,
+            allowedScopeHosts: allowedScopeHosts);
 
         var normalizedImages = discoveredImageUrls
             .Select(NormalizeUrl)
@@ -970,12 +1012,106 @@ public sealed class CrawlerRelayService
         };
     }
 
+    private async Task StoreDiscoveredImageDataAsync(
+        CrawldbContext context,
+        Page sourcePage,
+        IReadOnlyCollection<string> discoveredImageUrls,
+        CancellationToken cancellationToken)
+    {
+        if (!_imageStorageEnabled || discoveredImageUrls.Count == 0)
+        {
+            return;
+        }
+
+        var normalizedImages = discoveredImageUrls
+            .Select(NormalizeUrl)
+            .Where(url => !string.IsNullOrWhiteSpace(url))
+            .Distinct(StringComparer.Ordinal)
+            .ToList();
+        if (normalizedImages.Count == 0)
+        {
+            return;
+        }
+
+        var imageByFilename = await context.Images
+            .Where(image => image.PageId == sourcePage.Id && image.Filename != null)
+            .ToDictionaryAsync(image => image.Filename!, cancellationToken);
+
+        var changed = false;
+        foreach (var imageUrl in normalizedImages)
+        {
+            var filename = BuildImageRecordName(imageUrl);
+            if (!imageByFilename.TryGetValue(filename, out var image) || image.Data is not null)
+            {
+                continue;
+            }
+
+            var payload = await TryDownloadImagePayloadAsync(imageUrl, cancellationToken);
+            if (payload is null)
+            {
+                continue;
+            }
+
+            image.Data = payload;
+            image.AccessedTime = DateTime.SpecifyKind(DateTime.UtcNow, DateTimeKind.Unspecified);
+            changed = true;
+        }
+
+        if (changed)
+        {
+            await context.SaveChangesAsync(cancellationToken);
+        }
+    }
+
+    private async Task<byte[]?> TryDownloadImagePayloadAsync(string url, CancellationToken cancellationToken)
+    {
+        try
+        {
+            using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+            timeoutCts.CancelAfter(TimeSpan.FromSeconds(_imageFetchTimeoutSeconds));
+
+            using var request = new HttpRequestMessage(HttpMethod.Get, url);
+            request.Headers.UserAgent.ParseAdd("EIPS-TT-Manager/1.0");
+            using var response = await _httpClient.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, timeoutCts.Token);
+            if (!response.IsSuccessStatusCode)
+            {
+                return null;
+            }
+
+            var mediaType = response.Content.Headers.ContentType?.MediaType;
+            if (string.IsNullOrWhiteSpace(mediaType)
+                || !mediaType.StartsWith("image/", StringComparison.OrdinalIgnoreCase))
+            {
+                return null;
+            }
+
+            var contentLength = response.Content.Headers.ContentLength;
+            if (contentLength.HasValue && contentLength.Value > _imageMaxBytes)
+            {
+                return null;
+            }
+
+            var data = await response.Content.ReadAsByteArrayAsync(timeoutCts.Token);
+            if (data.Length == 0 || data.Length > _imageMaxBytes)
+            {
+                return null;
+            }
+
+            return data;
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
     private static async Task<List<string>> UpsertDiscoveredLinksAsync(
         CrawldbContext context,
         Page sourcePage,
         IReadOnlyCollection<string>? discoveredUrls,
         CancellationToken cancellationToken,
-        bool queueFrontierOnly = true)
+        bool queueFrontierOnly = true,
+        IReadOnlySet<string>? allowedScopeHosts = null)
     {
         if (discoveredUrls is null || discoveredUrls.Count == 0)
         {
@@ -1000,8 +1136,14 @@ public sealed class CrawlerRelayService
             return new List<string>();
         }
 
+        var scopedUrls = FilterUrlsByScope(filteredUrls, allowedScopeHosts);
+        if (scopedUrls.Count == 0)
+        {
+            return new List<string>();
+        }
+
         var knownTargets = await context.Pages
-            .Where(page => page.Url != null && filteredUrls.Contains(page.Url))
+            .Where(page => page.Url != null && scopedUrls.Contains(page.Url))
             .ToDictionaryAsync(page => page.Url!, cancellationToken);
 
         var targetPages = knownTargets.Values
@@ -1043,7 +1185,7 @@ public sealed class CrawlerRelayService
             return new List<string>();
         }
 
-        return filteredUrls
+        return scopedUrls
             .Where(discoveredUrl =>
             {
                 if (!knownTargets.TryGetValue(discoveredUrl, out var targetPage))
@@ -1118,6 +1260,7 @@ public sealed class CrawlerRelayService
     private async Task<List<string>> EnqueueSitemapDiscoveredUrlsAsync(
         IReadOnlyCollection<string> sitemapUrls,
         string sourceUrl,
+        IReadOnlySet<string>? allowedScopeHosts,
         CancellationToken cancellationToken)
     {
         if (!_sitemapIngestEnabled || sitemapUrls.Count == 0)
@@ -1135,9 +1278,9 @@ public sealed class CrawlerRelayService
             return new List<string>();
         }
 
-        var sourceHost = GetHost(sourceUrl);
         var visitedSitemaps = new HashSet<string>(StringComparer.Ordinal);
         var discoveredUrls = new HashSet<string>(StringComparer.Ordinal);
+        var droppedOutOfScopeCount = 0;
         var pending = new Queue<string>(normalizedSitemaps);
 
         while (pending.Count > 0
@@ -1183,9 +1326,9 @@ public sealed class CrawlerRelayService
                     continue;
                 }
 
-                if (!string.IsNullOrWhiteSpace(sourceHost)
-                    && !string.Equals(GetHost(normalizedPageUrl), sourceHost, StringComparison.OrdinalIgnoreCase))
+                if (!IsUrlWithinScope(normalizedPageUrl, allowedScopeHosts))
                 {
+                    droppedOutOfScopeCount += 1;
                     continue;
                 }
 
@@ -1195,6 +1338,13 @@ public sealed class CrawlerRelayService
 
         if (discoveredUrls.Count == 0)
         {
+            if (droppedOutOfScopeCount > 0)
+            {
+                _logger.LogInformation(
+                    "Dropped {Count} out-of-scope sitemap URLs for source {SourceUrl}.",
+                    droppedOutOfScopeCount,
+                    sourceUrl);
+            }
             return new List<string>();
         }
 
@@ -1209,6 +1359,13 @@ public sealed class CrawlerRelayService
             .ToList();
 
         _ = await _frontierService.EnqueueBatchAsync(enqueueCandidates, cancellationToken);
+        if (droppedOutOfScopeCount > 0)
+        {
+            _logger.LogInformation(
+                "Dropped {Count} out-of-scope sitemap URLs for source {SourceUrl}.",
+                droppedOutOfScopeCount,
+                sourceUrl);
+        }
         return discoveredUrls.ToList();
     }
 
@@ -1277,6 +1434,179 @@ public sealed class CrawlerRelayService
         return Uri.TryCreate(url, UriKind.Absolute, out var uri)
             ? uri.Host
             : null;
+    }
+
+    private async Task<HashSet<string>> ResolveAllowedScopeHostsAsync(
+        CrawldbContext context,
+        string sourceUrl,
+        CancellationToken cancellationToken)
+    {
+        var scopeHosts = await LoadConfiguredSeedHostsAsync(context, cancellationToken);
+        if (scopeHosts.Count > 0)
+        {
+            return scopeHosts;
+        }
+
+        var sourceHost = NormalizeHost(GetHost(sourceUrl));
+        if (!string.IsNullOrWhiteSpace(sourceHost))
+        {
+            scopeHosts.Add(sourceHost);
+        }
+
+        return scopeHosts;
+    }
+
+    private async Task<HashSet<string>> LoadConfiguredSeedHostsAsync(
+        CrawldbContext context,
+        CancellationToken cancellationToken)
+    {
+        var hosts = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var connection = context.Database.GetDbConnection() as NpgsqlConnection;
+        if (connection is null)
+        {
+            return hosts;
+        }
+
+        if (connection.State != ConnectionState.Open)
+        {
+            await connection.OpenAsync(cancellationToken);
+        }
+
+        const string globalConfigSql = """
+            SELECT value::text
+            FROM manager.global_setting
+            WHERE key = 'crawler.global_config'
+            LIMIT 1;
+            """;
+
+        await using (var globalConfigCmd = new NpgsqlCommand(globalConfigSql, connection))
+        {
+            var rawConfig = await globalConfigCmd.ExecuteScalarAsync(cancellationToken) as string;
+            if (!string.IsNullOrWhiteSpace(rawConfig))
+            {
+                var config = JsonSerializer.Deserialize<WorkerGlobalConfigViewModel>(rawConfig, _jsonOptions);
+                if (config is not null)
+                {
+                    foreach (var host in ExtractSeedHosts(config))
+                    {
+                        hosts.Add(host);
+                    }
+                }
+            }
+        }
+
+        if (hosts.Count > 0)
+        {
+            return hosts;
+        }
+
+        const string seedUrlSql = """
+            SELECT DISTINCT url
+            FROM manager.seed_url
+            WHERE url IS NOT NULL
+              AND btrim(url) <> '';
+            """;
+
+        await using var seedCmd = new NpgsqlCommand(seedUrlSql, connection);
+        await using var reader = await seedCmd.ExecuteReaderAsync(cancellationToken);
+        while (await reader.ReadAsync(cancellationToken))
+        {
+            var url = reader.IsDBNull(0) ? null : reader.GetString(0);
+            var host = NormalizeHost(GetHost(url));
+            if (!string.IsNullOrWhiteSpace(host))
+            {
+                hosts.Add(host);
+            }
+        }
+
+        return hosts;
+    }
+
+    private static IEnumerable<string> ExtractSeedHosts(WorkerGlobalConfigViewModel config)
+    {
+        var hosts = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+        foreach (var entry in config.SeedEntries)
+        {
+            if (!entry.Enabled)
+            {
+                continue;
+            }
+
+            var host = NormalizeHost(GetHost(entry.Url));
+            if (!string.IsNullOrWhiteSpace(host))
+            {
+                hosts.Add(host);
+            }
+        }
+
+        foreach (var rawLine in (config.SeedUrlsText ?? string.Empty)
+            .Split(new[] { '\r', '\n' }, StringSplitOptions.RemoveEmptyEntries))
+        {
+            var host = NormalizeHost(GetHost(rawLine));
+            if (!string.IsNullOrWhiteSpace(host))
+            {
+                hosts.Add(host);
+            }
+        }
+
+        return hosts;
+    }
+
+    private static List<string> FilterUrlsByScope(
+        IEnumerable<string> urls,
+        IReadOnlySet<string>? allowedScopeHosts)
+    {
+        if (allowedScopeHosts is null || allowedScopeHosts.Count == 0)
+        {
+            return urls.Distinct(StringComparer.Ordinal).ToList();
+        }
+
+        return urls
+            .Where(url => IsUrlWithinScope(url, allowedScopeHosts))
+            .Distinct(StringComparer.Ordinal)
+            .ToList();
+    }
+
+    private static bool IsUrlWithinScope(string? url, IReadOnlySet<string>? allowedScopeHosts)
+    {
+        if (allowedScopeHosts is null || allowedScopeHosts.Count == 0)
+        {
+            return true;
+        }
+
+        var host = NormalizeHost(GetHost(url));
+        if (string.IsNullOrWhiteSpace(host))
+        {
+            return false;
+        }
+
+        foreach (var allowedHost in allowedScopeHosts)
+        {
+            var normalizedAllowed = NormalizeHost(allowedHost);
+            if (string.IsNullOrWhiteSpace(normalizedAllowed))
+            {
+                continue;
+            }
+
+            if (string.Equals(host, normalizedAllowed, StringComparison.OrdinalIgnoreCase)
+                || host.EndsWith($".{normalizedAllowed}", StringComparison.OrdinalIgnoreCase))
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    private static string? NormalizeHost(string? host)
+    {
+        if (string.IsNullOrWhiteSpace(host))
+        {
+            return null;
+        }
+
+        return host.Trim().Trim('.').ToLowerInvariant();
     }
 
     private static async Task<List<string>> UpdateSitePolicyAsync(

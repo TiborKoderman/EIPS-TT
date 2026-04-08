@@ -299,6 +299,8 @@ public sealed class FrontierService
             var now = DateTime.UtcNow;
             (long Id, string Url, int Priority, string? SourceUrl, int Depth)? selected = null;
             var trapIds = new List<long>();
+            var blockedByCooldown = 0;
+            int? retryAfterMilliseconds = null;
             foreach (var item in candidates)
             {
                 if (IsLikelyCrawlerTrapUrl(item.Url))
@@ -312,6 +314,15 @@ public sealed class FrontierService
                     selected = item;
                     break;
                 }
+
+                blockedByCooldown += 1;
+                var remainingMs = await GetSiteCooldownRemainingMillisecondsAsync(crawlerKey, item.Url, now, cancellationToken);
+                if (remainingMs.HasValue)
+                {
+                    retryAfterMilliseconds = !retryAfterMilliseconds.HasValue
+                        ? remainingMs
+                        : Math.Min(retryAfterMilliseconds.Value, remainingMs.Value);
+                }
             }
 
             if (trapIds.Count > 0)
@@ -322,11 +333,22 @@ public sealed class FrontierService
 
             if (selected is null)
             {
+                if (blockedByCooldown > 0)
+                {
+                    _logger.LogDebug(
+                        "Frontier claim blocked by cooldown for worker {WorkerId}. blocked={BlockedCount} retryAfterMs={RetryAfterMs}",
+                        workerId,
+                        blockedByCooldown,
+                        retryAfterMilliseconds);
+                }
+
                 await tx.CommitAsync(cancellationToken);
                 return new FrontierClaimViewModel
                 {
                     Claimed = false,
                     WorkerId = workerId,
+                    BlockedByCooldown = blockedByCooldown > 0,
+                    RetryAfterMilliseconds = retryAfterMilliseconds,
                 };
             }
 
@@ -674,6 +696,32 @@ public sealed class FrontierService
         }
 
         UpsertCrawlerSiteCooldown(crawlerKey, siteIpKey, nowUtc, _politenessDelayMilliseconds);
+    }
+
+    private async Task<int?> GetSiteCooldownRemainingMillisecondsAsync(
+        string crawlerKey,
+        string url,
+        DateTime nowUtc,
+        CancellationToken cancellationToken)
+    {
+        var siteIpKey = await ResolveSiteIpKeyAsync(url, nowUtc, cancellationToken);
+        if (string.IsNullOrWhiteSpace(siteIpKey))
+        {
+            return null;
+        }
+
+        var scopedKey = ComposeCrawlerSiteKey(crawlerKey, siteIpKey);
+        if (!_crawlerSiteNextAllowedUtc.TryGetValue(scopedKey, out var readyAtUtc))
+        {
+            return null;
+        }
+
+        if (readyAtUtc <= nowUtc)
+        {
+            return 0;
+        }
+
+        return (int)Math.Ceiling((readyAtUtc - nowUtc).TotalMilliseconds);
     }
 
     private void UpsertCrawlerSiteCooldown(string crawlerKey, string siteIpKey, DateTime nowUtc, int delayMilliseconds)

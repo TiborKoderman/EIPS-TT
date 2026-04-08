@@ -2166,6 +2166,21 @@ class DaemonWorkerService(WorkerControlService):
         if not isinstance(data, dict):
             return None
         if not bool(data.get("claimed")):
+            blocked_by_cooldown = bool(data.get("blockedByCooldown"))
+            retry_after_ms = _coerce_int(data.get("retryAfterMilliseconds"), 0)
+            if blocked_by_cooldown:
+                self._emit_manager_event(
+                    "frontier-claim-blocked",
+                    worker_id=worker_id,
+                    payload={
+                        "workerId": worker_id,
+                        "reason": "cooldown",
+                        "retryAfterMilliseconds": retry_after_ms,
+                    },
+                )
+                # Avoid hot-loop polling when manager indicates strict politeness cooldown.
+                delay_seconds = max(0.05, min(1.0, float(retry_after_ms) / 1000.0 if retry_after_ms > 0 else 0.1))
+                time.sleep(delay_seconds)
             return None
 
         raw_url = str(data.get("url") or "").strip()

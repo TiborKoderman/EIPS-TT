@@ -334,6 +334,8 @@ public class FrontierClaimViewModel
     public int LeaseTtlSeconds { get; set; }
     public string? Source { get; set; }
     public string? SourceUrl { get; set; }
+    public bool BlockedByCooldown { get; set; }
+    public int? RetryAfterMilliseconds { get; set; }
 }
 
 /// <summary>
