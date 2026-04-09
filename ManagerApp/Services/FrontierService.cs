@@ -119,6 +119,15 @@ public sealed class FrontierService
             return false;
         }
         var normalizedUrl = normalized.Trim();
+        var rawUrl = (url ?? string.Empty).Trim();
+        if (!string.IsNullOrWhiteSpace(rawUrl)
+            && !string.Equals(rawUrl, normalizedUrl, StringComparison.Ordinal))
+        {
+            _logger.LogDebug(
+                "Canonicalized frontier enqueue URL from {OriginalUrl} to {CanonicalUrl}.",
+                rawUrl,
+                normalizedUrl);
+        }
 
         if (IsLikelyCrawlerTrapUrl(normalizedUrl))
         {
@@ -127,6 +136,16 @@ public sealed class FrontierService
         }
 
         var normalizedSource = NormalizeUrl(sourceUrl);
+        var rawSource = (sourceUrl ?? string.Empty).Trim();
+        if (!string.IsNullOrWhiteSpace(rawSource)
+            && !string.IsNullOrWhiteSpace(normalizedSource)
+            && !string.Equals(rawSource, normalizedSource, StringComparison.Ordinal))
+        {
+            _logger.LogDebug(
+                "Canonicalized frontier source URL from {OriginalUrl} to {CanonicalUrl}.",
+                rawSource,
+                normalizedSource);
+        }
 
         await using var connection = await OpenConnectionAsync(cancellationToken);
         if (connection is null)
@@ -147,12 +166,21 @@ public sealed class FrontierService
 
         var mergedByUrl = new Dictionary<string, FrontierEnqueueCandidate>(StringComparer.Ordinal);
         var skippedTrapCandidates = 0;
+        var canonicalizedUrlCount = 0;
+        var canonicalizedSourceCount = 0;
         foreach (var candidate in candidates)
         {
             var normalized = NormalizeUrl(candidate.Url);
             if (string.IsNullOrWhiteSpace(normalized))
             {
                 continue;
+            }
+
+            var rawUrl = (candidate.Url ?? string.Empty).Trim();
+            if (!string.IsNullOrWhiteSpace(rawUrl)
+                && !string.Equals(rawUrl, normalized, StringComparison.Ordinal))
+            {
+                canonicalizedUrlCount += 1;
             }
 
             if (IsLikelyCrawlerTrapUrl(normalized))
@@ -162,6 +190,13 @@ public sealed class FrontierService
             }
 
             var normalizedSource = NormalizeUrl(candidate.SourceUrl);
+            var rawSource = (candidate.SourceUrl ?? string.Empty).Trim();
+            if (!string.IsNullOrWhiteSpace(rawSource)
+                && !string.IsNullOrWhiteSpace(normalizedSource)
+                && !string.Equals(rawSource, normalizedSource, StringComparison.Ordinal))
+            {
+                canonicalizedSourceCount += 1;
+            }
             var normalizedDepth = Math.Max(0, candidate.Depth);
 
             if (mergedByUrl.TryGetValue(normalized, out var existing))
@@ -188,11 +223,27 @@ public sealed class FrontierService
 
         if (mergedByUrl.Count == 0)
         {
+            if (canonicalizedUrlCount > 0 || canonicalizedSourceCount > 0)
+            {
+                _logger.LogDebug(
+                    "Canonicalized enqueue batch URLs: urls={UrlCount}, sourceUrls={SourceCount}.",
+                    canonicalizedUrlCount,
+                    canonicalizedSourceCount);
+            }
+
             if (skippedTrapCandidates > 0)
             {
                 _logger.LogDebug("Skipped {Count} likely trap frontier candidates in enqueue batch.", skippedTrapCandidates);
             }
             return 0;
+        }
+
+        if (canonicalizedUrlCount > 0 || canonicalizedSourceCount > 0)
+        {
+            _logger.LogDebug(
+                "Canonicalized enqueue batch URLs: urls={UrlCount}, sourceUrls={SourceCount}.",
+                canonicalizedUrlCount,
+                canonicalizedSourceCount);
         }
 
         if (skippedTrapCandidates > 0)
@@ -914,22 +965,7 @@ public sealed class FrontierService
 
     private static string? NormalizeUrl(string? url)
     {
-        if (string.IsNullOrWhiteSpace(url))
-        {
-            return null;
-        }
-
-        var trimmed = url.Trim();
-        if (!Uri.TryCreate(trimmed, UriKind.Absolute, out var parsed))
-        {
-            return trimmed;
-        }
-
-        var builder = new UriBuilder(parsed)
-        {
-            Fragment = string.Empty,
-        };
-        return builder.Uri.AbsoluteUri;
+        return CanonicalUrlNormalizer.Normalize(url);
     }
 
     private static bool IsLikelyCrawlerTrapUrl(string normalizedUrl)

@@ -65,6 +65,8 @@ public sealed class CrawlerRelayService
         var accessedTime = DateTime.SpecifyKind(DateTime.UtcNow, DateTimeKind.Unspecified);
         var rawUrl = NormalizeUrl(request.RawUrl);
         var finalUrl = NormalizeUrl(request.DownloadResult?.FinalUrl);
+        LogCanonicalRewrite("crawler.rawUrl", request.RawUrl, rawUrl);
+        LogCanonicalRewrite("crawler.finalUrl", request.DownloadResult?.FinalUrl, finalUrl);
         var url = string.IsNullOrWhiteSpace(finalUrl) ? rawUrl : finalUrl;
         if (string.IsNullOrWhiteSpace(url))
         {
@@ -113,11 +115,37 @@ public sealed class CrawlerRelayService
         }
         else if (request.DownloadResult?.RobotsSitemaps is { Count: > 0 })
         {
-            sitemapCandidates = request.DownloadResult.RobotsSitemaps
-                .Select(NormalizeUrl)
-                .Where(item => !string.IsNullOrWhiteSpace(item))
+            var canonicalizedSitemaps = 0;
+            var normalizedSitemaps = new List<string>();
+            foreach (var sitemap in request.DownloadResult.RobotsSitemaps)
+            {
+                var normalized = NormalizeUrl(sitemap);
+                if (string.IsNullOrWhiteSpace(normalized))
+                {
+                    continue;
+                }
+
+                var original = (sitemap ?? string.Empty).Trim();
+                if (!string.IsNullOrWhiteSpace(original)
+                    && !string.Equals(original, normalized, StringComparison.Ordinal))
+                {
+                    canonicalizedSitemaps += 1;
+                }
+
+                normalizedSitemaps.Add(normalized);
+            }
+
+            sitemapCandidates = normalizedSitemaps
                 .Distinct(StringComparer.Ordinal)
                 .ToList();
+
+            if (canonicalizedSitemaps > 0)
+            {
+                _logger.LogInformation(
+                    "Canonicalized {Count} robots sitemap URLs during ingest for {Url}.",
+                    canonicalizedSitemaps,
+                    url);
+            }
         }
         var status = "inserted";
         Page targetPage;
@@ -287,6 +315,15 @@ public sealed class CrawlerRelayService
         }
         discoveredImageUrls.AddRange(ExtractParsedImageUrls(request.DownloadResult?.ParsedPayload));
 
+        var canonicalizedDiscoveredImages = CountCanonicalRewrites(discoveredImageUrls);
+        if (canonicalizedDiscoveredImages > 0)
+        {
+            _logger.LogInformation(
+                "Canonicalized {Count} discovered image URLs during ingest for {Url}.",
+                canonicalizedDiscoveredImages,
+                url);
+        }
+
         var inScopeImageUrls = FilterUrlsByScope(discoveredImageUrls, allowedScopeHosts);
         var droppedImageCount = Math.Max(0, discoveredImageUrls.Count - inScopeImageUrls.Count);
         if (droppedImageCount > 0)
@@ -312,6 +349,15 @@ public sealed class CrawlerRelayService
                 targetPage,
                 inScopeImageUrls,
                 cancellationToken);
+        }
+
+        var canonicalizedDiscoveredPages = CountCanonicalRewrites(request.DiscoveredUrls);
+        if (canonicalizedDiscoveredPages > 0)
+        {
+            _logger.LogInformation(
+                "Canonicalized {Count} discovered page URLs during ingest for {Url}.",
+                canonicalizedDiscoveredPages,
+                url);
         }
 
         var inScopeDiscoveredUrls = FilterUrlsByScope(request.DiscoveredUrls ?? new List<string>(), allowedScopeHosts);
@@ -866,22 +912,56 @@ public sealed class CrawlerRelayService
 
     private static string NormalizeUrl(string? value)
     {
-        var trimmed = (value ?? string.Empty).Trim();
-        if (string.IsNullOrWhiteSpace(trimmed))
+        return NormalizeUrl(value, baseUrl: null);
+    }
+
+    private static string NormalizeUrl(string? value, string? baseUrl)
+    {
+        return CanonicalUrlNormalizer.Normalize(value, baseUrl) ?? string.Empty;
+    }
+
+    private int CountCanonicalRewrites(IEnumerable<string>? urls)
+    {
+        if (urls is null)
         {
-            return string.Empty;
+            return 0;
         }
 
-        if (!Uri.TryCreate(trimmed, UriKind.Absolute, out var uri))
+        var rewritten = 0;
+        foreach (var candidate in urls)
         {
-            return trimmed;
+            var original = (candidate ?? string.Empty).Trim();
+            if (string.IsNullOrWhiteSpace(original))
+            {
+                continue;
+            }
+
+            var normalized = NormalizeUrl(original);
+            if (!string.IsNullOrWhiteSpace(normalized)
+                && !string.Equals(original, normalized, StringComparison.Ordinal))
+            {
+                rewritten += 1;
+            }
         }
 
-        var builder = new UriBuilder(uri)
+        return rewritten;
+    }
+
+    private void LogCanonicalRewrite(string source, string? original, string normalized)
+    {
+        var raw = (original ?? string.Empty).Trim();
+        if (string.IsNullOrWhiteSpace(raw)
+            || string.IsNullOrWhiteSpace(normalized)
+            || string.Equals(raw, normalized, StringComparison.Ordinal))
         {
-            Fragment = string.Empty,
-        };
-        return builder.Uri.AbsoluteUri;
+            return;
+        }
+
+        _logger.LogDebug(
+            "Canonicalized {Source} URL from {OriginalUrl} to {CanonicalUrl}.",
+            source,
+            raw,
+            normalized);
     }
 
     private static List<string> ExtractParsedImageUrls(JsonElement? parsedPayload)
@@ -1281,6 +1361,8 @@ public sealed class CrawlerRelayService
         var visitedSitemaps = new HashSet<string>(StringComparer.Ordinal);
         var discoveredUrls = new HashSet<string>(StringComparer.Ordinal);
         var droppedOutOfScopeCount = 0;
+        var canonicalizedSitemapChildCount = 0;
+        var canonicalizedSitemapPageCount = 0;
         var pending = new Queue<string>(normalizedSitemaps);
 
         while (pending.Count > 0
@@ -1303,11 +1385,18 @@ public sealed class CrawlerRelayService
 
             foreach (var child in childSitemaps)
             {
-                var normalizedChild = NormalizeUrl(child);
+                var normalizedChild = NormalizeUrl(child, sitemapUrl);
                 if (string.IsNullOrWhiteSpace(normalizedChild)
                     || visitedSitemaps.Contains(normalizedChild))
                 {
                     continue;
+                }
+
+                var originalChild = (child ?? string.Empty).Trim();
+                if (!string.IsNullOrWhiteSpace(originalChild)
+                    && !string.Equals(originalChild, normalizedChild, StringComparison.Ordinal))
+                {
+                    canonicalizedSitemapChildCount += 1;
                 }
 
                 pending.Enqueue(normalizedChild);
@@ -1320,10 +1409,17 @@ public sealed class CrawlerRelayService
                     break;
                 }
 
-                var normalizedPageUrl = NormalizeUrl(pageUrl);
+                var normalizedPageUrl = NormalizeUrl(pageUrl, sitemapUrl);
                 if (string.IsNullOrWhiteSpace(normalizedPageUrl))
                 {
                     continue;
+                }
+
+                var originalPageUrl = (pageUrl ?? string.Empty).Trim();
+                if (!string.IsNullOrWhiteSpace(originalPageUrl)
+                    && !string.Equals(originalPageUrl, normalizedPageUrl, StringComparison.Ordinal))
+                {
+                    canonicalizedSitemapPageCount += 1;
                 }
 
                 if (!IsUrlWithinScope(normalizedPageUrl, allowedScopeHosts))
@@ -1338,6 +1434,15 @@ public sealed class CrawlerRelayService
 
         if (discoveredUrls.Count == 0)
         {
+            if (canonicalizedSitemapChildCount > 0 || canonicalizedSitemapPageCount > 0)
+            {
+                _logger.LogInformation(
+                    "Canonicalized sitemap URLs for source {SourceUrl}: childSitemaps={ChildCount}, pageUrls={PageCount}.",
+                    sourceUrl,
+                    canonicalizedSitemapChildCount,
+                    canonicalizedSitemapPageCount);
+            }
+
             if (droppedOutOfScopeCount > 0)
             {
                 _logger.LogInformation(
@@ -1359,6 +1464,14 @@ public sealed class CrawlerRelayService
             .ToList();
 
         _ = await _frontierService.EnqueueBatchAsync(enqueueCandidates, cancellationToken);
+        if (canonicalizedSitemapChildCount > 0 || canonicalizedSitemapPageCount > 0)
+        {
+            _logger.LogInformation(
+                "Canonicalized sitemap URLs for source {SourceUrl}: childSitemaps={ChildCount}, pageUrls={PageCount}.",
+                sourceUrl,
+                canonicalizedSitemapChildCount,
+                canonicalizedSitemapPageCount);
+        }
         if (droppedOutOfScopeCount > 0)
         {
             _logger.LogInformation(
