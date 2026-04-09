@@ -453,10 +453,16 @@ class DaemonWorkerService(WorkerControlService):
             )
             self._workers[worker_id] = worker
             if group_id is None:
-                raise RuntimeError("groupId is required when spawning a worker.")
-            if group_id not in self._groups:
-                raise RuntimeError(f"Group {group_id} not found.")
-            target_group_id = group_id
+                # Backward compatibility for older queued commands that omitted groupId.
+                enabled_groups = [group.id for group in self._groups.values() if group.enabled]
+                fallback_group_id = min(enabled_groups) if enabled_groups else (min(self._groups.keys()) if self._groups else None)
+                if fallback_group_id is None:
+                    raise RuntimeError("No worker groups are configured.")
+                target_group_id = fallback_group_id
+            else:
+                if group_id not in self._groups:
+                    raise RuntimeError(f"Group {group_id} not found.")
+                target_group_id = group_id
             self._groups[target_group_id].worker_ids.append(worker_id)
 
             self._append_log(worker_id, "Info", f"Worker spawned in {requested_mode} mode.")
@@ -1150,6 +1156,11 @@ class DaemonWorkerService(WorkerControlService):
                 with self._lock:
                     current = self._workers.get(worker_id)
                     if current is None:
+                        continue
+
+                    # A pause/stop command may arrive while fetch is in flight.
+                    # Do not overwrite control-plane status with post-fetch updates.
+                    if current.status != "Active":
                         continue
 
                     current.current_url = processing["finalUrl"] or lease.url
