@@ -192,7 +192,7 @@ SQL
 
 project_compose exec -T db psql -U "${DB_USER}" -d "${DB_NAME}" -v ON_ERROR_STOP=1 -c "${cleanup_sql}" >/dev/null
 
-echo "[1/6] Collision dedupe on /api/frontier/seed"
+echo "[1/7] Collision dedupe on /api/frontier/seed"
 collision_url="https://${BASE_HOST}/collision"
 for _ in $(seq 1 12); do
   http_post_json "${MANAGER_BASE_URL}/api/frontier/seed" "{\"url\":\"${collision_url}\",\"priority\":990000,\"depth\":0}" >/dev/null &
@@ -202,7 +202,7 @@ wait
 collision_rows="$(db_scalar "SELECT COUNT(*) FROM crawldb.frontier_queue WHERE url = '${collision_url}';")"
 assert_eq "${collision_rows}" "1" "frontier seed collision should keep one queue row"
 
-echo "[2/6] Dequeue/complete/requeue flow with politeness skip"
+echo "[2/7] Dequeue/complete/requeue flow with politeness skip"
 url_same_1="https://${BASE_HOST}/same/a"
 url_same_2="https://${BASE_HOST}/same/b"
 url_other="https://${OTHER_HOST}/other/a"
@@ -270,7 +270,7 @@ assert_eq "${requeued_state}" "QUEUED" "requeue completion should place the URL 
 # Politeness cooldown may skip same-host URLs briefly after completion.
 sleep 1
 
-echo "[3/6] Lease expiry requeue"
+echo "[3/7] Lease expiry requeue"
 lease_url="https://${BASE_HOST}/lease-expiry"
 http_post_json "${MANAGER_BASE_URL}/api/frontier/seed" "{\"url\":\"${lease_url}\",\"priority\":2000000000,\"depth\":0}" >/dev/null
 
@@ -306,7 +306,7 @@ else
   exit 1
 fi
 
-echo "[4/6] Concurrent ingest dedupe race"
+echo "[4/7] Concurrent ingest dedupe race"
 ingest_root="https://${INGEST_HOST}/root"
 ingest_d1="https://${INGEST_HOST}/doc/a"
 ingest_d2="https://${INGEST_HOST}/doc/b"
@@ -348,7 +348,7 @@ assert_eq "${ingest_page_rows}" "1" "ingest root URL should be unique in crawldb
 ingest_frontier_rows="$(db_scalar "SELECT COUNT(*) FROM crawldb.frontier_queue WHERE url IN ('${ingest_d1}','${ingest_d2}');")"
 assert_eq "${ingest_frontier_rows}" "2" "discovered URLs should be deduped into unique frontier rows"
 
-echo "[5/6] Seed-domain scope filter (allow subdomains, reject out-of-scope)"
+echo "[5/7] Seed-domain scope filter (allow subdomains, reject out-of-scope)"
 scope_root="https://${BASE_HOST}/scope/root"
 scope_same="https://${BASE_HOST}/scope/same"
 scope_sub="https://www.${BASE_HOST}/scope/sub"
@@ -393,7 +393,7 @@ scope_image_out_count="$(db_scalar "SELECT COUNT(*) FROM crawldb.image WHERE pag
 assert_eq "${scope_image_in_count}" "2" "in-scope and subdomain discovered images should be recorded"
 assert_eq "${scope_image_out_count}" "0" "out-of-scope discovered image must not be recorded"
 
-echo "[6/6] Cooldown claim diagnostics (strict wait/retry)"
+echo "[6/7] Cooldown claim diagnostics (strict wait/retry)"
 cool_url_a="https://${BASE_HOST}/cooldown/a"
 cool_url_b="https://${BASE_HOST}/cooldown/b"
 project_compose exec -T db psql -U "${DB_USER}" -d "${DB_NAME}" -v ON_ERROR_STOP=1 -c "DELETE FROM crawldb.frontier_queue WHERE state = 'QUEUED'::crawldb.frontier_queue_state;" >/dev/null
@@ -414,5 +414,18 @@ if [[ "${cool_retry_ms}" -le 0 ]]; then
   echo "ASSERT FAILED: cooldown diagnostics should include retryAfterMilliseconds > 0" >&2
   exit 1
 fi
+
+echo "[7/7] Canonical URL equivalence collapse"
+canon_seed_a="https://${BASE_HOST}/canon/foo/../bar?utm_source=itest&b=2&a=1#section"
+canon_seed_b="https://${BASE_HOST}/canon/bar?b=2&a=1"
+canon_expected="https://${BASE_HOST}/canon/bar?a=1&b=2"
+
+http_post_json "${MANAGER_BASE_URL}/api/frontier/seed" "{\"url\":\"${canon_seed_a}\",\"priority\":997000,\"depth\":0}" >/dev/null
+http_post_json "${MANAGER_BASE_URL}/api/frontier/seed" "{\"url\":\"${canon_seed_b}\",\"priority\":997000,\"depth\":0}" >/dev/null
+
+canon_rows="$(db_scalar "SELECT COUNT(*) FROM crawldb.frontier_queue WHERE url LIKE 'https://${BASE_HOST}/canon/bar%';")"
+canon_url="$(db_scalar "SELECT url FROM crawldb.frontier_queue WHERE url LIKE 'https://${BASE_HOST}/canon/bar%' ORDER BY discovered_at ASC LIMIT 1;")"
+assert_eq "${canon_rows}" "1" "canonical-equivalent seeds should collapse into one frontier row"
+assert_eq "${canon_url}" "${canon_expected}" "frontier URL should match canonical query ordering and tracking removal"
 
 echo "Integration smoke passed (run id: ${TEST_RUN_ID})"
