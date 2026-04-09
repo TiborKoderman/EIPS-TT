@@ -73,7 +73,10 @@ def handle_reverse_command(service: DaemonWorkerService, payload: dict[str, obje
     command = str(payload.get("command", "")).strip().lower()
     nested_payload = payload.get("payload")
     nested = nested_payload if isinstance(nested_payload, dict) else {}
-    worker_id = coerce_worker_id(payload) or coerce_worker_id(nested)
+    dispatched_payload_raw = nested.get("payload")
+    dispatched_payload = dispatched_payload_raw if isinstance(dispatched_payload_raw, dict) else {}
+    effective_payload = dispatched_payload or nested
+    worker_id = coerce_worker_id(payload) or coerce_worker_id(nested) or coerce_worker_id(effective_payload)
 
     if command == "start-daemon":
         service.start_daemon()
@@ -84,6 +87,25 @@ def handle_reverse_command(service: DaemonWorkerService, payload: dict[str, obje
     if command == "reload-daemon":
         service.reload_workers()
         return True, None
+    if command == "save-global-config":
+        update_payload = effective_payload if effective_payload else payload
+        service.update_global_config(update_payload)
+        return True, None
+    if command == "spawn-worker":
+        spawn_payload = effective_payload if effective_payload else payload
+        seed_urls_raw = spawn_payload.get("seedUrls")
+        seed_urls = seed_urls_raw if isinstance(seed_urls_raw, list) else None
+        try:
+            service.spawn_worker(
+                name=str(spawn_payload.get("name")).strip() if spawn_payload.get("name") is not None else None,
+                mode=str(spawn_payload.get("mode", "thread")),
+                seed_url=str(spawn_payload.get("seedUrl")).strip() if spawn_payload.get("seedUrl") is not None else None,
+                seed_urls=[str(url).strip() for url in seed_urls or [] if str(url).strip()] or None,
+                group_id=int(str(spawn_payload.get("groupId"))) if spawn_payload.get("groupId") is not None else None,
+            )
+            return True, None
+        except (RuntimeError, ValueError) as exc:
+            return False, str(exc)
     if command == "start-worker" and worker_id is not None:
         ok, err = _run_worker_action(service, action="start", worker_id=worker_id)
         return ok, err
