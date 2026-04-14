@@ -100,6 +100,8 @@ Last rebuilt: 2026-03-26
 - [x] Kept terminal `DUPLICATE` frontier rows from being reset back to `QUEUED` during manager enqueue upserts.
 - [x] Updated manager discovered-link/image ingest so queueing/link edges no longer create placeholder `crawldb.page` rows before fetch/classification.
 - [x] Added crawler+manager trap suppression for recursive login redirect (`ReturnURL`) URL patterns to prevent high-score queue pollution.
+- [x] Enforced crawler-manager canonical URL parity in manager ingest/frontier normalization (path collapse, query sorting, tracking-param removal, fragment/default-port normalization) with canonical-equivalence smoke coverage.
+- [x] Canonicalized manager worker-service URL handling (seed dispatch/persistence/global seed config and frontier complete/prune inputs) and telemetry `manager.worker.current_url` persistence via the shared canonical normalizer.
 - [x] Expanded dashboard frontier diagnostics with `In queue / In memory / Leased` metrics and an IP timeout widget (including mapped domains).
 - [x] Added queue row timeout badges and static-height queue viewport to visualize rate-limited URLs without layout jump.
 - [x] Rebuilt static site graph mode as a dedicated renderer with unique site nodes, score-based colors, page-count sizing, and numbered inter-site edge weights.

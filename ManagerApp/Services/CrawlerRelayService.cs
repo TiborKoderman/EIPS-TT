@@ -573,7 +573,10 @@ public sealed class CrawlerRelayService
                 if (payloadDoc.RootElement.TryGetProperty("currentUrl", out var currentUrlNode)
                     && currentUrlNode.ValueKind == JsonValueKind.String)
                 {
-                    currentUrl = currentUrlNode.GetString();
+                    var normalizedCurrentUrl = NormalizeUrl(currentUrlNode.GetString());
+                    currentUrl = string.IsNullOrWhiteSpace(normalizedCurrentUrl)
+                        ? null
+                        : normalizedCurrentUrl;
                 }
 
                 if (payloadDoc.RootElement.TryGetProperty("pagesProcessed", out var pagesNode)
