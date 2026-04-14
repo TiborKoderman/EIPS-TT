@@ -199,8 +199,12 @@ class DaemonWorkerService(WorkerControlService):
         )
         self._allow_daemon_local_fallback = str(allow_local_fallback_raw).strip().lower() in {"1", "true", "yes", "on"}
         self._max_extracted_links_per_page = max(
-            5,
-            _coerce_int(os.getenv("CRAWLER_MAX_EXTRACTED_LINKS_PER_PAGE", "30"), 30),
+            30,
+            _coerce_int(os.getenv("CRAWLER_MAX_EXTRACTED_LINKS_PER_PAGE", "200"), 200),
+        )
+        self._max_extracted_images_per_page = max(
+            10,
+            _coerce_int(os.getenv("CRAWLER_MAX_EXTRACTED_IMAGES_PER_PAGE", "40"), 40),
         )
         self._site_next_available_monotonic: dict[str, float] = {}
         self._link_extractor = LinkExtractor()
@@ -2414,8 +2418,17 @@ class DaemonWorkerService(WorkerControlService):
             parser_payload: dict[str, object] | None = None
             if download.html_content:
                 extracted = self._link_extractor.extract(download.html_content, download.final_url)
-                discovered_links = extracted.links[: self._max_extracted_links_per_page]
-                discovered_images = extracted.images[: self._max_extracted_links_per_page]
+                discovered_links = self._prioritize_discovered_links(
+                    extracted.links,
+                    source_url=download.final_url,
+                )
+                discovered_images = extracted.images[: self._max_extracted_images_per_page]
+                if len(extracted.links) > len(discovered_links):
+                    self._append_log(
+                        worker_id,
+                        "Info",
+                        f"[discovery-trim] kept={len(discovered_links)} total={len(extracted.links)} strategy=forum-aware",
+                    )
                 parser_payload = {
                     "links": extracted.links,
                     "jsLinks": extracted.js_links,
@@ -2463,6 +2476,78 @@ class DaemonWorkerService(WorkerControlService):
                 "discoveredLinks": [],
                 "discoveredImages": [],
             }
+
+    def _prioritize_discovered_links(self, links: list[str], *, source_url: str) -> list[str]:
+        if not links:
+            return []
+
+        scored: list[tuple[int, int, str]] = []
+        for index, link in enumerate(links):
+            score = self._score_discovered_link(link, source_url=source_url)
+            scored.append((score, index, link))
+
+        scored.sort(key=lambda item: (-item[0], item[1]))
+        limit = min(self._max_extracted_links_per_page, len(scored))
+        return [item[2] for item in scored[:limit]]
+
+    @staticmethod
+    def _score_discovered_link(candidate_url: str, *, source_url: str) -> int:
+        try:
+            candidate = urlsplit(candidate_url)
+        except Exception:
+            return -10_000
+
+        candidate_host = (candidate.hostname or "").strip().lower()
+        candidate_path = (candidate.path or "/").strip().lower()
+        candidate_query = (candidate.query or "").strip().lower()
+        if not candidate_host:
+            return -10_000
+
+        try:
+            source = urlsplit(source_url)
+            source_host = (source.hostname or "").strip().lower()
+        except Exception:
+            source_host = ""
+
+        score = 0
+
+        if source_host and candidate_host == source_host:
+            score += 150
+        elif source_host and candidate_host.endswith("." + source_host):
+            score += 50
+
+        segment_count = len([segment for segment in candidate_path.split("/") if segment])
+        score += min(segment_count * 5, 40)
+
+        if candidate_path.startswith("/forum"):
+            score += 300
+            if "/forum/kategorija/" in candidate_path:
+                score += 180
+            if "/forum/tema/" in candidate_path:
+                score += 260
+            if "/forum/page/" in candidate_path:
+                score += 80
+
+            tail = candidate_path.rstrip("/").split("/")[-1]
+            if "-" in tail and tail.rsplit("-", 1)[-1].isdigit():
+                score += 120
+
+        if candidate_path in {"/", "/forum", "/forum/"}:
+            score -= 180
+        if candidate_path.startswith("/rubrika/"):
+            score -= 90
+        if candidate_path.endswith("/feed") or candidate_path.endswith("/feed/"):
+            score -= 140
+        if candidate_path.startswith("/search") or "/search/" in candidate_path:
+            score -= 120
+        if candidate_path.startswith("/register") or candidate_path.startswith("/registracija"):
+            score -= 90
+        if candidate_path.startswith("/wp-"):
+            score -= 180
+        if "utm_" in candidate_query:
+            score -= 40
+
+        return score
 
     def _resolve_robots_policy(self, url: str) -> RobotsPolicy | None:
         if not self._global_config.respect_robots_txt:

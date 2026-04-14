@@ -1,6 +1,7 @@
 using System.Collections.Concurrent;
 using System.Globalization;
 using System.Net;
+using System.Text.Json;
 using ManagerApp.Models;
 using Npgsql;
 
@@ -65,6 +66,10 @@ public sealed class FrontierService
     private readonly string? _connectionString;
     private readonly ConcurrentDictionary<string, DateTime> _crawlerSiteNextAllowedUtc = new(StringComparer.Ordinal);
     private readonly ConcurrentDictionary<string, (string SiteIpKey, DateTime ExpiresAtUtc)> _resolvedSiteIdentityCache = new(StringComparer.OrdinalIgnoreCase);
+    private static readonly JsonSerializerOptions JsonOptions = new()
+    {
+        PropertyNameCaseInsensitive = true,
+    };
     private readonly int _leaseTtlSeconds;
     private readonly int _politenessDelayMilliseconds;
     private const int MinPolitenessDelayMilliseconds = 5_000;
@@ -152,6 +157,17 @@ public sealed class FrontierService
         {
             return false;
         }
+
+        var allowedScopeHosts = await LoadConfiguredSeedHostsAsync(connection, cancellationToken);
+        if (!IsUrlWithinScope(normalizedUrl, normalizedSource, allowedScopeHosts))
+        {
+            _logger.LogInformation(
+                "Skipped out-of-scope frontier enqueue URL {Url}. source={SourceUrl}.",
+                normalizedUrl,
+                normalizedSource);
+            return false;
+        }
+
         return await EnqueueCoreAsync(connection, normalizedUrl, priority, depth, normalizedSource, cancellationToken);
     }
 
@@ -257,11 +273,20 @@ public sealed class FrontierService
             return 0;
         }
 
+        var allowedScopeHosts = await LoadConfiguredSeedHostsAsync(connection, cancellationToken);
+        var skippedOutOfScopeCandidates = 0;
+
         var inserted = 0;
         foreach (var candidate in mergedByUrl.Values)
         {
             if (string.IsNullOrWhiteSpace(candidate.Url))
             {
+                continue;
+            }
+
+            if (!IsUrlWithinScope(candidate.Url, candidate.SourceUrl, allowedScopeHosts))
+            {
+                skippedOutOfScopeCandidates += 1;
                 continue;
             }
 
@@ -278,7 +303,137 @@ public sealed class FrontierService
             }
         }
 
+        if (skippedOutOfScopeCandidates > 0)
+        {
+            _logger.LogInformation(
+                "Skipped {Count} out-of-scope frontier enqueue candidates in batch.",
+                skippedOutOfScopeCandidates);
+        }
+
         return inserted;
+    }
+
+    private static bool IsUrlWithinScope(string? targetUrl, string? sourceUrl, IReadOnlySet<string> allowedScopeHosts)
+    {
+        var targetHost = GetNormalizedHost(targetUrl);
+        if (string.IsNullOrWhiteSpace(targetHost))
+        {
+            return false;
+        }
+
+        if (allowedScopeHosts.Count > 0)
+        {
+            return allowedScopeHosts.Contains(targetHost);
+        }
+
+        var sourceHost = GetNormalizedHost(sourceUrl);
+        if (string.IsNullOrWhiteSpace(sourceHost))
+        {
+            return true;
+        }
+
+        return string.Equals(targetHost, sourceHost, StringComparison.OrdinalIgnoreCase);
+    }
+
+    private async Task<HashSet<string>> LoadConfiguredSeedHostsAsync(NpgsqlConnection connection, CancellationToken cancellationToken)
+    {
+        var hosts = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+        const string globalConfigSql = """
+            SELECT value::text
+            FROM manager.global_setting
+            WHERE key = 'crawler.global_config'
+            LIMIT 1;
+            """;
+
+        await using (var globalConfigCmd = new NpgsqlCommand(globalConfigSql, connection))
+        {
+            var rawConfig = await globalConfigCmd.ExecuteScalarAsync(cancellationToken) as string;
+            if (!string.IsNullOrWhiteSpace(rawConfig))
+            {
+                var config = JsonSerializer.Deserialize<WorkerGlobalConfigViewModel>(rawConfig, JsonOptions);
+                if (config is not null)
+                {
+                    foreach (var host in ExtractSeedHosts(config))
+                    {
+                        hosts.Add(host);
+                    }
+                }
+            }
+        }
+
+        if (hosts.Count > 0)
+        {
+            return hosts;
+        }
+
+        const string seedUrlSql = """
+            SELECT DISTINCT url
+            FROM manager.seed_url
+            WHERE url IS NOT NULL
+              AND btrim(url) <> '';
+            """;
+
+        await using var seedCmd = new NpgsqlCommand(seedUrlSql, connection);
+        await using var reader = await seedCmd.ExecuteReaderAsync(cancellationToken);
+        while (await reader.ReadAsync(cancellationToken))
+        {
+            var url = reader.IsDBNull(0) ? null : reader.GetString(0);
+            var host = GetNormalizedHost(url);
+            if (!string.IsNullOrWhiteSpace(host))
+            {
+                hosts.Add(host);
+            }
+        }
+
+        return hosts;
+    }
+
+    private static IEnumerable<string> ExtractSeedHosts(WorkerGlobalConfigViewModel config)
+    {
+        var hosts = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+        foreach (var entry in config.SeedEntries)
+        {
+            if (!entry.Enabled)
+            {
+                continue;
+            }
+
+            var host = GetNormalizedHost(entry.Url);
+            if (!string.IsNullOrWhiteSpace(host))
+            {
+                hosts.Add(host);
+            }
+        }
+
+        foreach (var rawLine in (config.SeedUrlsText ?? string.Empty)
+            .Split(new[] { '\r', '\n' }, StringSplitOptions.RemoveEmptyEntries))
+        {
+            var host = GetNormalizedHost(rawLine);
+            if (!string.IsNullOrWhiteSpace(host))
+            {
+                hosts.Add(host);
+            }
+        }
+
+        return hosts;
+    }
+
+    private static string? GetNormalizedHost(string? url)
+    {
+        if (string.IsNullOrWhiteSpace(url))
+        {
+            return null;
+        }
+
+        var host = ExtractHost(url);
+        if (string.IsNullOrWhiteSpace(host))
+        {
+            return null;
+        }
+
+        return host.Trim().Trim('.').ToLowerInvariant();
     }
 
     private static async Task<bool> EnqueueCoreAsync(
