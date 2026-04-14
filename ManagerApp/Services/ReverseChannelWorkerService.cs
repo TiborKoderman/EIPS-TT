@@ -110,11 +110,7 @@ public sealed class ReverseChannelWorkerService : IWorkerService
             return null;
         }
 
-        var normalizedSeedUrls = (seedUrls ?? Array.Empty<string>())
-            .Select(url => url.Trim())
-            .Where(url => !string.IsNullOrWhiteSpace(url))
-            .Distinct(StringComparer.OrdinalIgnoreCase)
-            .ToList();
+        var normalizedSeedUrls = NormalizeSeedUrls(seedUrls);
 
         var payload = new
         {
@@ -335,10 +331,10 @@ public sealed class ReverseChannelWorkerService : IWorkerService
     public async Task<bool> AddSeedAsync(string url, int? workerId = null)
     {
         LastError = null;
-        var normalized = (url ?? string.Empty).Trim();
+        var normalized = NormalizeUrl(url);
         if (string.IsNullOrWhiteSpace(normalized))
         {
-            LastError = "Seed URL must not be empty.";
+            LastError = "Seed URL must be a valid http/https URL.";
             return false;
         }
 
@@ -362,10 +358,10 @@ public sealed class ReverseChannelWorkerService : IWorkerService
     public async Task<bool> CompleteFrontierUrlAsync(int workerId, string url, string? leaseToken, string status = "completed")
     {
         LastError = null;
-        var normalizedUrl = (url ?? string.Empty).Trim();
+        var normalizedUrl = NormalizeUrl(url);
         if (string.IsNullOrWhiteSpace(normalizedUrl))
         {
-            LastError = "Frontier completion requires a non-empty URL.";
+            LastError = "Frontier completion requires a valid http/https URL.";
             return false;
         }
 
@@ -382,10 +378,10 @@ public sealed class ReverseChannelWorkerService : IWorkerService
     public async Task<bool> PruneFrontierUrlAsync(int workerId, string url, string reason = "server-conflict")
     {
         LastError = null;
-        var normalizedUrl = (url ?? string.Empty).Trim();
+        var normalizedUrl = NormalizeUrl(url);
         if (string.IsNullOrWhiteSpace(normalizedUrl))
         {
-            LastError = "Frontier prune requires a non-empty URL.";
+            LastError = "Frontier prune requires a valid http/https URL.";
             return false;
         }
 
@@ -819,6 +815,12 @@ public sealed class ReverseChannelWorkerService : IWorkerService
     {
         try
         {
+            var normalizedSeedUrls = NormalizeSeedUrls(seedUrls);
+            if (normalizedSeedUrls.Count == 0)
+            {
+                return;
+            }
+
             var connectionString = _configuration.GetConnectionString("CrawldbConnection");
             if (string.IsNullOrWhiteSpace(connectionString))
             {
@@ -837,7 +839,7 @@ public sealed class ReverseChannelWorkerService : IWorkerService
                 DO NOTHING;
                 """;
 
-            foreach (var url in seedUrls)
+            foreach (var url in normalizedSeedUrls)
             {
                 await using var cmd = new NpgsqlCommand(insertSql, connection);
                 cmd.Parameters.AddWithValue("daemon_id", daemonDbId);
@@ -1306,9 +1308,19 @@ public sealed class ReverseChannelWorkerService : IWorkerService
             .Where(entry => !string.IsNullOrWhiteSpace(entry.Url))
             .Select(entry => new SeedEntryViewModel
             {
-                Url = entry.Url.Trim(),
+                Url = NormalizeUrl(entry.Url) ?? string.Empty,
                 Enabled = entry.Enabled,
                 Label = entry.Label?.Trim() ?? string.Empty,
+            })
+            .Where(entry => !string.IsNullOrWhiteSpace(entry.Url))
+            .GroupBy(entry => entry.Url, StringComparer.Ordinal)
+            .Select(group => new SeedEntryViewModel
+            {
+                Url = group.Key,
+                Enabled = group.Any(item => item.Enabled),
+                Label = group.Select(item => item.Label)
+                    .FirstOrDefault(label => !string.IsNullOrWhiteSpace(label))
+                    ?? string.Empty,
             })
             .ToList();
 
@@ -1334,6 +1346,26 @@ public sealed class ReverseChannelWorkerService : IWorkerService
         config.RelevanceAllowedSuffixBoost = Math.Max(0, config.RelevanceAllowedSuffixBoost);
         config.RelevanceKeywordBoost = Math.Max(0, config.RelevanceKeywordBoost);
         config.RelevanceDepthPenalty = Math.Max(0, config.RelevanceDepthPenalty);
+    }
+
+    private static string? NormalizeUrl(string? url)
+    {
+        return CanonicalUrlNormalizer.Normalize(url);
+    }
+
+    private static List<string> NormalizeSeedUrls(IEnumerable<string>? seedUrls)
+    {
+        if (seedUrls is null)
+        {
+            return new List<string>();
+        }
+
+        return seedUrls
+            .Select(NormalizeUrl)
+            .Where(url => !string.IsNullOrWhiteSpace(url))
+            .Select(url => url!)
+            .Distinct(StringComparer.Ordinal)
+            .ToList();
     }
 
     private static string NormalizeStatus(string? status)

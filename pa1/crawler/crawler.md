@@ -53,6 +53,27 @@ Queue behavior options (daemon-side):
 - Manager-generated daemon scripts export both `MANAGER_DAEMON_WS_TOKEN` and `MANAGER_INGEST_API_TOKEN` for consistent authenticated relay.
 - Worker politeness enforces a hard minimum 5s per-IP delay (`max(5s, configured, robots, group-rate)`), and reported robots/effective delay values are relayed to manager ingest.
 
+## Report 1 Canonical URL Contract
+
+Canonical URL storage is enforced end-to-end in crawler and manager ingest/frontier paths.
+
+- Supported schemes: `http`, `https`.
+- Canonical host/scheme casing: lowercase.
+- Fragment handling: always removed.
+- Path handling: decode, collapse dot-segments (`.` / `..`), preserve trailing slash semantics, then re-encode.
+- Query handling: parse/sort by `(key, value)` and remove tracking keys (`utm_*`, `fbclid`, `gclid`, `igshid`, `mc_cid`, `mc_eid`, `ref`, `ref_src`).
+- Port handling: strip default ports (`:80` for `http`, `:443` for `https`).
+
+This contract ensures semantically equivalent URL variants collapse to one stored identity in frontier/page persistence.
+
+## Report 1 Scope Guardrails
+
+The current implementation remains intentionally within Report 1 scope.
+
+- In scope now: fetching/parsing pipeline, requests-based retrieval, robots/politeness, canonicalization, dedupe, seed-domain controls, websocket daemon orchestration.
+- Design references only (deferred): notebooks under `notebooks/` that cover PageRank, LSI, Naive Bayes, FastText embeddings, and Q-learning.
+- JavaScript crawling support (Selenium workflow) remains optional and assignment-gated.
+
 ## Docker Packaging and Release
 
 - Crawler image is built from `pa1/crawler/Dockerfile`.
