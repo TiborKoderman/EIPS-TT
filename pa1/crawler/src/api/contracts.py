@@ -101,7 +101,7 @@ class GlobalWorkerConfig:
     user_agent: str = "fri-wier-T"
     seed_urls: list[str] = field(default_factory=list)
     seed_entries: list[SeedEntry] = field(default_factory=default_seed_entries)
-    queue_mode: str = "both"
+    queue_mode: str = "server"
     strategy_mode: str = "balanced"
     score_function: str = "rendezvous"
     score_weight_pages: float = 1.0

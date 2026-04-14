@@ -618,7 +618,7 @@ class DaemonWorkerService(WorkerControlService):
 
         queue_mode = str(payload.get("queueMode", self._global_config.queue_mode)).strip().lower()
         if queue_mode not in {"local", "server", "both"}:
-            queue_mode = "both"
+            queue_mode = "server"
 
         strategy_mode = str(payload.get("strategyMode", self._global_config.strategy_mode)).strip().lower()
         if strategy_mode not in {"balanced", "coverage", "focused", "freshness"}:
@@ -1128,12 +1128,15 @@ class DaemonWorkerService(WorkerControlService):
         stop_event = threading.Event()
 
         def run() -> None:
+            idle_sleep_seconds = 0.15
             while not stop_event.is_set():
-                time.sleep(1.2)
+                if stop_event.wait(idle_sleep_seconds):
+                    break
 
                 with self._lock:
                     current = self._workers.get(worker_id)
                     if current is None or current.status != "Active":
+                        idle_sleep_seconds = 0.25
                         continue
                     lease = self._claim_next_frontier_url(worker_id)
                     if lease is None:
@@ -1143,6 +1146,7 @@ class DaemonWorkerService(WorkerControlService):
                             reason="waiting-for-queue",
                             current_url=None,
                         )
+                        idle_sleep_seconds = 0.25
                         continue
                     self._set_worker_runtime_state_locked(
                         current,
@@ -1150,6 +1154,8 @@ class DaemonWorkerService(WorkerControlService):
                         reason="fetching",
                         current_url=lease.url,
                     )
+                    # Keep claim cadence tight while queue has available work.
+                    idle_sleep_seconds = 0.05
 
                 processing = self._download_and_extract_links(worker_id, lease.url)
 
@@ -1192,18 +1198,27 @@ class DaemonWorkerService(WorkerControlService):
                             f"{failure_stage.capitalize()} failed for {lease.url}: {processing['error']}",
                         )
 
+                    source_for_discovery = str(processing["finalUrl"] or lease.url)
+                    queue_eligible_discovered_links: list[str] = []
                     for link in processing["discoveredLinks"]:
-                        self._enqueue_frontier_url(
-                            link,
-                            source_url=str(processing["finalUrl"] or lease.url),
+                        normalized_link = self._normalize_frontier_url(link, base_url=source_for_discovery)
+                        if not normalized_link:
+                            continue
+
+                        queued = self._enqueue_frontier_url(
+                            normalized_link,
+                            source_url=source_for_discovery,
                             depth=max(lease.depth + 1, 1),
                         )
+                        if queued:
+                            queue_eligible_discovered_links.append(normalized_link)
 
                     self._report_page_to_manager(
                         current,
                         lease.url,
                         processing["downloadResult"],
                         processing["discoveredLinks"],
+                        queue_eligible_discovered_links,
                         processing.get("discoveredImages", []),
                     )
                     self._emit_manager_event(
@@ -2536,6 +2551,7 @@ class DaemonWorkerService(WorkerControlService):
         raw_url: str | None,
         download_result: dict[str, object | None],
         discovered_links: list[str],
+        queue_eligible_discovered_links: list[str],
         discovered_images: list[str],
     ) -> None:
         if self._manager_ingest_url is None or not raw_url:
@@ -2547,6 +2563,7 @@ class DaemonWorkerService(WorkerControlService):
             "siteId": None,
             "sourcePageId": None,
             "discoveredUrls": discovered_links,
+            "queueEligibleDiscoveredUrls": queue_eligible_discovered_links,
             "discoveredImageUrls": discovered_images,
             "downloadResult": download_result,
         }

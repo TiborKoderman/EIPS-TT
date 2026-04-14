@@ -281,7 +281,7 @@ public sealed class ReverseChannelWorkerService : IWorkerService
                 Enabled = true,
                 MaxPagesPerWorker = 5000,
                 RateLimitPerMinute = 240,
-                QueueMode = "both",
+                QueueMode = "server",
                 StrategyMode = "balanced",
                 TopicKeywords = new List<string> { "medicine", "health", "clinic" },
                 TopicKeywordsText = "medicine\nhealth\nclinic",

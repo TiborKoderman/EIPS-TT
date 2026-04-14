@@ -370,6 +370,36 @@ public sealed class CrawlerRelayService
                 url);
         }
 
+        var queueEligibilityInput = request.QueueEligibleDiscoveredUrls is { Count: > 0 }
+            ? request.QueueEligibleDiscoveredUrls
+            : request.DiscoveredUrls;
+        var canonicalizedQueueEligiblePages = CountCanonicalRewrites(queueEligibilityInput);
+        if (canonicalizedQueueEligiblePages > 0)
+        {
+            _logger.LogInformation(
+                "Canonicalized {Count} queue-eligible discovered URLs during ingest for {Url}.",
+                canonicalizedQueueEligiblePages,
+                url);
+        }
+
+        var normalizedQueueEligibilityInput = (queueEligibilityInput ?? new List<string>())
+            .Select(NormalizeUrl)
+            .Where(queueUrl => !string.IsNullOrWhiteSpace(queueUrl))
+            .Distinct(StringComparer.Ordinal)
+            .ToList();
+
+        var inScopeQueueEligibleDiscoveredUrls = FilterUrlsByScope(
+            normalizedQueueEligibilityInput,
+            allowedScopeHosts);
+        var droppedQueueEligibleCount = Math.Max(0, normalizedQueueEligibilityInput.Count - inScopeQueueEligibleDiscoveredUrls.Count);
+        if (droppedQueueEligibleCount > 0)
+        {
+            _logger.LogInformation(
+                "Dropped {Count} out-of-scope queue-eligible discovered URLs during ingest for {Url}.",
+                droppedQueueEligibleCount,
+                url);
+        }
+
         var discoveredQueueCandidates = await UpsertDiscoveredLinksAsync(
             context,
             targetPage.DuplicateOfPageId.HasValue
@@ -379,9 +409,23 @@ public sealed class CrawlerRelayService
             cancellationToken,
             allowedScopeHosts: allowedScopeHosts);
 
-        if (discoveredQueueCandidates.Count > 0)
+        var queueEligibleSet = new HashSet<string>(inScopeQueueEligibleDiscoveredUrls, StringComparer.Ordinal);
+        var queueCandidates = discoveredQueueCandidates
+            .Where(discoveredUrl => queueEligibleSet.Contains(discoveredUrl))
+            .ToList();
+
+        var filteredOutQueueCandidates = discoveredQueueCandidates.Count - queueCandidates.Count;
+        if (filteredOutQueueCandidates > 0)
         {
-            var enqueueCandidates = discoveredQueueCandidates
+            _logger.LogInformation(
+                "Skipped queueing {Count} discovered URLs because they were not queue-eligible for {Url}.",
+                filteredOutQueueCandidates,
+                url);
+        }
+
+        if (queueCandidates.Count > 0)
+        {
+            var enqueueCandidates = queueCandidates
                 .Select(discoveredUrl => new FrontierEnqueueCandidate
                 {
                     Url = discoveredUrl,
@@ -1785,6 +1829,7 @@ public sealed class CrawlerIngestRequest
     public int? SiteId { get; set; }
     public int? SourcePageId { get; set; }
     public List<string>? DiscoveredUrls { get; set; }
+    public List<string>? QueueEligibleDiscoveredUrls { get; set; }
     public List<string>? DiscoveredImageUrls { get; set; }
     public CrawlerDownloadResult? DownloadResult { get; set; }
 }
