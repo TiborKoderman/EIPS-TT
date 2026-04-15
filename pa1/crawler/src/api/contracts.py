@@ -108,21 +108,6 @@ class GlobalWorkerConfig:
     score_weight_errors: float = 1.0
     topic_keywords: list[str] = field(
         default_factory=lambda: [
-            "medicine",
-            "medicina",
-            "health",
-            "zdravje",
-            "doctor",
-            "zdravnik",
-            "clinic",
-            "klinika",
-            "ambulanta",
-            "hospital",
-            "bolnisnica",
-            "treatment",
-            "zdravljenje",
-            "disease",
-            "bolezen",
             "fitness",
             "fitnes",
             "exercise",
@@ -134,6 +119,8 @@ class GlobalWorkerConfig:
             "nutrition",
             "prehrana",
             "vadba",
+            "kondicija",
+            "rekreacija",
         ]
     )
     relevance_allowed_domain_suffixes: list[str] = field(default_factory=list)

@@ -28,15 +28,19 @@ class PreferentialScorer:
         preferred_hosts: list[str] | None = None,
     ) -> None:
         self._topic_keywords = [kw.lower() for kw in (topic_keywords or [
-            "medicine",
-            "health",
-            "medover",
-            "symptom",
-            "clinic",
-            "hospital",
-            "treatment",
-            "disease",
-            "doctor",
+            "fitness",
+            "fitnes",
+            "exercise",
+            "telovadba",
+            "training",
+            "trening",
+            "workout",
+            "wellness",
+            "nutrition",
+            "prehrana",
+            "vadba",
+            "kondicija",
+            "rekreacija",
         ])]
         self._preferred_hosts = [host.lower() for host in (preferred_hosts or [])]
 

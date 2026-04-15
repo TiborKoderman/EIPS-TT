@@ -133,16 +133,14 @@ class DaemonWorkerService(WorkerControlService):
                 queue_mode="server",
                 strategy_mode="balanced",
                 topic_keywords=[
-                    "medicine", "medicina",
-                    "health", "zdravje",
-                    "doctor", "zdravnik",
-                    "clinic", "klinika", "ambulanta",
-                    "hospital", "bolnisnica",
                     "fitness", "fitnes",
                     "exercise", "telovadba",
                     "training", "trening",
+                    "wellness",
                     "nutrition", "prehrana",
                     "workout", "vadba",
+                    "kondicija",
+                    "rekreacija",
                 ],
                 avoid_duplicate_paths_across_daemons=True,
                 worker_ids=[1],
@@ -193,6 +191,7 @@ class DaemonWorkerService(WorkerControlService):
             )
         self._pending_manager_events: deque[dict[str, object | None]] = deque(maxlen=1000)
         self._manager_event_relay_degraded = False
+        self._next_server_claim_retry_monotonic = 0.0
         allow_local_fallback_raw = os.getenv(
             "CRAWLER_DAEMON_ALLOW_LOCAL_FALLBACK",
             "true",
@@ -1204,18 +1203,55 @@ class DaemonWorkerService(WorkerControlService):
 
                     source_for_discovery = str(processing["finalUrl"] or lease.url)
                     queue_eligible_discovered_links: list[str] = []
-                    for link in processing["discoveredLinks"]:
-                        normalized_link = self._normalize_frontier_url(link, base_url=source_for_discovery)
-                        if not normalized_link:
-                            continue
+                    next_depth = max(lease.depth + 1, 1)
+                    use_server_batch_discovery = (
+                        self._global_config.queue_mode == "server"
+                        and self._manager_ingest_url is not None
+                        and not self._allow_daemon_local_fallback
+                    )
 
-                        queued = self._enqueue_frontier_url(
-                            normalized_link,
-                            source_url=source_for_discovery,
-                            depth=max(lease.depth + 1, 1),
-                        )
-                        if queued:
+                    if use_server_batch_discovery:
+                        seen_queue_eligible: set[str] = set()
+                        for link in processing["discoveredLinks"]:
+                            resolved = self._resolve_frontier_enqueue_candidate(
+                                link,
+                                source_url=source_for_discovery,
+                                depth=next_depth,
+                                explicit_priority=None,
+                                worker_id=worker_id,
+                            )
+                            if resolved is None:
+                                continue
+
+                            normalized_link, _ = resolved
+                            if normalized_link in seen_queue_eligible:
+                                continue
+                            seen_queue_eligible.add(normalized_link)
                             queue_eligible_discovered_links.append(normalized_link)
+
+                        self._emit_manager_event(
+                            "queue-change",
+                            worker_id=worker_id,
+                            payload={
+                                "action": "enqueue-batch-candidates",
+                                "workerId": worker_id,
+                                "queueMode": self._global_config.queue_mode,
+                                "eligibleCount": len(queue_eligible_discovered_links),
+                            },
+                        )
+                    else:
+                        for link in processing["discoveredLinks"]:
+                            normalized_link = self._normalize_frontier_url(link, base_url=source_for_discovery)
+                            if not normalized_link:
+                                continue
+
+                            queued = self._enqueue_frontier_url(
+                                normalized_link,
+                                source_url=source_for_discovery,
+                                depth=next_depth,
+                            )
+                            if queued:
+                                queue_eligible_discovered_links.append(normalized_link)
 
                     self._report_page_to_manager(
                         current,
@@ -1720,9 +1756,11 @@ class DaemonWorkerService(WorkerControlService):
             return active
 
         if queue_mode in {"server", "both"}:
-            server_lease = self._claim_frontier_url_from_manager(worker_id)
-            if server_lease is not None:
-                return server_lease
+            now = time.monotonic()
+            if now >= self._next_server_claim_retry_monotonic:
+                server_lease = self._claim_frontier_url_from_manager(worker_id)
+                if server_lease is not None:
+                    return server_lease
             if queue_mode == "server" and not self._allow_daemon_local_fallback:
                 return None
 
@@ -2208,10 +2246,12 @@ class DaemonWorkerService(WorkerControlService):
                         "retryAfterMilliseconds": retry_after_ms,
                     },
                 )
-                # Avoid hot-loop polling when manager indicates strict politeness cooldown.
+                # Avoid hot-loop polling without sleeping under the daemon lock.
                 delay_seconds = max(0.05, min(1.0, float(retry_after_ms) / 1000.0 if retry_after_ms > 0 else 0.1))
-                time.sleep(delay_seconds)
+                self._next_server_claim_retry_monotonic = time.monotonic() + delay_seconds
             return None
+
+        self._next_server_claim_retry_monotonic = 0.0
 
         raw_url = str(data.get("url") or "").strip()
         if not raw_url:

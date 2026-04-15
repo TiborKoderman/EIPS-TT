@@ -22,13 +22,19 @@ class CrawlerConfig:
     large_binary_threshold_bytes: int = 5_000_000
     frontier_in_memory_limit: int = 50_000
     topic_keywords: tuple[str, ...] = (
-        "medicine",
-        "health",
-        "doctor",
-        "clinic",
-        "hospital",
-        "treatment",
-        "disease",
+        "fitness",
+        "fitnes",
+        "exercise",
+        "telovadba",
+        "training",
+        "trening",
+        "workout",
+        "wellness",
+        "nutrition",
+        "prehrana",
+        "vadba",
+        "kondicija",
+        "rekreacija",
     )
     relevance_allowed_domain_suffixes: tuple[str, ...] = ()
     relevance_same_host_boost: float = 10.0
@@ -64,7 +70,7 @@ def load_crawler_config() -> CrawlerConfig:
             kw.strip()
             for kw in os.getenv(
                 "CRAWLER_TOPIC_KEYWORDS",
-                "medicine,health,doctor,clinic,hospital,treatment,disease",
+                "fitness,fitnes,exercise,telovadba,training,trening,workout,wellness,nutrition,prehrana,vadba,kondicija,rekreacija",
             ).split(",")
             if kw.strip()
         ),

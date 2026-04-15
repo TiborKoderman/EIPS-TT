@@ -93,6 +93,7 @@ ALTER TABLE crawldb.page_data ADD CONSTRAINT fk_page_data_page FOREIGN KEY ( pag
 ALTER TABLE crawldb.page_data ADD CONSTRAINT fk_page_data_data_type FOREIGN KEY ( data_type_code ) REFERENCES crawldb.data_type( code ) ON DELETE RESTRICT;
 
 INSERT INTO crawldb.data_type VALUES
+	('HTML'),
 	('PDF'),
 	('DOC'),
 	('DOCX'),
