@@ -12,7 +12,7 @@ Fokus je samo na člankih (ne forumi).
 
 ### Dodane/posodobljene datoteke
 
-- `pa1/crawler/src/core/article_extractor.py`
+- `pa2/crawler/src/core/article_extractor.py`
   - glavna ekstrakcijska logika za članke
   - URL-level filter (hitro izloči očitne ne-article strani)
   - izbor najboljšega content root elementa z več selektorji + scoring
@@ -29,25 +29,25 @@ Fokus je samo na člankih (ne forumi).
     - `is_article`
     - `reason` (zakaj je bil URL sprejet ali zavrnjen)
 
-- `pa1/crawler/src/article_extraction_cli.py`
+- `pa2/crawler/src/article_extraction_cli.py`
   - single-page CLI za hiter ročni QA
   - omogoča test z URL-jem ali lokalnim HTML file-om
   - izpis JSON rezultata + opcijski izpis `cleaned_content`
 
-- `pa1/crawler/src/article_extraction_validate.py`
+- `pa2/crawler/src/article_extraction_validate.py`
   - batch validacija nad seznamom URL-jev iz CSV
   - izračun summary metrik (fetch uspeh, št. člankov, povprečne dolžine, labeled accuracy)
   - izhod:
     - full JSON report
     - opcijski CSV report
 
-- `pa1/tmp/extraction_sample/validation_urls.sample.csv`
+- `pa2/tmp/extraction_sample/validation_urls.sample.csv`
   - sample input za validacijo (mix article + non-article URL-jev)
 
 - generirani artefakti (iz testnega runa):
-  - `pa1/tmp/extraction_sample/article_01.json`
-  - `pa1/tmp/extraction_sample/validation_report.json`
-  - `pa1/tmp/extraction_sample/validation_report.csv`
+  - `pa2/tmp/extraction_sample/article_01.json`
+  - `pa2/tmp/extraction_sample/validation_report.json`
+  - `pa2/tmp/extraction_sample/validation_report.csv`
 
 ## 2) Zakaj je implementacija taka
 
@@ -61,19 +61,19 @@ Fokus je samo na člankih (ne forumi).
 ### 3.1 URL test
 
 ```powershell
-python pa1/crawler/src/article_extraction_cli.py --url "https://medover.zurnal24.si/ti-dve-pogosti-navadi-podvojita-tveganje-za-srcno-in-mozgansko-kap/" --user-agent "fri-wier-EIPS-TT" --print-cleaned
+python pa2/crawler/src/article_extraction_cli.py --url "https://medover.zurnal24.si/ti-dve-pogosti-navadi-podvojita-tveganje-za-srcno-in-mozgansko-kap/" --user-agent "fri-wier-EIPS-TT" --print-cleaned
 ```
 
 ### 3.2 Shrani rezultat v JSON
 
 ```powershell
-python pa1/crawler/src/article_extraction_cli.py --url "https://medover.zurnal24.si/ti-dve-pogosti-navadi-podvojita-tveganje-za-srcno-in-mozgansko-kap/" --output-json "pa1/tmp/extraction_sample/article_01.json"
+python pa2/crawler/src/article_extraction_cli.py --url "https://medover.zurnal24.si/ti-dve-pogosti-navadi-podvojita-tveganje-za-srcno-in-mozgansko-kap/" --output-json "pa2/tmp/extraction_sample/article_01.json"
 ```
 
 ### 3.3 Lokalni HTML file test
 
 ```powershell
-python pa1/crawler/src/article_extraction_cli.py --html-file "C:\pot\do\lokalne_strani.html" --print-cleaned
+python pa2/crawler/src/article_extraction_cli.py --html-file "C:\pot\do\lokalne_strani.html" --print-cleaned
 ```
 
 ## 4) CLI flagi za `article_extraction_cli.py`
@@ -105,7 +105,7 @@ python pa1/crawler/src/article_extraction_cli.py --html-file "C:\pot\do\lokalne_
 ## 5) Kako pognati batch validacijo
 
 ```powershell
-python pa1/crawler/src/article_extraction_validate.py --input pa1/tmp/extraction_sample/validation_urls.sample.csv --output-json pa1/tmp/extraction_sample/validation_report.json --output-csv pa1/tmp/extraction_sample/validation_report.csv --user-agent "fri-wier-EIPS-TT"
+python pa2/crawler/src/article_extraction_validate.py --input pa2/tmp/extraction_sample/validation_urls.sample.csv --output-json pa2/tmp/extraction_sample/validation_report.json --output-csv pa2/tmp/extraction_sample/validation_report.csv --user-agent "fri-wier-EIPS-TT"
 ```
 
 ## 6) CLI flagi za `article_extraction_validate.py`
@@ -176,4 +176,5 @@ Ključna polja:
 2. Nato poženi batch validacijo na labeled sample CSV.
 3. Preglej `reason` in `cleaned_content` pri edge primerih.
 4. Šele potem integriraj v DB pipeline (`cleaned_content` write), ko ste zadovoljni s stabilnostjo.
+
 
