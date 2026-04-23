@@ -11,7 +11,8 @@ from typing import Any
 
 import requests
 
-from core.article_extractor import ArticleExtractionResult, extract_medover_article
+from core.article_extractor_xpath import extract_medover_article
+from core.article_extractor import ArticleExtractionResult
 
 
 def build_parser() -> argparse.ArgumentParser:

@@ -12,7 +12,7 @@ from pathlib import Path
 
 import requests
 
-from core.article_extractor import extract_medover_article
+from core.article_extractor_xpath import extract_medover_article
 
 
 def build_parser() -> argparse.ArgumentParser:
