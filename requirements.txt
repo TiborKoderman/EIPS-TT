@@ -9,4 +9,6 @@ pyopenssl==26.0.0
 beautifulsoup4==4.14.3
 html5lib==1.1
 elementpath==4.7.0
+sentence-transformers==3.0.1
+pgvector==0.2.5
 jupyterlab==4.3.5
