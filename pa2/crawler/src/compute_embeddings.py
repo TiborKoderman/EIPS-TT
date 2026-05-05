@@ -32,7 +32,7 @@ def process_table(cur, model, table_name, batch_size=100):
         # Update db
         for i, emb in zip(ids, embeddings):
             # pgvector accepts lists
-            cur.execute(f"UPDATE crawldb.{table_name} SET embedding = %s WHERE id = %s;", (emb.tolist(), i))
+            cur.execute(f"UPDATE crawldb.{table_name} SET embedding = %s, embedded_at = NOW() WHERE id = %s;", (emb.tolist(), i))
 
         processed += len(rows)
         logging.info(f"Updated {processed}/{count} in {table_name}")

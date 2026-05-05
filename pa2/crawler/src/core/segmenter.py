@@ -77,57 +77,75 @@ def build_short_char_chunks(
 
 
 def build_long_word_chunks(
-	cleaned_content: str,
-	*,
-	words_per_chunk: int = 250,
-	overlap_words: int = 0,
-	min_words: int = 1,
+        cleaned_content: str,
+        *,
+        words_per_chunk: int = 250,
+        overlap_words: int = 50,
+        min_words: int = 1,
 ) -> list[TextChunk]:
-	"""Split text into word-based chunks (keeps whole words).
+        """Split text logically (Option B: Hybrid Paragraph/Sentence Chunking).
 
-	- `words_per_chunk`: chunk size in words
-	- `overlap_words`: optional overlap to preserve context
-	"""
+        - respect paragraphs (\n\n) as primary boundaries
+        - bounds sizes with words_per_chunk
+        - uses sentence splitting if a paragraph exceeds max words
+        - supports overlap_words when splitting larger blocks
+        """
+        if not cleaned_content or not cleaned_content.strip():
+                return []
 
-	text = normalize_text(cleaned_content)
-	if not text:
-		return []
+        # 1. Split into natural paragraphs
+        paragraphs = [p.strip() for p in cleaned_content.split("\n\n") if p.strip()]
 
-	if words_per_chunk <= 0:
-		raise ValueError("words_per_chunk must be > 0")
-	if overlap_words < 0:
-		raise ValueError("overlap_words must be >= 0")
-	if overlap_words >= words_per_chunk:
-		raise ValueError("overlap_words must be < words_per_chunk")
+        chunks: list[TextChunk] = []
+        current_chunk_words: list[str] = []
+        idx = 0
 
-	words = [w for w in text.split(" ") if w]
-	if not words:
-		return []
+        def _commit_chunk():
+                nonlocal idx, current_chunk_words
+                if len(current_chunk_words) >= min_words:
+                        text = normalize_text(" ".join(current_chunk_words))
+                        chunks.append(TextChunk(
+                                index=idx,
+                                text=text,
+                                char_count=len(text),
+                                token_count=len(current_chunk_words)
+                        ))
+                        idx += 1
 
-	step = words_per_chunk - overlap_words
-	chunks: list[TextChunk] = []
-	idx = 0
-	for start in range(0, len(words), step):
-		window = words[start : start + words_per_chunk]
-		if len(window) < min_words:
-			continue
-		piece = " ".join(window).strip()
-		if not piece:
-			continue
-		chunks.append(
-			TextChunk(
-				index=idx,
-				text=piece,
-				char_count=len(piece),
-				token_count=len(window),
-			)
-		)
-		idx += 1
+                        # Handle overlap for the next chunk
+                        if overlap_words > 0:
+                                current_chunk_words = current_chunk_words[-overlap_words:]
+                        else:
+                                current_chunk_words = []
+                else:
+                        current_chunk_words = []
 
-		if start + words_per_chunk >= len(words):
-			break
+        for p in paragraphs:
+                p_words = p.split()
 
-	return chunks
+                # If adding this paragraph fits nicely:
+                if len(current_chunk_words) + len(p_words) <= words_per_chunk:
+                        current_chunk_words.extend(p_words)
+                else:
+                        # If we already have something substantial, commit it first
+                        if len(current_chunk_words) >= (words_per_chunk * 0.5):
+                                _commit_chunk()
+
+                        # What if paragraph itself is HUGE? (Fallback to Sentence/Word slicing)
+                        if len(p_words) > words_per_chunk:
+                                sentences = [s.strip() for s in re.split(r'(?<=[.!?])\s+', p) if s.strip()]
+                                for s in sentences:
+                                        s_words = s.split()
+                                        if len(current_chunk_words) + len(s_words) > words_per_chunk and current_chunk_words:
+                                                _commit_chunk()
+                                        current_chunk_words.extend(s_words)
+                        else:
+                                current_chunk_words.extend(p_words)
+
+        if current_chunk_words:
+                _commit_chunk()
+
+        return chunks
 
 
 

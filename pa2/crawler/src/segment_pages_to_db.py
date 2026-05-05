@@ -114,7 +114,7 @@ def main() -> int:
             long_chunks = build_long_word_chunks(
                 cleaned,
                 words_per_chunk=250,
-                overlap_words=0,
+                overlap_words=50,
                 min_words=1,
             )
 
@@ -140,6 +140,7 @@ def main() -> int:
                 page_type=page_type,
                 chunks=short_chunks,
                 embedding_model=args.embedding_model,
+                extraction_result=result,
             )
             inserted_long += insert_segments(
                 conn,
@@ -148,6 +149,7 @@ def main() -> int:
                 page_type=page_type,
                 chunks=long_chunks,
                 embedding_model=args.embedding_model,
+                extraction_result=result,
             )
 
             updated_pages += 1
@@ -244,27 +246,39 @@ def insert_segments(
     page_type: PageType,
     chunks: list[Any],
     embedding_model: str,
+    extraction_result: Any = None,
 ) -> int:
     if not chunks:
         return 0
 
-    rows = [
-        (
+    heading_val = extraction_result.title if extraction_result else None
+    author_val = extraction_result.author if extraction_result else None
+    published_time_val = extraction_result.published_at if extraction_result and hasattr(extraction_result, 'published_at') else None
+
+    rows = []
+    for chunk in chunks:
+        meta_dict = {
+            "char_count": chunk.char_count
+        }
+        if author_val:
+            meta_dict["author"] = author_val
+        if published_time_val:
+            meta_dict["published_time"] = published_time_val
+
+        rows.append((
             page_id,
             page_type,
             chunk.index,
             chunk.text,
-            None,
-            None,
-            None,
-            None,
+            None,  # html_tag
+            None,  # section_title
+            heading_val,  # heading
+            None,  # heading_level
             None,  # embedding
             embedding_model,
             None,  # embedded_at
-            json.dumps({"char_count": chunk.char_count}, ensure_ascii=False),
-        )
-        for chunk in chunks
-    ]
+            json.dumps(meta_dict, ensure_ascii=False),
+        ))
 
     sql = f"""
         INSERT INTO {table}(
