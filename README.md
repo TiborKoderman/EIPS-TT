@@ -54,7 +54,21 @@ docker compose --profile server --profile crawler up -d manager crawler db
 bash scripts/db-migrate.sh
 ```
 
-3. Check status/logs:
+3. Run PA2 Extraction and embedding on the database:
+
+```powershell
+# Windows (PowerShell)
+.\scripts\run-cleaned-segmentation-embeddings.ps1
+```
+
+```bash
+# Or run manual commands for Linux/macOS
+python pa2/crawler/src/segment_pages_to_db.py --limit 10000
+python pa2/crawler/src/compute_embeddings.py
+```
+*Note: This will perform HTML boilerplate removal, chop everything into "short" (50 char) and "long" (250 word) segments, and calculate PGVector embeddings (LaBSE model) suitable for semantic searching.*
+
+4. Check status/logs:
 
 ```bash
 docker compose ps
@@ -62,7 +76,7 @@ docker compose logs --tail=200 manager
 docker compose logs --tail=200 crawler
 ```
 
-4. Stop deployment:
+5. Stop deployment:
 
 ```bash
 docker compose --profile server --profile crawler down

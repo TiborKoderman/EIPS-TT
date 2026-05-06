@@ -1,24 +1,24 @@
 services:
   db:
-    image: postgres:latest
+    image: postgres:16-bookworm
     environment:
       POSTGRES_DB: crawldb
       POSTGRES_USER: postgres
       POSTGRES_PASSWORD: postgres
     ports:
-      - "${DB_HOST_PORT:-5432}:5432"
+      - '5433:5432'
     volumes:
       - postgres-data:/var/lib/postgresql/data
       - ./db/migrations:/db-migrations:ro
       - ./db/migrations/00_initial_crawldb.sql:/docker-entrypoint-initdb.d/00_initial_crawldb.sql:ro
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U postgres -d crawldb"]
+      test: ['CMD-SHELL', 'pg_isready -U postgres -d crawldb']
       interval: 5s
       timeout: 5s
       retries: 20
 
   manager:
-    profiles: ["server"]
+    profiles: ['server']
     build:
       context: .
       dockerfile: ManagerApp/Dockerfile.server-crawler
@@ -36,12 +36,12 @@ services:
       CrawlerApi__DaemonChannelToken: ${CRAWLER_API_TOKEN:-}
       CrawlerApi__FrontierApiToken: ${CRAWLER_API_TOKEN:-}
       CRAWLER_USER_AGENT: fri-wier-T
-      CRAWLER_DOWNLOAD_PDF_CONTENT: "true"
+      CRAWLER_DOWNLOAD_PDF_CONTENT: 'true'
     ports:
-      - "${MANAGER_HOST_PORT:-5175}:5175"
+      - '${MANAGER_HOST_PORT:-5175}:5175'
 
   crawler:
-    profiles: ["crawler"]
+    profiles: ['crawler']
     build:
       context: .
       dockerfile: pa1/crawler/Dockerfile
@@ -57,7 +57,7 @@ services:
       MANAGER_INGEST_API_TOKEN: ${CRAWLER_API_TOKEN:-}
       MANAGER_DAEMON_WS_TOKEN: ${CRAWLER_API_TOKEN:-}
       CRAWLER_USER_AGENT: fri-wier-T
-      CRAWLER_DOWNLOAD_PDF_CONTENT: "true"
+      CRAWLER_DOWNLOAD_PDF_CONTENT: 'true'
 
 volumes:
   postgres-data:

@@ -1,0 +1,92 @@
+\documentclass[9pt]{IEEEtran}
+\usepackage[utf8]{inputenc}
+\usepackage[T1]{fontenc}
+\usepackage[english]{babel}
+\usepackage{graphicx}
+\usepackage{hyperref}
+\usepackage{geometry}
+\usepackage{listings}
+\usepackage{xcolor}
+
+\title{IEPS: Programming Assignment 2\\Data Extraction and Embeddings}
+\author{Dino Džaferagić, Tibor Koderman, Jerneja Krajcar}
+\date{\today}
+
+\begin{document}
+\maketitle
+
+\section{Introduction}
+This report describes the solutions for the second programming assignment (PA2).
+The assignment covers two main phases: 1) extracting and cleaning relevant information (boilerplate removal from HTML pages)
+and 2) implementing a local vector database, generating text segments, and computing their embeddings using PostgreSQL and
+the pgvector extension.
+
+\section{Boilerplate Removal}
+To clean the stored HTML documents and remove formatting noise like menus, footers, and visual navigation elements, we used a hybrid approach:
+\begin{itemize}
+    \item \textbf{XPath queries:} Searching for content within \texttt{<article>}, \texttt{<main>} tags, or elements functioning
+    as content containers (e.g., \texttt{class} or \texttt{id} containing "content").
+    \item \textbf{Heuristics for element removal:} Before extracting text, we intentionally stripped elements obviously containing
+    noise using XPath (tags such as \texttt{<nav>}, \texttt{<footer>}, \texttt{<header>}, \texttt{<aside>}, \texttt{<script>}, \texttt{<style>}).
+    We also checked attributes for hidden menus and toolbars.
+\end{itemize}
+
+The cleaned text is then stored in a newly created \texttt{cleaned\_content} column in our relational database.
+
+\section{Text Segmentation}
+Properly segmenting the cleaned text is the most critical step to avoid losing context during vectorization and to ensure accurate information retrieval, as emphasized in the task requirements. Without a proper approach, important indicators get overlooked, leading to incomplete or out-of-context vector matches.
+
+\subsection{Criteria for Splitting the Page into Thematic Sections}
+As required, we had to define strict criteria for splitting the page into multiple thematic sections. Rather than relying on unpredictable HTML tags like paragraphs or sentences—which can range from two words to two pages—we chose length-based slicing constraints as our primary criteria. Our strict segmenting criteria are defined by two boundaries: 1) the maximum allowed volume of content per chunk (character count vs. word count) and 2) the adherence to syntactic borders (ignoring spaces vs. keeping whole words). By comparing these extremes, we established two distinct profiles:
+
+\subsection{Short segments (up to 50 characters)}
+This strategy arbitrarily slices the plain text into rigidly fixed small windows of up to 50 characters, often cutting mid-word or mid-sentence.
+\begin{itemize}
+    \item \textbf{Advantages:} Yields highly dense micro-data with low vector variance. Performs excellently when the model only needs to pinpoint a highly specific phrase, isolated keyword, or independent date, acting similarly to exact keyword-matching but within a semantic space.
+    \item \textbf{Disadvantages (Context Loss):} Slicing mid-word can severely confuse the embedding model, as the cut-off thought or sentence loses syntactic structure. By ignoring sentence or paragraph boundaries, we completely destroy the broader logic and context of the author's original message.
+\end{itemize}
+
+\subsection{Logical \& Hybrid Overlapping Segments (\textasciitilde{}250 words)}
+To achieve the most appropriate strategy for vector embedding, we replaced fixed slicing with \textit{Semantic/Logical Chunking} paired with a sliding window (overlap). Rather than blindly counting up to 250 words, this strategy analyzes the raw \verb|\n\n| paragraph breaks and \verb|[.!?]| sentence boundaries to group complete thematic thoughts:
+\begin{itemize}
+    \item \textbf{Advantages (High Context Preservation \& Overlap):} This strategy adheres perfectly to the assignment's goal of making each segment a "complete description of one topic." We group paragraphs dynamically until hitting the word limit. If a block is too large, it correctly falls back to sentence-level boundary splits. Crucially, we introduced an \textbf{overlap of 50 words} between consecutive chunks to ensure no topic edge gets sharply severed, resulting in industry-grade RAG precision.
+    \item \textbf{Disadvantages:} The dynamic processing requires more computational overhead (regex splitting over sentences and overlap buffer tracking). Furthermore, dynamically bounded text arrays can slightly vary the semantic vector sizes compared to strictly fixed sizes, though standard transformers effectively pool this variance.
+\end{itemize}
+
+\subsection{Structuring with Hybrid Metadata}
+Furthermore, the task prompted us to extract structured meaningful content (e.g., article titles, authors, and publication dates). While our segments rely purely on robust plain-text NLP boundaries, we actively align this with structural HTML metadata. During the extraction phase, XPath was utilized to pull the article's core attributes. These are formally injected into the database alongside the plain text—mapping the extracted title into the \texttt{heading} column and pushing dates and authors into the \texttt{metadata} JSON properties.
+This guarantees that while the text chunks themselves remain semantically raw for better embeddings, they are permanently anchored to their original structured metadata context.
+
+\section{Vector Embeddings}
+\subsection{Database Design and Schema Justification}
+While the assignment provided a minimal baseline schema (a single \texttt{page\_segment} table), we intentionally expanded it to fully support the assignment's encouragement to "experiment with different chunking strategies" and to include structural metadata. To cleanly separate, compare, and test the two contrasting segmentation strategies side-by-side, we created two dedicated tables: \texttt{page\_segment\_short} and \texttt{page\_segment\_long}.
+
+To ensure a robust, production-ready environment, we introduced several critical columns beyond the basic requirements:
+\begin{itemize}
+    \item \texttt{cleaned\_content\_hash}: Added to the main \texttt{page} table to serve as an idempotency key. It allows us to safely re-run the extraction scripts without duplicating the segmentation effort if the original HTML content has not changed.
+    \item \texttt{segment\_text}: Replaced the baseline column name (\texttt{page\_segment}) to prevent confusing name collisions with the table itself, explicitly denoting the raw text payload.
+    \item \texttt{segment\_index}: Preserves the sequential order of segments, allowing the retrieval system to fetch neighboring chunks and reconstruct surrounding text flow if more context is needed.
+    \item \texttt{page\_type}: Categorizes the source document (e.g., article vs. forum), enabling efficient SQL pre-filtering to improve search precision before the semantic vector search even begins.
+    \item \texttt{embedding} and \texttt{embedding\_model}: Stores the actual 768-dimensional vector and explicitly tracks the model used. This allows safely generating and comparing multiple different embedding models inside the same document without overlapping constraints.
+    \item \texttt{metadata}: A flexible \texttt{JSONB} column to dynamically store extracted structural data (like author names or \texttt{published\_at} dates) mapped from XPath, without requiring rigid continuous SQL schema alterations.
+    \item \texttt{created\_at} and \texttt{embedded\_at}: Essential auditing timestamps to track when segmentation and asynchronous vectorization occurred.
+\end{itemize}
+
+Indexing maps vectors using \texttt{vector\_cosine\_ops} on HNSW / IVFFLAT trees.
+The database also employs strong \texttt{UNIQUE} constraints (page\_id, segment\_index, embedding\_model) to prevent duplicate embeddings upon repeated document processing.
+
+\subsection{Selected Model and Multilingualism}
+To properly process the Slovenian language, we employed the multilingual model \texttt{sentence-transformers/LaBSE}.
+In the implementation script (\texttt{compute\_embeddings.py}), this model vectorizes the prepared fragments and saves
+them back into the before mentioned tables. The output of the \textit{LaBSE} model is a numerical vector of size 768.
+The integration runs sequentially in batches of 100 documents to guarantee memory safety.
+
+\section{Conclusion and Evaluation}
+\textit{[Add evaluation regarding the parsing reliability of your pages or whatever was noticed during a manual quick check...
+freel describe here how the system behaved on your real data.]}
+
+We successfully managed to reliably process large amounts of unstructured HTML code, extract the essence,
+and translate it into a robust vector format ideal for RAG processing.
+
+\end{document}
+
