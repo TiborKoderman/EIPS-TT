@@ -1,0 +1,37 @@
+{
+  "timestamp": "2026-05-07T21:54:30.743946Z",
+  "embedding_model": "sentence-transformers/LaBSE",
+  "metric": "cosine",
+  "table": "page_segment_long",
+  "top_k": 3,
+  "rerank": false,
+  "rerank_model": null,
+  "queries": [
+    {
+      "label": "ad-hoc",
+      "query": "Kateri so simptomi visokega krvnega tlaka?",
+      "expected": "",
+      "initial": [
+        {
+          "page_id": 1738,
+          "url": "https://medover.zurnal24.si/kako-prepoznati-krvne-strdke-trombozo/",
+          "score": 0.45087198766684466,
+          "preview": "pljučne embolije lahko trajno okvarijo pljučne žile, kar vodi v popuščanje srca. Velik del arterijskih tromboz se lahko prepreči z zdravim življenjskim slogom brez kajenja, z zdravo, uravnoteženo preh…"
+        },
+        {
+          "page_id": 140,
+          "url": "https://medover.zurnal24.si/6-kljucnih-nasvetov-za-lazje-obvladovanje-krvnega-tlaka/",
+          "score": 0.4583645897616322,
+          "preview": ", ki prikazuje pritisk v arterijah, ko srce počiva med utripoma in se polni s krvjo. Na spletni strani klinike Mayo Clinic pojasnjujejo, da strokovnjaki krvni tlak razvrščajo v štiri različne skupine:…"
+        },
+        {
+          "page_id": 140,
+          "url": "https://medover.zurnal24.si/6-kljucnih-nasvetov-za-lazje-obvladovanje-krvnega-tlaka/",
+          "score": 0.46882806625449835,
+          "preview": "6 ključnih nasvetov za lažje obvladovanje krvnega tlaka Visok krvni tlak je vse pogostejši problem z resnimi posledicami. Preproste spremembe v vsakdanjem življenju pa lahko naredijo veliko razliko. V…"
+        }
+      ],
+      "rerank": []
+    }
+  ]
+}
