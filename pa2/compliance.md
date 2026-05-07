@@ -8,7 +8,7 @@ Status legend:
 - PARTIAL — partially implemented; concrete gap noted.
 - MISSING — not implemented.
 
-Last verified: 2026-05-08. DB state: 10,290 HTML pages, 779 articles with cleaned_content, 51,394 short segments, 2,414 long segments, all embedded with LaBSE.
+Last verified: 2026-05-08. Verified artifact: `pa2/extraction-db/crawldb_pa2.dump` (PostgreSQL custom format, gzip, 743,512,347 bytes, tracked through Git LFS). Dump state: 10,413 HTML pages, 779 articles with `cleaned_content`, 51,394 short segments, 2,414 long segments, all embedded with LaBSE.
 
 ## Section 2 — Identifying and extracting information
 
@@ -17,7 +17,7 @@ Last verified: 2026-05-08. DB state: 10,290 HTML pages, 779 articles with cleane
 - **Requirement:** use XPath expressions to filter relevant content from HTML pages.
 - **Status:** DONE
 - **Evidence:** `pa2/implementation-extraction/pipeline/extractor_xpath.py` — multi-selector XPath pipeline (`//main//article`, `//article`, `//*[@itemprop='articleBody']`, CMS class containers), score-based root selection, deterministic boilerplate removal via XPath drops + noise-keyword class/id filter.
-- **Verified:** `fill_cleaned_content.py` ran on all 4,652 HTML pages; 779 pages yielded non-empty `cleaned_content` (article-eligible). Remaining 3,873 pages have empty `cleaned_content` due to URL gate (forum, listing, homepage paths) — correct behavior.
+- **Verified:** the PA2 dump contains 10,413 HTML pages. URL gate breakdown from the dump: 9,062 forum threads, 436 forum/category index pages, 128 tag/author/login/search-style pages, and 787 potential articles. Of those 787 potential articles, 779 yielded non-empty `cleaned_content`; the remaining 8 failed the content gate and are intentionally unsegmented.
 
 ### 2.2 Regex extraction
 
@@ -96,7 +96,7 @@ Last verified: 2026-05-08. DB state: 10,290 HTML pages, 779 articles with cleane
   - `pa2/report-extraction.pdf` — 5 pages, 131 kB, built from `pa2/report/report.tex`.
   - `pa2/README.md` — setup, DB restore, pipeline run order, demo flags, PA1 notes.
   - `pa2/implementation-extraction/demo.py` — present.
-  - `pa2/extraction-db/crawldb_pa2.dump` — pg_dump custom-format, 427 MB, contains `crawldb.page` + `crawldb.page_segment_short` + `crawldb.page_segment_long` with all indexes.
+  - `pa2/extraction-db/crawldb_pa2.dump` — pg_dump custom-format, gzip-compressed, 710 MiB / 743,512,347 bytes, tracked through Git LFS. Contains the `vector` extension, `crawldb` schema, lookup tables, `crawldb.page`, `crawldb.page_segment_short`, `crawldb.page_segment_long`, and `crawldb.article_link_graph`; excludes raw `link`, `frontier_queue`, `image`, and `page_data` tables.
 - **Pending:** manual step — confirm GitHub user `opbieps` has read access.
 
 ### 6.1 Report content fields
@@ -114,13 +114,34 @@ Last verified: 2026-05-08. DB state: 10,290 HTML pages, 779 articles with cleane
   - §"Demo Program" — query examples table with real scores (baseline run)
   - §"Cross-Encoder Reranker" — model choice + real before/after results
   - §"Remaining Reranker Failure" — legal query case
-  - §"Limitations" — truncated dump, IVFFlat probe sensitivity, short-segment quality, Slovenian-only coverage
+  - §"Limitations" — artifact scope, IVFFlat probe sensitivity, short-segment quality, Slovenian-only coverage
   - §"Methods Tried but Not Used" — regex-only, MiniLM alt model, HNSW, sentence-only segmentation
 
 ## Pipeline orchestration (new, 2026-05-08)
 
 - **Status:** DONE
 - **Evidence:** `pa2/implementation-extraction/pipeline/run_pipeline.py` — single-command end-to-end pipeline: stage 1 `fill_cleaned_content`, stage 2 `segment_pages`, stage 3 `compute_embeddings`, stage 4 `build_link_graph`. All stages idempotent. Flags: `--force`, `--limit`, `--skip-*`, `--dry-run`, `--batch-size`, `--model-name`. Usage: `python pa2/implementation-extraction/pipeline/run_pipeline.py`.
+
+## Assignment database dumps (new, 2026-05-08)
+
+- **Status:** DONE
+- **Evidence:**
+  - `scripts/dump-assignment-dbs.sh` creates separate custom-format dumps for PA1 and PA2.
+  - PA1 mode writes `pa1/db`, excludes PA2 vector/link-graph tables and operational `frontier_queue`, and excludes `image`/`page_data` table data as required by Assignment 1.
+  - PA2 mode writes `pa2/extraction-db/crawldb_pa2.dump`, includes only the extraction restore payload, and excludes raw crawl `link`, `frontier_queue`, `image`, and `page_data` tables.
+  - `.gitattributes` tracks `pa2/extraction-db/crawldb_pa2.dump` with Git LFS so GitHub/GitLab commits contain a pointer instead of a 710 MiB regular Git blob.
+  - `.gitignore` ignores generic dump outputs while explicitly allowing required assignment artifacts (`pa1/db` and `pa2/extraction-db/crawldb_pa2.dump`).
+
+### PA1 dump artifact
+
+- **Verified:** `pa1/db` is PostgreSQL custom format with gzip compression, 66,625,839 bytes (64 MiB), under the 100 MB Assignment 1 limit.
+- **Contents:** `crawldb` schema/data without `image` or `page_data` table data. Row counts in the artifact: 25,716 pages total (`HTML` 1,001, `BINARY` 16,786, `DUPLICATE` 27, `FRONTIER` 7,902), plus `site`, `page_type`, `data_type`, and `link` data.
+- **Note:** this branch deliberately keeps the existing PA1 artifact instead of the accidental 921 MiB plain-text dump that had been introduced on the earlier `assignment2` history.
+
+### PA2 dump artifact
+
+- **Verified:** `pg_restore --list pa2/extraction-db/crawldb_pa2.dump` succeeds and shows PostgreSQL custom format with gzip compression.
+- **Contents:** 10,416 pages total (`HTML` 10,413, `BINARY` 1, `DUPLICATE` 2), 779 pages with non-empty `cleaned_content`, 51,394 short segments with embeddings, 2,414 long segments with embeddings, 48,686 article-link graph edges, 6 data types, 4 page types, and 1 site.
 
 ## PA1 crawler improvements (new, 2026-05-08)
 
@@ -135,10 +156,10 @@ Last verified: 2026-05-08. DB state: 10,290 HTML pages, 779 articles with cleane
 
 ## PA1 discrepancies still open (defense readiness)
 
-- **HTML page count:** 4,652 HTML pages in restored dump (below 5,000-page guideline). Dump truncated at COPY row 926,047. Documented in `pa2/README.md` and report §Limitations. Not a PA2 implementation gap.
+- **PA1 artifact page count:** the committed `pa1/db` custom dump has 1,001 HTML pages, below the PA1 5,000-page guideline. The PA2 extraction dump contains 10,413 HTML pages and is the source used for PA2 retrieval evaluation.
 - **LSH bonus (PA1 §2.1 BONUS):** Not implemented. Current dedup is exact SHA-256 only. Explicitly not claimed in README.
-- **Page payload presence:** All 4,652 HTML rows have non-null `html_content`; 779 yield non-empty `cleaned_content` after article filtering. No silent skips due to null content.
-- **Frontier / link / image / page_data tables:** Migration 07 only touches `crawldb.page` (new columns) and creates new `page_segment_*` tables. PA1 semantics preserved.
+- **PA2 page payload presence:** all 10,413 HTML rows in the PA2 dump have page records; 779 yield non-empty `cleaned_content` after article filtering and are segmented.
+- **Frontier / link / image / page_data tables:** migration 07 only touches `crawldb.page` (new columns) and creates new `page_segment_*` tables. PA1 semantics preserved. The PA2 dump intentionally excludes raw crawl `link`, `frontier_queue`, `image`, and `page_data` tables to keep the submission artifact focused on extraction and retrieval.
 
 ## Branch + merge accounting
 

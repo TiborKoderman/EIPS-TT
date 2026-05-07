@@ -28,7 +28,7 @@ Our PA1 corpus is restricted to MedOverNet (\url{https://medover.zurnal24.si/}),
     \item \textbf{URL gate.} Forum, category, search, login, and registration paths are filtered out at the URL level (substrings \texttt{/forum/}, \texttt{kategorija}, \texttt{iskanje}, \texttt{prijava}, \texttt{registracija}, \texttt{tag/}, \texttt{author/}). This is a fast, deterministic pre-cut.
     \item \textbf{Content gate.} A page that survives the URL filter must yield non-empty cleaned text; otherwise \texttt{cleaned\_content} is stored as an empty string and no segments are generated.
 \end{itemize}
-The restored \texttt{pa1/db} dump contains 4,652 HTML pages. URL-class breakdown: 3,520 forum threads (\texttt{/forum/tema/}), 212 forum/article category indexes, 126 tag and author pages, and \textbf{787 potential articles} outside all filtered prefixes. Of those 787, \textbf{779 yield non-empty \texttt{cleaned\_content}} and are segmented and embedded; 8 fail the content gate (empty extraction result). (See \S\ref{sec:limitations} for a note on the dump being truncated below the 5000-page assignment guideline.)
+The PA2 extraction dump contains 10,413 HTML pages. URL-class breakdown: 9,062 forum threads (\texttt{/forum/tema/}), 436 forum/category index pages, 128 tag/author/login/search-style pages, and \textbf{787 potential articles} outside all filtered prefixes. Of those 787, \textbf{779 yield non-empty \texttt{cleaned\_content}} and are segmented and embedded; 8 fail the content gate (empty extraction result). The committed \texttt{pa1/db} artifact remains the smaller PA1 custom-format dump and is kept separate from the PA2 extraction database.
 
 \section{Boilerplate Removal}
 To clean the stored HTML documents and remove formatting noise like menus, footers, and visual navigation elements, we used a hybrid approach:
@@ -183,7 +183,7 @@ The legal query \textit{"Kakšne so pravne posledice neplačila prometne kazni v
 \section{Limitations}
 \label{sec:limitations}
 \begin{itemize}
-    \item \textbf{Truncated crawl dump.} The PA1 plain-SQL dump contains 4,652 HTML pages (920 article-eligible), below the 5,000-page guideline stated in the assignment. The dump appears to have been cut during the \texttt{COPY} phase for the \texttt{page} table (row 926,047 is the last valid row). A 5,000+ page corpus would produce proportionally more segments and likely improve retrieval recall on niche topics.
+    \item \textbf{Artifact scope.} The PA2 extraction dump is intentionally separate from the PA1 submission dump. It contains the page table, lookup tables, article link graph, and segment tables with embeddings; raw crawl operational tables such as \texttt{frontier\_queue}, \texttt{link}, \texttt{image}, and \texttt{page\_data} are excluded from the PA2 artifact to keep the database focused on extraction and retrieval.
     \item \textbf{IVFFlat recall sensitivity.} With \texttt{probes=1} (default), IVFFlat can miss relevant segments in adjacent Voronoi cells. For production use, \texttt{probes} should be tuned to $\approx\sqrt{\text{lists}}$.
     \item \textbf{Short-segment quality.} The 50-character short-segment strategy frequently cuts mid-word and mid-sentence, producing fragments that confuse both LaBSE and the cross-encoder. Short segments yielded noticeably lower retrieval precision in our manual spot-checks.
     \item \textbf{Slovenian-only coverage.} MedOverNet content is Slovenian; the corpus contains no multilingual articles, so the multilingual capacity of LaBSE and \texttt{bge-reranker-v2-m3} is underutilised here.
@@ -201,4 +201,3 @@ The legal query \textit{"Kakšne so pravne posledice neplačila prometne kazni v
 We built a complete end-to-end RAG extraction pipeline for MedOverNet: HTML boilerplate removal via XPath, dual-strategy text segmentation (50-char and 250-word hybrid), LaBSE 768-d embeddings stored in pgvector with IVFFlat cosine indexes, a flexible retrieval demo, and a cross-encoder reranker. The system reliably handles Slovenian medical and wellness content. The three well-formed queries consistently return relevant segments; the three adversarial queries expose the expected failure modes (underspecified input, out-of-domain corpus, ambiguous acronyms) that no retrieval system can fully overcome without richer data.
 
 \end{document}
-

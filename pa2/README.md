@@ -15,7 +15,7 @@ pa2/
 ├── compliance.md                    # per-requirement audit against Assignment2.md
 ├── TODO.md                          # actionable checklist
 ├── extraction-db/
-│   └── crawldb_pa2.dump             # pg_dump custom-format export (page + segments)
+│   └── crawldb_pa2.dump             # Git LFS pg_dump custom-format export
 ├── report/
 │   └── report.tex                   # LaTeX source
 └── implementation-extraction/
@@ -57,22 +57,22 @@ The PA2 database is a pgvector-extended PostgreSQL instance. To restore from the
 # 1. Start the container
 docker compose up -d db
 
-# 2. Restore the dump (creates crawldb schema + all tables)
-pg_restore -h localhost -p 5433 -U postgres -d postgres \
+# 2. Restore the dump into the crawldb database
+pg_restore -h localhost -p 5432 -U postgres -d crawldb \
   --no-owner --no-acl \
   pa2/extraction-db/crawldb_pa2.dump
 
 # Verify
-docker exec eips-tt-db-1 psql -U postgres -d crawldb \
+docker compose exec db psql -U postgres -d crawldb \
   -c "SELECT COUNT(*) FROM crawldb.page_segment_long WHERE embedding IS NOT NULL;"
 ```
 
-> **Note:** The dump contains `crawldb.page` (HTML content), `crawldb.page_segment_short`, and `crawldb.page_segment_long` with pre-computed LaBSE embeddings. The migration `db/migrations/07_page_cleaned_content_and_segments.sql` must be applied if restoring from a fresh PA1 dump instead.
+> **Note:** The dump is tracked through Git LFS. It contains the `vector` extension, `crawldb` schema, lookup tables, `crawldb.page` (HTML content), `crawldb.page_segment_short`, `crawldb.page_segment_long`, and `crawldb.article_link_graph` with pre-computed LaBSE embeddings. It intentionally excludes raw `link`, `frontier_queue`, `image`, and `page_data` tables.
 
 ### Apply migration to a fresh PA1 dump
 
 ```bash
-psql -h localhost -p 5433 -U postgres -d crawldb \
+psql -h localhost -p 5432 -U postgres -d crawldb \
   -f db/migrations/07_page_cleaned_content_and_segments.sql
 ```
 
@@ -86,7 +86,7 @@ Run each stage in order from the repo root with the virtualenv active.
 
 ```bash
 python pa2/implementation-extraction/pipeline/fill_cleaned_content.py \
-  --host localhost --port 5433 --db crawldb --user postgres --password postgres \
+  --host localhost --port 5432 --db crawldb --user postgres --password postgres \
   --extractor xpath --limit 0
 ```
 
@@ -96,7 +96,7 @@ python pa2/implementation-extraction/pipeline/fill_cleaned_content.py \
 
 ```bash
 python pa2/implementation-extraction/pipeline/segment_pages.py \
-  --host localhost --port 5433 --db crawldb --user postgres --password postgres \
+  --host localhost --port 5432 --db crawldb --user postgres --password postgres \
   --limit 0
 ```
 
@@ -123,19 +123,19 @@ Set `CUDA_VISIBLE_DEVICES` to a valid GPU ID to use GPU acceleration.
 python pa2/implementation-extraction/demo.py \
   --query "Kateri so simptomi visokega krvnega tlaka?" \
   --top-k 5 \
-  --host localhost --port 5433 --db crawldb --user postgres --password postgres
+  --host localhost --port 5432 --db crawldb --user postgres --password postgres
 
 # batch, all 6 evaluation queries
 python pa2/implementation-extraction/demo.py \
   --queries-file pa2/implementation-extraction/eval/queries.json \
   --top-k 5 \
-  --host localhost --port 5433 --db crawldb --user postgres --password postgres
+  --host localhost --port 5432 --db crawldb --user postgres --password postgres
 
 # with cross-encoder reranker
 python pa2/implementation-extraction/demo.py \
   --queries-file pa2/implementation-extraction/eval/queries.json \
   --top-k 5 --rerank \
-  --host localhost --port 5433 --db crawldb --user postgres --password postgres
+  --host localhost --port 5432 --db crawldb --user postgres --password postgres
 ```
 
 Run outputs are saved to `pa2/implementation-extraction/eval/runs/<timestamp>_{baseline,rerank}.json`.
@@ -167,6 +167,7 @@ cp pa2/report/report.pdf pa2/report-extraction.pdf
 
 ## PA1 notes
 
-- **HTML page count:** The restored dump contains 4,652 HTML pages (920 article-eligible after URL filtering), below the 5,000-page assignment guideline. The dump was truncated at row 926,047 of the `COPY page` statement in the plain-SQL export. This is documented in `pa2/compliance.md`.
+- **PA1 dump:** `pa1/db` remains the Assignment 1 custom-format artifact, is 64 MiB, and excludes `image`/`page_data` table data as required. It contains 1,001 HTML rows, below the PA1 5,000-page guideline.
+- **PA2 dump:** `pa2/extraction-db/crawldb_pa2.dump` is a separate custom-format extraction artifact tracked through Git LFS. It contains 10,413 HTML pages, 779 cleaned articles, 51,394 short segments, and 2,414 long segments with LaBSE embeddings.
 - **LSH deduplication bonus (PA1 §2.1):** Not implemented. Current deduplication is exact SHA-256 only. Not claimed.
 - **PA1 tables untouched:** Migration 07 only adds columns to `crawldb.page` and creates new `page_segment_*` tables. Frontier, link, image, and page_data tables are unmodified.

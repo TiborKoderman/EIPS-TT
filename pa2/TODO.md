@@ -8,14 +8,15 @@ Tracks every actionable item for `docs/Assignment2.md` compliance. See `pa2/comp
 - [x] Create spec layout `pa2/{implementation-extraction/{demo.py,pipeline/,eval/{runs/}},extraction-db/,report/}`
 - [x] Port migration `db/migrations/07_page_cleaned_content_and_segments.sql` from `extractor`
 - [x] Extend `requirements.txt` with `html5lib`, `elementpath`, `sentence-transformers`, `pgvector`, `torch`, `transformers`
-- [x] Restore `pa1/db` plain-SQL dump into local pgvector container (db `crawldb`) — 4,652 HTML pages confirmed
+- [x] Keep `pa1/db` as the existing PA1 custom-format artifact — 64 MiB, excludes image/page_data table data, 1,001 HTML pages
+- [x] Generate separate PA2 custom-format extraction dump — 10,413 HTML pages confirmed
 - [x] Apply migration 07 against the restored DB
 
 ## B. Extraction (Section 2)
 
 - [x] XPath extractor ported (`pipeline/extractor_xpath.py`) — Section 2.1 DONE
 - [x] Regex-only extractor authored (`pipeline/extractor_regex.py`) — Section 2.2 DONE
-- [x] Run `pipeline/fill_cleaned_content.py` (full DB) — all 4,652 HTML pages processed; 779 have non-empty `cleaned_content`
+- [x] Run `pipeline/fill_cleaned_content.py` (full DB) — PA2 dump has 10,413 HTML pages; 779 have non-empty `cleaned_content`
 
 ## C. Segmentation + schema (Sections 2.3, 3.1)
 
@@ -53,14 +54,14 @@ Tracks every actionable item for `docs/Assignment2.md` compliance. See `pa2/comp
 
 ## H. Submission packaging (Section 6)
 
-- [x] `pa2/extraction-db/crawldb_pa2.dump` — pg_dump custom-format, 427 MB, includes page + both segment tables + all indexes
+- [x] `pa2/extraction-db/crawldb_pa2.dump` — pg_dump custom-format, 710 MiB, Git LFS tracked, includes vector extension, crawldb schema, lookup tables, page, both segment tables, article link graph, and all indexes; excludes raw link/frontier/image/page_data tables
 - [x] `pa2/README.md` — setup, DB restore, pipeline run order, demo usage, PA1 notes
 - [x] `tree pa2/` matches Section 6 spec layout (extra subdirs `pipeline/`, `eval/` inside `implementation-extraction/` are permitted)
 - [ ] (manual user step) confirm GitHub user `opbieps` has read access on the private repo
 
 ## I. PA1 discrepancies (defense readiness)
 
-- [x] HTML page count verified: 4,652 (dump truncated at COPY row 926,047 — below 5,000 guideline; documented in README and report §Limitations)
-- [x] `html_content` non-null verified: all 4,652 HTML rows have content; 779 yield non-empty `cleaned_content` after article filtering
+- [x] PA2 HTML page count verified from dump: 10,413 HTML pages; 779 yield non-empty `cleaned_content` after article filtering
+- [x] PA1 artifact page count noted separately: committed `pa1/db` has 1,001 HTML pages, below the PA1 5,000-page guideline
 - [x] LSH bonus: not implemented — explicitly noted as not-claimed in README
 - [x] PA1 tables untouched: migration 07 only adds columns to `crawldb.page` and creates new `page_segment_*` tables
