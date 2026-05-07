@@ -1,0 +1,239 @@
+{
+  "timestamp": "2026-05-07T21:54:13.484708Z",
+  "embedding_model": "sentence-transformers/LaBSE",
+  "metric": "cosine",
+  "table": "page_segment_long",
+  "top_k": 5,
+  "rerank": false,
+  "rerank_model": null,
+  "queries": [
+    {
+      "label": "good_1_blood_pressure",
+      "query": "Kateri so simptomi visokega krvnega tlaka?",
+      "expected": "Articles about hypertension symptoms (glavobol, vrtoglavica, krvavitve iz nosu).",
+      "initial": [
+        {
+          "page_id": 1738,
+          "url": "https://medover.zurnal24.si/kako-prepoznati-krvne-strdke-trombozo/",
+          "score": 0.45087198766684466,
+          "preview": "pljučne embolije lahko trajno okvarijo pljučne žile, kar vodi v popuščanje srca. Velik del arterijskih tromboz se lahko prepreči z zdravim življenjskim slogom brez kajenja, z zdravo, uravnoteženo preh…"
+        },
+        {
+          "page_id": 140,
+          "url": "https://medover.zurnal24.si/6-kljucnih-nasvetov-za-lazje-obvladovanje-krvnega-tlaka/",
+          "score": 0.4583645897616322,
+          "preview": ", ki prikazuje pritisk v arterijah, ko srce počiva med utripoma in se polni s krvjo. Na spletni strani klinike Mayo Clinic pojasnjujejo, da strokovnjaki krvni tlak razvrščajo v štiri različne skupine:…"
+        },
+        {
+          "page_id": 140,
+          "url": "https://medover.zurnal24.si/6-kljucnih-nasvetov-za-lazje-obvladovanje-krvnega-tlaka/",
+          "score": 0.46882806625449835,
+          "preview": "6 ključnih nasvetov za lažje obvladovanje krvnega tlaka Visok krvni tlak je vse pogostejši problem z resnimi posledicami. Preproste spremembe v vsakdanjem življenju pa lahko naredijo veliko razliko. V…"
+        },
+        {
+          "page_id": 1533,
+          "url": "https://medover.zurnal24.si/kako-in-kdaj-si-meriti-krvni-tlak/",
+          "score": 0.4760790027356424,
+          "preview": "Pogoste napake pri merjenju krvnega tlaka Zvišan krvni tlak (hipertenzija) ne povzroča bolečin, vendar dolgoročno povzroča resne zdravstvene zaplete, zato ga pogosto imenujemo tihi ubijalec. V Sloveni…"
+        },
+        {
+          "page_id": 1648,
+          "url": "https://medover.zurnal24.si/kako-depresija-in-kronicni-stres-vplivata-na-srce-kaj-lahko-naredite-zase/",
+          "score": 0.5125930018778444,
+          "preview": "To NI znak slabosti, ampak odgovorne skrbi zase. Ni dvoma – kronični stres in depresija nista le “stanja duha”, temveč dejavna zdravstvena tveganja, ki vplivajo na srce. Prepoznati, nasloviti in obvla…"
+        }
+      ],
+      "rerank": []
+    },
+    {
+      "label": "good_2_diabetes_diet",
+      "query": "Kakšna prehrana je primerna pri sladkorni bolezni tipa 2?",
+      "expected": "Articles on diabetes diet, low glycemic index foods, sugar substitutes.",
+      "initial": [
+        {
+          "page_id": 2021,
+          "url": "https://medover.zurnal24.si/kardiometabolni-dejavniki-kaj-so-in-kako-vplivajo-na-zdravje/",
+          "score": 0.4069148302078247,
+          "preview": "pa vplivamo na svojo telesno maso, obseg pasu, prehranjevalne navade, telesno aktivnost, kajenje in druge škodljive razvade. Zdrav življenjski slog pri osebah z mejno bazalno glikemijo (mejno zvišanje…"
+        },
+        {
+          "page_id": 2023,
+          "url": "https://medover.zurnal24.si/razblinjamo-mite-ali-sladkor-in-stres-povzrocata-sladkorno-bolezen/",
+          "score": 0.4442639946937561,
+          "preview": "pa svetuje v zmernih količinah ,” pove. Razloži, da je sladkorna bolezen povezana s previsokimi ravnimi krvnega sladkorja (glukoze) v krvi. Glukozo vnesemo s hrano, nahaja pa se v hrani, ki vsebuje og…"
+        },
+        {
+          "page_id": 2023,
+          "url": "https://medover.zurnal24.si/razblinjamo-mite-ali-sladkor-in-stres-povzrocata-sladkorno-bolezen/",
+          "score": 0.44535585912202846,
+          "preview": "razlikujejo od tistih pri sladkorni bolezni tipa 2. To je mit, pomembno je le, da oseba s sladkorno boleznijo pozna svojo bolezen, prepozna simptome in znake hipoglikemije, zna izmeriti sladkor in je…"
+        },
+        {
+          "page_id": 2021,
+          "url": "https://medover.zurnal24.si/kardiometabolni-dejavniki-kaj-so-in-kako-vplivajo-na-zdravje/",
+          "score": 0.477799863946445,
+          "preview": "Zakaj je pri sladkorni bolezni zdrav življenjski slog tako pomemben? Bolezni srca in ožilja so še vedno najpogostejši vzrok umrljivosti v Sloveniji. Raziskave kažejo, da bi jih bilo lahko precej manj,…"
+        },
+        {
+          "page_id": 2019,
+          "url": "https://medover.zurnal24.si/cudezna-tabletka-je-tu/",
+          "score": 0.48576181957266196,
+          "preview": "obolevnosti za sladkorno boleznijo tipa 2 menimo, da strukturirani edukacijski programi lahko pomembno pripomorejo k opolnomočenju oseb s sladkorno boleznijo, saj le to predstavlja temeljni delež v pr…"
+        }
+      ],
+      "rerank": []
+    },
+    {
+      "label": "good_3_insomnia_help",
+      "query": "Kako naravno premagati nespečnost in izboljšati spanec?",
+      "expected": "Sleep hygiene, melatonin, herbal remedies, relaxation tips.",
+      "initial": [
+        {
+          "page_id": 2028,
+          "url": "https://medover.zurnal24.si/lahko-zaradi-pomanjkanja-spanja-zbolimo-odgovor-vas-bo-sokiral/",
+          "score": 0.5256449156086069,
+          "preview": "krepitev pridobljene imunosti. Kakor spanje pomaga možganom pri utrjevanju učenja in spomina, se med spanjem krepi sposobnost imunskega sistema, da si zapomni, kako prepoznati in se odzvati na nevarne…"
+        },
+        {
+          "page_id": 2031,
+          "url": "https://medover.zurnal24.si/nasveti-za-boljsi-spanec/",
+          "score": 0.528906496102005,
+          "preview": "spodbuja proizvodnjo melatonina ponoči. 3. V svoj vsakdan vključite živila bogata z melatoninom , kot so med drugim banane, češnje, orehi in ovseni kosmiči. 5. Poskrbite za redno spalno rutino. Pojdit…"
+        },
+        {
+          "page_id": 1645,
+          "url": "https://medover.zurnal24.si/nocne-ptice-tveganje-za-zdravje-srca-in-ozilja/",
+          "score": 0.5335174977944042,
+          "preview": "bolj nagnjeni k motnjam razpoloženja, kot sta anksioznost in depresija, ki prav tako povečujejo tveganja za bolezni srca in ožilja. Internist dr. John La Puma za Medical News Today pojasnjuje, da veče…"
+        },
+        {
+          "page_id": 2028,
+          "url": "https://medover.zurnal24.si/lahko-zaradi-pomanjkanja-spanja-zbolimo-odgovor-vas-bo-sokiral/",
+          "score": 0.535220128129108,
+          "preview": "Tako spanje vpliva na imunski sistem Spanje in imunski sistem sta dvosmerno povezana. V zadnjih desetletjih se je znanje o spanju izjemno poglobilo in pokazalo daljnosežen pomen spanja na skoraj vse s…"
+        },
+        {
+          "page_id": 1950,
+          "url": "https://medover.zurnal24.si/zakaj-je-zdravje-in-pocutje-tako-pomemben-dosleden-urnik-spanja/",
+          "score": 0.5361617984916385,
+          "preview": "ritmu : notranji uri, ki deluje v 24-urnem ciklu. “Ko se zjutraj zbudimo in odpremo oči, zaznamo svetlobo. Ta jutranja svetloba je zelo pomemben signal za našo notranjo (cirkadiano) uro, ” pojasnjuje…"
+        }
+      ],
+      "rerank": []
+    },
+    {
+      "label": "bad_1_ambiguous_pain",
+      "query": "Boli me",
+      "expected": "Too short and ambiguous; expected to return generic medical chatter.",
+      "initial": [
+        {
+          "page_id": 1760,
+          "url": "https://medover.zurnal24.si/napake-ki-jih-delamo-ko-nas-bolijo-sklepi-ali-hrbet/",
+          "score": 0.6782334255119213,
+          "preview": "je, da so pogosto kronične. Za vsako kronično bolečino pa velja, da jo je težko odpraviti. Razlog je, da kronična bolečina postane avtonomna – živčne poti, ki prenašajo signal iz bolečih struktur v gl…"
+        },
+        {
+          "page_id": 1521,
+          "url": "https://medover.zurnal24.si/kronicne-bolecine-so-mnogokrat-povezane-s-pomanjkanjem-teh-hranil/",
+          "score": 0.6865726037708026,
+          "preview": "Kronične bolečine so mnogokrat povezane s pomanjkanjem teh hranil To težavo je pogosto lažje odpraviti, kot si mislite. “Kronična bolečina je pogost, kompleksen in mučen problem, ki ima globok vpliv n…"
+        },
+        {
+          "page_id": 1623,
+          "url": "https://medover.zurnal24.si/trpi-vsak-peti-med-nami-to-so-nefarmakoloske-oblike-pomoci/",
+          "score": 0.7047426104545593,
+          "preview": "Trpi vsak peti med nami. To so nefarmakološke oblike pomoči Nefarmakološke možnosti zdravljenja kronične bolečine: ne gre le za zmanjševanje bolečine, temveč tudi tehnike, kako s kronično bolečino laž…"
+        },
+        {
+          "page_id": 1760,
+          "url": "https://medover.zurnal24.si/napake-ki-jih-delamo-ko-nas-bolijo-sklepi-ali-hrbet/",
+          "score": 0.7071108098560084,
+          "preview": "Napake, ki jih delamo, ko nas bolijo sklepi ali hrbet Kako postopati v primeru bolečin v sklepih ali hrbtu, da stanja ne poslabšamo, temveč pospešimo okrevanje? Odgovore smo poiskali pri specialistu f…"
+        },
+        {
+          "page_id": 1755,
+          "url": "https://medover.zurnal24.si/zakaj-se-pozimi-poslabsajo-bolecine-v-sklepih/",
+          "score": 0.708111745602592,
+          "preview": "Zakaj se pozimi poslabšajo bolečine v sklepih? Hladno vreme pogosto spremljajo bolečine v sklepih. Je to le naključje ali obstaja povezava? “Pozimi so lahko prizadeti vsi sklepi, vendar so bolečine po…"
+        }
+      ],
+      "rerank": []
+    },
+    {
+      "label": "bad_2_out_of_domain_legal",
+      "query": "Kakšne so pravne posledice neplačila prometne kazni v Sloveniji?",
+      "expected": "Out-of-domain (legal). Expected to return loosely related civic/administrative content if any.",
+      "initial": [
+        {
+          "page_id": 2069,
+          "url": "https://medover.zurnal24.si/zasvojenost-preventiva-je-bolj-ucinkovita-od-kurative/",
+          "score": 0.6763290377055451,
+          "preview": "Ljudska univerza Nova Gorica …) kot tudi programe, projekte in ostale aktivnosti številnih vladnih in nevladnih organizacij (center za socialno delo, NVO na področju športa, mladine, socialnega varstv…"
+        },
+        {
+          "page_id": 1868,
+          "url": "https://medover.zurnal24.si/ko-obdarujete-otroke-obdarujte-odgovorno/",
+          "score": 0.6904771739528873,
+          "preview": "video vsebine, brez strukture in nadzora, se njegovi možgani začnejo prilagajati na nižjo stopnjo stimulacije iz resničnega sveta .« Da bi to preprečili, Kramli svetuje, naj starši, vzgojitelji in dru…"
+        },
+        {
+          "page_id": 2069,
+          "url": "https://medover.zurnal24.si/zasvojenost-preventiva-je-bolj-ucinkovita-od-kurative/",
+          "score": 0.6985930024738904,
+          "preview": "aktivnosti za širšo javnost. Ko sem v luči novembrske akcije – ob mesecu preprečevanja odvisnosti v MONG – govorila z direktorico Mladinskega centra in z vodjo Centra za zdravljenje odvisnosti, sta ob…"
+        },
+        {
+          "page_id": 2003,
+          "url": "https://medover.zurnal24.si/poletje-in-solske-obveznosti-da-koliko-ali-sploh-ne/",
+          "score": 0.7077570259571055,
+          "preview": "ta nagrada ne pomeni toliko, kot si mislijo starši. V kolikor se starši odločijo za nagrado pa naj bo ta zaslužena in dobro osmišljena. Kaj, zakaj in s kakšnim namenom. Če ste se vnaprej dogovorili za…"
+        },
+        {
+          "page_id": 1867,
+          "url": "https://medover.zurnal24.si/mladi-in-tveganje-za-zasvojenost-z-igrami-na-sreco-kaj-pravijo-najnovejse-raziskave/",
+          "score": 0.7099327868183123,
+          "preview": "Najbolj ogroženi so mladi v Severni Ameriki (33,7 %), Zahodni Evropi (26,6 %), Vzhodni Evropi (21,9 %), Afriki (18,9 %), nekoliko manj pa v Vzhodni in JV Azija (10,9 %) in Avstraliji / Novi Zelandiji…"
+        }
+      ],
+      "rerank": []
+    },
+    {
+      "label": "bad_3_acronym_no_context",
+      "query": "ATM",
+      "expected": "Acronym with multiple meanings (medicine + finance). Expected to surface unrelated content; reranker should at least prefer medical interpretations if any segment matches.",
+      "initial": [
+        {
+          "page_id": 1870,
+          "url": "https://medover.zurnal24.si/ko-se-hec-spremeni-v-odvisnost-pot-iz-zasvojenosti-z-igrami-na-sreco/",
+          "score": 0.7200224900205446,
+          "preview": "da imam vse pod nadzorom, da lahko kadar koli neham. […] V svojih dvajsetih in tridesetih sem našla novo tolažbo v nakupovanju. Nič ni bilo lepšega kot občutek, ko sem stala pred blagajno z novimi obl…"
+        },
+        {
+          "page_id": 1552,
+          "url": "https://medover.zurnal24.si/demenca-in-finance-kdaj-urediti-pooblastila/",
+          "score": 0.7489477397265727,
+          "preview": "nevidna v banki ali trgovini, je lahko nevidna tudi pri oceni za dolgotrajno oskrbo. Pri ocenjevanju se pogosto zgodi nekaj zelo subtilnega. Oseba samozavestno reče: “Ne potrebujem pomoči.” Zato moram…"
+        },
+        {
+          "page_id": 1557,
+          "url": "https://medover.zurnal24.si/demenca-in-denar-zakaj-popolna-kontrola-ni-resitev/",
+          "score": 0.7606741475255296,
+          "preview": "Demenca in denar: Zakaj popolna kontrola ni rešitev Ko demenca prizadene presojo, se denar hitro spremeni v vir strahu. A popolna kontrola pogosto povzroči več škode kot varnosti. To temo odpiram, ker…"
+        },
+        {
+          "page_id": 1555,
+          "url": "https://medover.zurnal24.si/delirij-pri-demenci/",
+          "score": 0.7629953450568889,
+          "preview": "Če se stanje pri demenci spremeni čez noč, je takojšnje ukrepanje ključno! Če se stanje osebe z demenco spremeni čez noč, ne čakajte. Razlika med demenco in delirijem je lahko razlika med poslabšanjem…"
+        },
+        {
+          "page_id": 1553,
+          "url": "https://medover.zurnal24.si/resnica-o-demenci-o-kateri-vsi-molcijo-ko-skrb-izcrpava-svojce/",
+          "score": 0.77566765095784,
+          "preview": "“Včasih si želim, da bi bilo konec.” Resnica o demenci, o kateri vsi molčijo O tem skoraj nihče ne govori. Večinoma govorimo o osebi z demenco, o izgubi, ki jo prinaša bolezen, o spominu, ki izginja.…"
+        }
+      ],
+      "rerank": []
+    }
+  ]
+}

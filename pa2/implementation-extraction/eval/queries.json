@@ -1,0 +1,41 @@
+{
+  "_comment": "PA2 Section 4 demo queries. Three intended-good (medical/wellness topics likely covered by MedOverNet) and three intended-bad (out-of-domain or ambiguous, used to motivate Section 4.1 reranker).",
+  "queries": [
+    {
+      "label": "good_1_blood_pressure",
+      "query": "Kateri so simptomi visokega krvnega tlaka?",
+      "intent": "good",
+      "expected": "Articles about hypertension symptoms (glavobol, vrtoglavica, krvavitve iz nosu)."
+    },
+    {
+      "label": "good_2_diabetes_diet",
+      "query": "Kakšna prehrana je primerna pri sladkorni bolezni tipa 2?",
+      "intent": "good",
+      "expected": "Articles on diabetes diet, low glycemic index foods, sugar substitutes."
+    },
+    {
+      "label": "good_3_insomnia_help",
+      "query": "Kako naravno premagati nespečnost in izboljšati spanec?",
+      "intent": "good",
+      "expected": "Sleep hygiene, melatonin, herbal remedies, relaxation tips."
+    },
+    {
+      "label": "bad_1_ambiguous_pain",
+      "query": "Boli me",
+      "intent": "bad",
+      "expected": "Too short and ambiguous; expected to return generic medical chatter."
+    },
+    {
+      "label": "bad_2_out_of_domain_legal",
+      "query": "Kakšne so pravne posledice neplačila prometne kazni v Sloveniji?",
+      "intent": "bad",
+      "expected": "Out-of-domain (legal). Expected to return loosely related civic/administrative content if any."
+    },
+    {
+      "label": "bad_3_acronym_no_context",
+      "query": "ATM",
+      "intent": "bad",
+      "expected": "Acronym with multiple meanings (medicine + finance). Expected to surface unrelated content; reranker should at least prefer medical interpretations if any segment matches."
+    }
+  ]
+}

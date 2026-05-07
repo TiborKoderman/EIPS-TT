@@ -133,14 +133,17 @@ class DaemonWorkerService(WorkerControlService):
                 queue_mode="server",
                 strategy_mode="balanced",
                 topic_keywords=[
+                    # fitness / wellness (primary domain focus)
                     "fitness", "fitnes",
                     "exercise", "telovadba",
                     "training", "trening",
-                    "wellness",
+                    "workout", "wellness",
                     "nutrition", "prehrana",
-                    "workout", "vadba",
-                    "kondicija",
-                    "rekreacija",
+                    "vadba", "kondicija",
+                    "rekreacija", "sport",
+                    "shujsati", "hujsanje", "kalorij", "beljakovine",
+                    # secondary: health topics overlapping fitness
+                    "dieta", "zdravje", "vitamin",
                 ],
                 avoid_duplicate_paths_across_daemons=True,
                 worker_ids=[1],
