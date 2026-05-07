@@ -7,7 +7,13 @@ __pycache__/
 *.pyc
 pa1/report/.out/*
 !pa1/report/.out/.gitkeep
+*.dump
+*.dump.gz
+*.sql.gz
+*.sql.xz
+*.sql.zst
 pa2/extraction-db/*.dump
+!pa2/extraction-db/crawldb_pa2.dump
 *.aux
 *.fdb_latexmk
 *.fls
@@ -23,3 +29,4 @@ ManagerApp/bin
 ManagerApp/obj
 .github
 pa1/db
+!pa1/db
