@@ -99,6 +99,11 @@ public class PageSearchDto
     public bool HasAllowedSuffixEvidence { get; set; }
     public bool HasSameHostEvidence { get; set; }
     public int? FrontierDepth { get; set; }
+    public string Assignment2ContentType { get; set; } = "unknown";
+    public bool HasCleanedContent { get; set; }
+    public int CleanedContentLength { get; set; }
+    public int ShortSegmentCount { get; set; }
+    public int LongSegmentCount { get; set; }
 }
 
 public class PageEvaluationSummaryDto
@@ -174,6 +179,102 @@ public class CollectedSiteSummaryDto
     public DateTime? LastPageAccessed { get; set; }
     public string? RobotsContent { get; set; }
     public string? SitemapContent { get; set; }
+    public int Assignment2CleanedPages { get; set; }
+    public int Assignment2ArticlePages { get; set; }
+    public int Assignment2ForumPages { get; set; }
+    public int Assignment2ShortSegments { get; set; }
+    public int Assignment2LongSegments { get; set; }
+}
+
+public class Assignment2OverviewDto
+{
+    public int ExtractedArticlePages { get; set; }
+    public int ExtractedForumPages { get; set; }
+    public int CleanedPagesTotal { get; set; }
+    public int ShortSegmentTotal { get; set; }
+    public int LongSegmentTotal { get; set; }
+    public int EmbeddedShortSegments { get; set; }
+    public int EmbeddedLongSegments { get; set; }
+    public string ActiveEmbeddingModel { get; set; } = "unknown";
+    public string AnnIndex { get; set; } = "unknown";
+    public string SimilarityMetric { get; set; } = "unknown";
+    public string RerankerModel { get; set; } = "BAAI/bge-reranker-v2-m3";
+}
+
+public class Assignment2DocumentSummaryDto
+{
+    public int PageId { get; set; }
+    public string Url { get; set; } = "";
+    public string ContentType { get; set; } = "unknown";
+    public bool HasCleanedContent { get; set; }
+    public int CleanedContentLength { get; set; }
+    public int ShortSegmentCount { get; set; }
+    public int LongSegmentCount { get; set; }
+    public DateTime? AccessedTime { get; set; }
+}
+
+public class Assignment2DocumentDetailDto
+{
+    public int PageId { get; set; }
+    public string Url { get; set; } = "";
+    public string ContentType { get; set; } = "unknown";
+    public string? CleanedContent { get; set; }
+    public int CleanedContentLength { get; set; }
+    public int ShortSegmentCount { get; set; }
+    public int LongSegmentCount { get; set; }
+    public string? SiteDomain { get; set; }
+    public DateTime? AccessedTime { get; set; }
+}
+
+public class Assignment2SiteMetricsDto
+{
+    public int SiteId { get; set; }
+    public int CleanedPages { get; set; }
+    public int ArticlePages { get; set; }
+    public int ForumPages { get; set; }
+    public int ShortSegments { get; set; }
+    public int LongSegments { get; set; }
+}
+
+public class Assignment2QueryDefinitionDto
+{
+    public string Label { get; set; } = "";
+    public string Query { get; set; } = "";
+    public string Intent { get; set; } = "";
+    public string Expected { get; set; } = "";
+}
+
+public class Assignment2DemoHitDto
+{
+    public int? PageId { get; set; }
+    public string? Url { get; set; }
+    public double? Score { get; set; }
+    public double? RerankScore { get; set; }
+    public string Preview { get; set; } = "";
+}
+
+public class Assignment2DemoQueryResultDto
+{
+    public string Label { get; set; } = "";
+    public string Query { get; set; } = "";
+    public string Expected { get; set; } = "";
+    public List<Assignment2DemoHitDto> Initial { get; set; } = new();
+    public List<Assignment2DemoHitDto> Rerank { get; set; } = new();
+}
+
+public class Assignment2DemoRunResultDto
+{
+    public string RunPath { get; set; } = "";
+    public DateTime? TimestampUtc { get; set; }
+    public string EmbeddingModel { get; set; } = "unknown";
+    public string Metric { get; set; } = "unknown";
+    public string Table { get; set; } = "page_segment_long";
+    public int TopK { get; set; }
+    public bool Rerank { get; set; }
+    public string? RerankModel { get; set; }
+    public string Stdout { get; set; } = "";
+    public string Stderr { get; set; } = "";
+    public List<Assignment2DemoQueryResultDto> Queries { get; set; } = new();
 }
 
 /// <summary>
@@ -235,8 +336,12 @@ public class WorkerGlobalConfigViewModel
     public int CrawlDelayMilliseconds { get; set; } = 300;
     public bool RespectRobotsTxt { get; set; } = true;
     public string UserAgent { get; set; } = "EIPS-TT-Crawler/1.0";
-    public string SeedUrlsText { get; set; } = "";
-    public List<SeedEntryViewModel> SeedEntries { get; set; } = new();
+    public string SeedUrlsText { get; set; } = "https://medover.zurnal24.si/\nhttps://medover.zurnal24.si/forum/";
+    public List<SeedEntryViewModel> SeedEntries { get; set; } =
+    [
+        new() { Url = "https://medover.zurnal24.si/", Enabled = true, Label = "Med.Over" },
+        new() { Url = "https://medover.zurnal24.si/forum/", Enabled = true, Label = "Med.Over Forum" },
+    ];
     public string QueueMode { get; set; } = "server";
     public string StrategyMode { get; set; } = "balanced";
     public string ScoreFunction { get; set; } = "rendezvous";
@@ -244,8 +349,8 @@ public class WorkerGlobalConfigViewModel
     public double ScoreWeightErrors { get; set; } = 1.0;
     public List<string> TopicKeywords { get; set; } = new();
     public string TopicKeywordsText { get; set; } = "";
-    public List<string> RelevanceAllowedDomainSuffixes { get; set; } = new();
-    public string RelevanceAllowedDomainSuffixesText { get; set; } = "";
+    public List<string> RelevanceAllowedDomainSuffixes { get; set; } = ["medover.zurnal24.si"];
+    public string RelevanceAllowedDomainSuffixesText { get; set; } = "medover.zurnal24.si";
     public double RelevanceSameHostBoost { get; set; } = 10.0;
     public double RelevanceAllowedSuffixBoost { get; set; } = 20.0;
     public double RelevanceKeywordBoost { get; set; } = 5.0;

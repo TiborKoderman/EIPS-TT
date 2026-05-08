@@ -15,11 +15,15 @@ public partial class Page
 
     public string? HtmlContent { get; set; }
 
+    public string? CleanedContent { get; set; }
+
     public int? HttpStatusCode { get; set; }
 
     public DateTime? AccessedTime { get; set; }
 
     public string? ContentHash { get; set; }
+
+    public string? CleanedContentHash { get; set; }
 
     public int? DuplicateOfPageId { get; set; }
 

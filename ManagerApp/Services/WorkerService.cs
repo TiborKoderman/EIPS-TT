@@ -201,6 +201,13 @@ public class WorkerService : IWorkerService
         return false;
     }
 
+    public async Task<bool> RemoveWorkerAsync(int id, string? daemonId = null)
+    {
+        LastError = null;
+        var response = await PostAsync($"api/workers/{id}/remove", new { });
+        return response?.Ok == true;
+    }
+
     private async Task PersistSeedUrlsAsync(int externalWorkerId, IReadOnlyList<string> seedUrls)
     {
         try

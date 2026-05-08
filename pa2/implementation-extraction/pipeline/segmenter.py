@@ -1,22 +1,9 @@
-"""Plain-text segmentation utilities (PA2).
-
-This module implements TWO segmentation strategies required by the assignment:
-
-1) Short segments: up to 50 characters
-   - we do NOT respect sentence boundaries or whole words
-   - chunks are created by fixed-size slicing
-
-2) Long segments: 250 words
-   - we DO respect whole words (split on whitespace)
-   - chunk size measured in words
-
-Both strategies are deterministic and easy to describe in the PA2 report.
-"""
+"""Plain-text segmentation utilities (PA2)."""
 
 from __future__ import annotations
 
-import re
 from dataclasses import dataclass
+import re
 
 
 _WHITESPACE_RE = re.compile(r"\s+")
@@ -24,129 +11,150 @@ _WHITESPACE_RE = re.compile(r"\s+")
 
 @dataclass(frozen=True)
 class TextChunk:
-	index: int
-	text: str
-	char_count: int
-	token_count: int
+    index: int
+    text: str
+    char_count: int
+    token_count: int
 
 
 def normalize_text(text: str) -> str:
-	text = (text or "").replace("\xa0", " ")
-	text = _WHITESPACE_RE.sub(" ", text)
-	return text.strip()
+    text = (text or "").replace("\xa0", " ")
+    text = _WHITESPACE_RE.sub(" ", text)
+    return text.strip()
 
 
 def build_short_char_chunks(
-	cleaned_content: str,
-	*,
-	chunk_chars: int = 50,
-	step_chars: int | None = None,
-	min_chars: int = 1,
+    cleaned_content: str,
+    *,
+    chunk_chars: int = 50,
+    step_chars: int | None = None,
+    min_chars: int = 1,
 ) -> list[TextChunk]:
-	"""Split text into fixed-size char chunks (no word/sentence boundaries).
+    """Split text into fixed-size character chunks."""
 
-	- `chunk_chars`: max length of each chunk
-	- `step_chars`: stride; defaults to `chunk_chars` (non-overlapping)
-	"""
+    text = normalize_text(cleaned_content)
+    if not text:
+        return []
 
-	text = normalize_text(cleaned_content)
-	if not text:
-		return []
+    if chunk_chars <= 0:
+        raise ValueError("chunk_chars must be > 0")
 
-	if chunk_chars <= 0:
-		raise ValueError("chunk_chars must be > 0")
+    step = chunk_chars if step_chars is None else step_chars
+    if step <= 0:
+        raise ValueError("step_chars must be > 0")
 
-	step = chunk_chars if step_chars is None else step_chars
-	if step <= 0:
-		raise ValueError("step_chars must be > 0")
+    chunks: list[TextChunk] = []
+    idx = 0
+    for start in range(0, len(text), step):
+        piece = text[start:start + chunk_chars].strip()
+        if len(piece) < min_chars:
+            continue
 
-	chunks: list[TextChunk] = []
-	idx = 0
-	for start in range(0, len(text), step):
-		piece = text[start : start + chunk_chars]
-		piece = piece.strip()
-		if len(piece) < min_chars:
-			continue
-		tokens = [t for t in piece.split(" ") if t]
-		chunks.append(
-			TextChunk(index=idx, text=piece, char_count=len(piece), token_count=len(tokens))
-		)
-		idx += 1
+        tokens = [token for token in piece.split(" ") if token]
+        chunks.append(TextChunk(
+            index=idx,
+            text=piece,
+            char_count=len(piece),
+            token_count=len(tokens),
+        ))
+        idx += 1
 
-	return chunks
+    return chunks
 
 
 def build_long_word_chunks(
-        cleaned_content: str,
-        *,
-        words_per_chunk: int = 250,
-        overlap_words: int = 50,
-        min_words: int = 1,
+    cleaned_content: str,
+    *,
+    words_per_chunk: int = 250,
+    overlap_words: int = 50,
+    min_words: int = 1,
 ) -> list[TextChunk]:
-        """Split text logically (Option B: Hybrid Paragraph/Sentence Chunking).
+    """Split article-like text by paragraph/sentence boundaries."""
 
-        - respect paragraphs (\n\n) as primary boundaries
-        - bounds sizes with words_per_chunk
-        - uses sentence splitting if a paragraph exceeds max words
-        - supports overlap_words when splitting larger blocks
-        """
-        if not cleaned_content or not cleaned_content.strip():
-                return []
+    if not cleaned_content or not cleaned_content.strip():
+        return []
 
-        # 1. Split into natural paragraphs
-        paragraphs = [p.strip() for p in cleaned_content.split("\n\n") if p.strip()]
+    paragraphs = [paragraph.strip() for paragraph in cleaned_content.split("\n\n") if paragraph.strip()]
 
-        chunks: list[TextChunk] = []
-        current_chunk_words: list[str] = []
-        idx = 0
+    chunks: list[TextChunk] = []
+    current_words: list[str] = []
+    idx = 0
 
-        def _commit_chunk():
-                nonlocal idx, current_chunk_words
-                if len(current_chunk_words) >= min_words:
-                        text = normalize_text(" ".join(current_chunk_words))
-                        chunks.append(TextChunk(
-                                index=idx,
-                                text=text,
-                                char_count=len(text),
-                                token_count=len(current_chunk_words)
-                        ))
-                        idx += 1
+    def commit_chunk() -> None:
+        nonlocal idx, current_words
+        if len(current_words) < min_words:
+            current_words = []
+            return
 
-                        # Handle overlap for the next chunk
-                        if overlap_words > 0:
-                                current_chunk_words = current_chunk_words[-overlap_words:]
-                        else:
-                                current_chunk_words = []
-                else:
-                        current_chunk_words = []
+        text = normalize_text(" ".join(current_words))
+        chunks.append(TextChunk(
+            index=idx,
+            text=text,
+            char_count=len(text),
+            token_count=len(current_words),
+        ))
+        idx += 1
 
-        for p in paragraphs:
-                p_words = p.split()
+        if overlap_words > 0:
+            current_words = current_words[-overlap_words:]
+        else:
+            current_words = []
 
-                # If adding this paragraph fits nicely:
-                if len(current_chunk_words) + len(p_words) <= words_per_chunk:
-                        current_chunk_words.extend(p_words)
-                else:
-                        # If we already have something substantial, commit it first
-                        if len(current_chunk_words) >= (words_per_chunk * 0.5):
-                                _commit_chunk()
+    for paragraph in paragraphs:
+        paragraph_words = paragraph.split()
+        if len(current_words) + len(paragraph_words) <= words_per_chunk:
+            current_words.extend(paragraph_words)
+            continue
 
-                        # What if paragraph itself is HUGE? (Fallback to Sentence/Word slicing)
-                        if len(p_words) > words_per_chunk:
-                                sentences = [s.strip() for s in re.split(r'(?<=[.!?])\s+', p) if s.strip()]
-                                for s in sentences:
-                                        s_words = s.split()
-                                        if len(current_chunk_words) + len(s_words) > words_per_chunk and current_chunk_words:
-                                                _commit_chunk()
-                                        current_chunk_words.extend(s_words)
-                        else:
-                                current_chunk_words.extend(p_words)
+        if len(current_words) >= (words_per_chunk * 0.5):
+            commit_chunk()
 
-        if current_chunk_words:
-                _commit_chunk()
+        if len(paragraph_words) > words_per_chunk:
+            sentences = [sentence.strip() for sentence in re.split(r"(?<=[.!?])\s+", paragraph) if sentence.strip()]
+            for sentence in sentences:
+                sentence_words = sentence.split()
+                if len(current_words) + len(sentence_words) > words_per_chunk and current_words:
+                    commit_chunk()
+                current_words.extend(sentence_words)
+            continue
 
-        return chunks
+        current_words.extend(paragraph_words)
+
+    if current_words:
+        commit_chunk()
+
+    return chunks
 
 
+def build_forum_long_chunks(
+    post_blocks: list[str],
+    *,
+    words_per_chunk: int = 220,
+    overlap_words: int = 30,
+    min_words: int = 1,
+) -> list[TextChunk]:
+    """Chunk forum threads by post/reply first, then by paragraph/sentence."""
 
+    normalized_blocks = [block.strip() for block in post_blocks if block and block.strip()]
+    if not normalized_blocks:
+        return []
 
+    chunks: list[TextChunk] = []
+    idx = 0
+    for block in normalized_blocks:
+        block_chunks = build_long_word_chunks(
+            block,
+            words_per_chunk=words_per_chunk,
+            overlap_words=overlap_words,
+            min_words=min_words,
+        )
+        for block_chunk in block_chunks:
+            chunks.append(TextChunk(
+                index=idx,
+                text=block_chunk.text,
+                char_count=block_chunk.char_count,
+                token_count=block_chunk.token_count,
+            ))
+            idx += 1
+
+    return chunks

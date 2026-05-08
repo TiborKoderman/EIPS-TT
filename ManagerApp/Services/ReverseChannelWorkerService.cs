@@ -131,7 +131,7 @@ public sealed class ReverseChannelWorkerService : IWorkerService
 
         if (normalizedSeedUrls.Count > 0)
         {
-            await PersistSeedUrlsAsync(response.Id, normalizedSeedUrls);
+            await PersistSeedUrlsAsync(response.Id, normalizedSeedUrls, targetDaemonId);
         }
 
         return response;
@@ -174,6 +174,29 @@ public sealed class ReverseChannelWorkerService : IWorkerService
     {
         LastError = null;
         return ExecuteCommandAsync("pause-worker", id, daemonId);
+    }
+
+    public async Task<bool> RemoveWorkerAsync(int id, string? daemonId = null)
+    {
+        LastError = null;
+        var targetDaemonId = ResolveTargetDaemonId(daemonId);
+        if (!await EnsureDaemonConnectedAsync(targetDaemonId))
+        {
+            return false;
+        }
+
+        var removed = await RequestAsync<JsonElement>("remove-worker", new
+        {
+            workerId = id,
+        }, ensureConnected: false, daemonId: targetDaemonId);
+        if (removed.ValueKind is JsonValueKind.Undefined or JsonValueKind.Null)
+        {
+            return false;
+        }
+
+        await RemovePersistedWorkerRuntimeAsync(id, targetDaemonId);
+        await RemoveWorkerIdFromPersistedGroupsAsync(id, targetDaemonId);
+        return true;
     }
 
     public async Task<Dictionary<string, int>> GetWorkerStatusCountsAsync()
@@ -283,8 +306,8 @@ public sealed class ReverseChannelWorkerService : IWorkerService
                 RateLimitPerMinute = 240,
                 QueueMode = "server",
                 StrategyMode = "balanced",
-                TopicKeywords = new List<string> { "fitness", "fitnes", "exercise", "training", "workout", "wellness", "nutrition", "vadba" },
-                TopicKeywordsText = "fitness\nfitnes\nexercise\ntraining\nworkout\nwellness\nnutrition\nvadba",
+                TopicKeywords = new List<string> { "medicine", "medicina", "medicinski", "health", "zdravje", "zdravst", "doctor", "zdravnik", "specialist", "bolezen", "simptom", "simptomi", "diagnoza", "zdravljenje", "terapija", "pregled", "ambulanta", "klinika", "bolnisnica", "forum", "vprasanje", "odgovor", "nosecnost", "dojenje", "otrok", "prehrana" },
+                TopicKeywordsText = "medicine\nmedicina\nmedicinski\nhealth\nzdravje\nzdravst\ndoctor\nzdravnik\nspecialist\nbolezen\nsimptom\nsimptomi\ndiagnoza\nzdravljenje\nterapija\npregled\nambulanta\nklinika\nbolnisnica\nforum\nvprasanje\nodgovor\nnosecnost\ndojenje\notrok\nprehrana",
                 AvoidDuplicatePathsAcrossDaemons = true,
                 WorkerIds = new List<int>(),
             },
@@ -725,12 +748,14 @@ public sealed class ReverseChannelWorkerService : IWorkerService
             "start-worker" => "start-worker",
             "stop-worker" => "stop-worker",
             "pause-worker" => "pause-worker",
+            "remove-worker" => "remove-worker",
             _ => null,
         };
 
         if (string.Equals(commandType, "start-worker", StringComparison.OrdinalIgnoreCase)
             || string.Equals(commandType, "stop-worker", StringComparison.OrdinalIgnoreCase)
             || string.Equals(commandType, "pause-worker", StringComparison.OrdinalIgnoreCase)
+            || string.Equals(commandType, "remove-worker", StringComparison.OrdinalIgnoreCase)
             || string.Equals(commandType, "reload-daemon", StringComparison.OrdinalIgnoreCase)
             || string.Equals(commandType, "stop-daemon", StringComparison.OrdinalIgnoreCase))
         {
@@ -799,6 +824,86 @@ public sealed class ReverseChannelWorkerService : IWorkerService
         return await EnqueueCommandAsync(commandType, workerId);
     }
 
+    private async Task RemovePersistedWorkerRuntimeAsync(int workerId, string daemonId)
+    {
+        try
+        {
+            var connectionString = _configuration.GetConnectionString("CrawldbConnection");
+            if (string.IsNullOrWhiteSpace(connectionString))
+            {
+                return;
+            }
+
+            await using var connection = new NpgsqlConnection(connectionString);
+            await connection.OpenAsync();
+
+            var daemonDbId = await ResolveDaemonDbIdAsync(connection, daemonId)
+                ?? _configuration.GetValue("CrawlerApi:DefaultDaemonDbId", 1);
+
+            const string deleteWorkerSql = """
+                DELETE FROM manager.worker
+                WHERE external_worker_id = @worker_id
+                  AND daemon_id = @daemon_id;
+                """;
+
+            await using (var deleteWorkerCmd = new NpgsqlCommand(deleteWorkerSql, connection))
+            {
+                deleteWorkerCmd.Parameters.AddWithValue("worker_id", workerId);
+                deleteWorkerCmd.Parameters.AddWithValue("daemon_id", daemonDbId);
+                await deleteWorkerCmd.ExecuteNonQueryAsync();
+            }
+
+            const string deleteSeedSql = """
+                DELETE FROM manager.seed_url
+                WHERE external_worker_id = @worker_id
+                  AND daemon_id = @daemon_id;
+                """;
+
+            await using var deleteSeedCmd = new NpgsqlCommand(deleteSeedSql, connection);
+            deleteSeedCmd.Parameters.AddWithValue("worker_id", workerId);
+            deleteSeedCmd.Parameters.AddWithValue("daemon_id", daemonDbId);
+            await deleteSeedCmd.ExecuteNonQueryAsync();
+        }
+        catch (Exception ex)
+        {
+            _logger.LogDebug(ex, "Failed to delete persisted runtime state for worker {WorkerId}", workerId);
+        }
+    }
+
+    private async Task RemoveWorkerIdFromPersistedGroupsAsync(int workerId, string daemonId)
+    {
+        try
+        {
+            var groups = await LoadWorkerGroupsAsync();
+            var changed = false;
+            foreach (var group in groups)
+            {
+                if (!string.Equals(group.DaemonId, daemonId, StringComparison.OrdinalIgnoreCase))
+                {
+                    continue;
+                }
+
+                var updatedIds = group.WorkerIds.Where(id => id != workerId).ToList();
+                if (updatedIds.Count == group.WorkerIds.Count)
+                {
+                    continue;
+                }
+
+                group.WorkerIds = updatedIds;
+                changed = true;
+            }
+
+            if (changed)
+            {
+                await SaveJsonGlobalSettingAsync("crawler.worker_groups", groups, updatedBy: "manager-ui");
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogDebug(ex, "Failed to update persisted worker groups after removing worker {WorkerId}", workerId);
+        }
+    }
+
     private static bool IsTransientRequestFailure(string? error)
     {
         if (string.IsNullOrWhiteSpace(error))
@@ -811,7 +916,7 @@ public sealed class ReverseChannelWorkerService : IWorkerService
             || error.Contains("disconnected", StringComparison.OrdinalIgnoreCase);
     }
 
-    private async Task PersistSeedUrlsAsync(int externalWorkerId, IReadOnlyList<string> seedUrls)
+    private async Task PersistSeedUrlsAsync(int externalWorkerId, IReadOnlyList<string> seedUrls, string daemonId)
     {
         try
         {
@@ -827,10 +932,11 @@ public sealed class ReverseChannelWorkerService : IWorkerService
                 return;
             }
 
-            var daemonDbId = _configuration.GetValue("CrawlerApi:DefaultDaemonDbId", 1);
-
             await using var connection = new NpgsqlConnection(connectionString);
             await connection.OpenAsync();
+
+            var daemonDbId = await ResolveDaemonDbIdAsync(connection, daemonId)
+                ?? _configuration.GetValue("CrawlerApi:DefaultDaemonDbId", 1);
 
             const string insertSql = """
                 INSERT INTO manager.seed_url (daemon_id, external_worker_id, url)
@@ -852,6 +958,29 @@ public sealed class ReverseChannelWorkerService : IWorkerService
         {
             _logger.LogWarning(ex, "Failed to persist seed URLs for worker {WorkerId}", externalWorkerId);
         }
+    }
+
+    private static async Task<int?> ResolveDaemonDbIdAsync(NpgsqlConnection connection, string daemonIdentifier)
+    {
+        const string sql = """
+            SELECT id
+            FROM manager.daemon
+            WHERE COALESCE(metadata->>'daemonId', '') = @daemon_identifier
+               OR lower(name) = lower(@daemon_name)
+            ORDER BY CASE WHEN COALESCE(metadata->>'daemonId', '') = @daemon_identifier THEN 0 ELSE 1 END
+            LIMIT 1;
+            """;
+
+        await using var cmd = new NpgsqlCommand(sql, connection);
+        cmd.Parameters.AddWithValue("daemon_identifier", daemonIdentifier ?? string.Empty);
+        cmd.Parameters.AddWithValue("daemon_name", daemonIdentifier == "local-default" ? "Local Daemon" : daemonIdentifier ?? string.Empty);
+        var scalar = await cmd.ExecuteScalarAsync();
+        if (scalar is null || scalar == DBNull.Value)
+        {
+            return null;
+        }
+
+        return Convert.ToInt32(scalar);
     }
 
     private async Task<bool> EnsureDaemonConnectedAsync(string? daemonId = null)

@@ -22,21 +22,17 @@ class CrawlerConfig:
     large_binary_threshold_bytes: int = 5_000_000
     frontier_in_memory_limit: int = 50_000
     topic_keywords: tuple[str, ...] = (
-        # fitness / wellness (primary domain focus)
-        "fitness", "fitnes",
-        "exercise", "telovadba",
-        "training", "trening",
-        "workout", "wellness",
-        "nutrition", "prehrana",
-        "vadba", "kondicija",
-        "rekreacija", "sport",
-        "shujsati", "hujsanje", "kalorij", "beljakovine",
-        # secondary: health topics overlapping fitness
-        "dieta", "zdravje", "vitamin",
+        "medicine", "medicina", "medicinski",
+        "health", "zdravje", "zdravst",
+        "doctor", "zdravnik", "specialist",
+        "bolezen", "simptom", "simptomi",
+        "diagnoza", "zdravljenje", "terapija",
+        "pregled", "ambulanta", "klinika",
+        "bolnisnica", "forum", "vprasanje", "odgovor",
+        "nosecnost", "dojenje", "otrok", "prehrana",
     )
     relevance_allowed_domain_suffixes: tuple[str, ...] = (
-        "medover.net",
-        "zurnal24.si",
+        "medover.zurnal24.si",
     )
     relevance_same_host_boost: float = 10.0
     relevance_allowed_suffix_boost: float = 20.0
@@ -71,12 +67,12 @@ def load_crawler_config() -> CrawlerConfig:
             kw.strip()
             for kw in os.getenv(
                 "CRAWLER_TOPIC_KEYWORDS",
-                "fitness,fitnes,exercise,telovadba,training,trening,workout,wellness,nutrition,prehrana,vadba,kondicija,rekreacija,sport,shujsati,hujsanje,kalorij,beljakovine,dieta,zdravje,vitamin",
+                "medicine,medicina,medicinski,health,zdravje,zdravst,doctor,zdravnik,specialist,bolezen,simptom,simptomi,diagnoza,zdravljenje,terapija,pregled,ambulanta,klinika,bolnisnica,forum,vprasanje,odgovor,nosecnost,dojenje,otrok,prehrana",
             ).split(",")
             if kw.strip()
         ),
         relevance_allowed_domain_suffixes=_parse_csv_hosts(
-            os.getenv("CRAWLER_RELEVANCE_ALLOWED_SUFFIXES", "medover.net,zurnal24.si"),
+            os.getenv("CRAWLER_RELEVANCE_ALLOWED_SUFFIXES", "medover.zurnal24.si"),
         ),
         relevance_same_host_boost=float(
             os.getenv("CRAWLER_RELEVANCE_SAME_HOST_BOOST", "10"),

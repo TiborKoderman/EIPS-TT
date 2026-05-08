@@ -4,6 +4,7 @@
 @using System.Text.Json
 @using ManagerApp.Models
 @using ManagerApp.Services
+@inject IJSRuntime JS
 @inject IWorkerService WorkerService
 @inject NavigationManager Navigation
 
@@ -83,6 +84,9 @@
                         </button>
                         <button class="btn" @onclick="StopWorker" disabled="@workerActionInProgress">
                             <span class="mdi mdi-stop"></span> Stop
+                        </button>
+                        <button class="btn" @onclick="RemoveWorker" disabled="@workerActionInProgress">
+                            <span class="mdi mdi-delete-outline"></span> Remove
                         </button>
                     </div>
                 </div>
@@ -281,6 +285,26 @@
         await ExecuteWorkerAction("stop", () => WorkerService.StopWorkerAsync(WorkerId, targetDaemon));
     }
 
+    private async Task RemoveWorker()
+    {
+        if (workerDetail is null)
+        {
+            return;
+        }
+
+        var confirmed = await ConfirmWorkerRemovalAsync(workerDetail.Worker);
+        if (!confirmed)
+        {
+            return;
+        }
+
+        var targetDaemon = workerDetail.Worker.DaemonId ?? DaemonId;
+        await ExecuteWorkerAction(
+            "remove",
+            () => WorkerService.RemoveWorkerAsync(WorkerId, targetDaemon),
+            onSuccess: () => Navigation.NavigateTo("/workers"));
+    }
+
     private string BuildTabHref(string tabKey)
     {
         if (string.IsNullOrWhiteSpace(DaemonId))
@@ -291,7 +315,7 @@
         return $"/workers/{WorkerId}/{tabKey}?daemonId={Uri.EscapeDataString(DaemonId)}";
     }
 
-    private async Task ExecuteWorkerAction(string actionName, Func<Task<bool>> action)
+    private async Task ExecuteWorkerAction(string actionName, Func<Task<bool>> action, Action? onSuccess = null)
     {
         if (workerActionInProgress)
         {
@@ -308,12 +332,25 @@
             actionStatus = ok
                 ? $"Worker {WorkerId} {actionName} requested successfully."
                 : $"Worker {WorkerId} {actionName} failed. {WorkerService.LastError}";
+            if (ok && onSuccess is not null)
+            {
+                onSuccess();
+                return;
+            }
+
             await RefreshDataAsync();
         }
         finally
         {
             workerActionInProgress = false;
         }
+    }
+
+    private Task<bool> ConfirmWorkerRemovalAsync(WorkerViewModel worker)
+    {
+        var daemonId = string.IsNullOrWhiteSpace(worker.DaemonId) ? "local-default" : worker.DaemonId;
+        var message = $"Remove worker {worker.Id} ({worker.Name}) from daemon {daemonId}? Active workers will be stopped first and their current frontier claim will be requeued.";
+        return JS.InvokeAsync<bool>("confirm", message).AsTask();
     }
 
     private static List<WorkerLogEntryViewModel> BuildLogsFromCrawlerEvents(

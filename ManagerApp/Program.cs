@@ -24,6 +24,7 @@ builder.Services.AddScoped(sp =>
 builder.Services.AddScoped<IStatisticsService, StatisticsService>();
 builder.Services.AddScoped<IGraphService, GraphService>();
 builder.Services.AddScoped<IPageService, PageService>();
+builder.Services.AddScoped<IAssignment2Service, Assignment2Service>();
 builder.Services.AddSingleton<DaemonChannelService>();
 builder.Services.AddSingleton<CrawlerRelayService>();
 builder.Services.AddSingleton<FrontierService>();

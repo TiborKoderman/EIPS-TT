@@ -38,6 +38,9 @@ class WorkerControlService(Protocol):
     def stop_worker(self, worker_id: int) -> bool:
         ...
 
+    def remove_worker(self, worker_id: int) -> bool:
+        ...
+
     def spawn_worker(
         self,
         *,

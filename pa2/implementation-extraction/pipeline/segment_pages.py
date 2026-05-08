@@ -32,7 +32,8 @@ if SRC_DIR not in sys.path:
     sys.path.insert(0, SRC_DIR)
 
 from extractor_xpath import extract_medover_article  # noqa: E402
-from segmenter import build_long_word_chunks, build_short_char_chunks  # noqa: E402
+from forum_extractor import extract_forum_thread  # noqa: E402
+from segmenter import build_forum_long_chunks, build_long_word_chunks, build_short_char_chunks  # noqa: E402
 
 
 @dataclass(frozen=True)
@@ -96,27 +97,32 @@ def main() -> int:
         pages = fetch_html_pages(conn, limit=args.limit, force=args.force)
         for page in pages:
             processed += 1
-            result = extract_medover_article(url=page.url, html=page.html_content)
+            result = extract_page_content(page.url, page.html_content)
             page_type = get_page_type(page.url, result)
 
             cleaned = result.cleaned_content or ""
             cleaned_hash = sha256_hex(cleaned) if cleaned else None
 
-            # Segmentation strategy requested in the assignment:
-            # - short: <= 50 characters, no sentence/word boundary rules
-            # - long: 250 words, keep whole words
             short_chunks = build_short_char_chunks(
                 cleaned,
                 chunk_chars=50,
                 step_chars=50,
                 min_chars=1,
             )
-            long_chunks = build_long_word_chunks(
-                cleaned,
-                words_per_chunk=250,
-                overlap_words=50,
-                min_words=1,
-            )
+            if page_type == "forum":
+                long_chunks = build_forum_long_chunks(
+                    build_forum_post_blocks(result),
+                    words_per_chunk=220,
+                    overlap_words=30,
+                    min_words=1,
+                )
+            else:
+                long_chunks = build_long_word_chunks(
+                    cleaned,
+                    words_per_chunk=250,
+                    overlap_words=50,
+                    min_words=1,
+                )
 
             if args.dry_run:
                 updated_pages += 1
@@ -260,12 +266,17 @@ def insert_segments(
     rows = []
     for chunk in chunks:
         meta_dict = {
-            "char_count": chunk.char_count
+            "char_count": chunk.char_count,
+            "token_count": chunk.token_count,
+            "page_type": page_type,
         }
         if author_val:
             meta_dict["author"] = author_val
         if published_time_val:
             meta_dict["published_time"] = published_time_val
+        post_count = len(getattr(extraction_result, "posts", []) or [])
+        if post_count > 0:
+            meta_dict["post_count"] = post_count
 
         rows.append((
             page_id,
@@ -314,19 +325,52 @@ def sha256_hex(text: str) -> str:
     return hashlib.sha256((text or "").encode("utf-8")).hexdigest()
 
 
+def extract_page_content(url: str, html_content: str) -> Any:
+    if is_forum_thread_url(url):
+        return extract_forum_thread(url, html_content)
+    return extract_medover_article(url=url, html=html_content)
+
+
+def is_forum_thread_url(url: str) -> bool:
+    return "/forum/tema/" in (url or "").lower()
+
+
+def build_forum_post_blocks(extraction_result: Any) -> list[str]:
+    posts = getattr(extraction_result, "posts", []) or []
+    blocks: list[str] = []
+    for index, post in enumerate(posts):
+        lines: list[str] = []
+        label = "Opening post" if index == 0 else f"Reply {index}"
+        header_parts = [label]
+        if getattr(post, "author", None):
+            header_parts.append(post.author)
+        if getattr(post, "published_at", None):
+            header_parts.append(post.published_at)
+        lines.append(" | ".join(header_parts))
+
+        lines.extend(getattr(post, "body_paragraphs", []) or [])
+        block = "\n\n".join(line for line in lines if line).strip()
+        if block:
+            blocks.append(block)
+
+    return blocks
+
+
 def get_page_type(url: str, extraction_result: Any) -> PageType:
     """Determine page type based on URL and extraction results."""
     url_lower = (url or "").lower()
-    if "/forum/" in url_lower or "forum." in url_lower:
+    if is_forum_thread_url(url_lower):
         return "forum"
-    if extraction_result.is_article:
+    if getattr(extraction_result, "is_article", False):
         return "article"
-    # Simple heuristic for listing pages (e.g., category views, search results)
-    if "/kategorija/" in url_lower or "/iskanje/" in url_lower or "/tag/" in url_lower:
+    if "/forum/" in url_lower and any(
+        token in url_lower for token in ("/forum/kategorija/", "/forum/page/", "/forum/tag/", "/forum/search")
+    ):
+        return "listing"
+    if "/kategorija/" in url_lower or "/iskanje/" in url_lower or "/tag/" in url_lower or "/search" in url_lower:
         return "listing"
     return "unknown"
 
 
 if __name__ == "__main__":
     raise SystemExit(main())
-

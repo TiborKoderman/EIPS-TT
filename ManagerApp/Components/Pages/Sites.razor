@@ -3,6 +3,7 @@
 @using ManagerApp.Services
 @using Microsoft.AspNetCore.WebUtilities
 @inject IPageService PageService
+@inject IAssignment2Service Assignment2Service
 @inject NavigationManager Navigation
 @implements IAsyncDisposable
 
@@ -97,6 +98,16 @@
                     <div><strong>Avg / median / top page score:</strong> @SelectedSite.AveragePageScore.ToString("0.00") / @SelectedSite.MedianPageScore.ToString("0.00") / @SelectedSite.TopPageScore.ToString("0.00")</div>
                     <div><strong>Last collected page:</strong> @(SelectedSite.LastPageAccessed?.ToLocalTime().ToString("yyyy-MM-dd HH:mm:ss") ?? "-")</div>
 
+                    @if (SelectedSiteAssignment2 is not null)
+                    {
+                        <div class="policy-block">
+                            <div><strong>Assignment 2</strong></div>
+                            <div><strong>Cleaned pages:</strong> @SelectedSiteAssignment2.CleanedPages</div>
+                            <div><strong>Articles / forum:</strong> @SelectedSiteAssignment2.ArticlePages / @SelectedSiteAssignment2.ForumPages</div>
+                            <div><strong>Segments:</strong> @($"{SelectedSiteAssignment2.ShortSegments} short / {SelectedSiteAssignment2.LongSegments} long")</div>
+                        </div>
+                    }
+
                     <div class="policy-block">
                         <div><strong>Robots policy:</strong> @DescribeRootPolicy(SelectedSite.RobotsContent)</div>
                         @if (string.IsNullOrWhiteSpace(SelectedSite.RobotsContent))
@@ -162,6 +173,7 @@
     private string OrderBy { get; set; } = "relevance";
     private List<CollectedSiteSummaryDto> Rows { get; set; } = new();
     private CollectedSiteSummaryDto? SelectedSite { get; set; }
+    private Assignment2SiteMetricsDto? SelectedSiteAssignment2 { get; set; }
     private bool ShowRobotsFull { get; set; }
     private bool ShowSitemapFull { get; set; }
 
@@ -248,6 +260,9 @@
     {
         SelectedSite = await PageService.GetCollectedSiteDetailsAsync(siteId)
             ?? Rows.FirstOrDefault(site => site.SiteId == siteId);
+        SelectedSiteAssignment2 = SelectedSite is null
+            ? null
+            : await Assignment2Service.GetAssignment2SiteMetricsAsync(SelectedSite.SiteId);
         ShowRobotsFull = false;
         ShowSitemapFull = false;
     }
