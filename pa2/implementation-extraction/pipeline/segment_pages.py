@@ -94,7 +94,12 @@ def main() -> int:
     inserted_long = 0
 
     try:
-        pages = fetch_html_pages(conn, limit=args.limit, force=args.force)
+        pages = fetch_html_pages(
+            conn,
+            limit=args.limit,
+            force=args.force,
+            embedding_model=args.embedding_model,
+        )
         for page in pages:
             processed += 1
             result = extract_page_content(page.url, page.html_content)
@@ -185,10 +190,33 @@ def main() -> int:
     return 0
 
 
-def fetch_html_pages(conn: psycopg2.extensions.connection, *, limit: int, force: bool) -> list[HtmlPageRow]:
+def fetch_html_pages(
+    conn: psycopg2.extensions.connection,
+    *,
+    limit: int,
+    force: bool,
+    embedding_model: str,
+) -> list[HtmlPageRow]:
     where = ""
     if not force:
-        where = "AND (cleaned_content IS NULL OR length(cleaned_content) = 0)"
+        where = """
+          AND (
+                cleaned_content IS NULL
+                OR length(cleaned_content) = 0
+                OR NOT EXISTS (
+                    SELECT 1
+                    FROM crawldb.page_segment_short s
+                    WHERE s.page_id = crawldb.page.id
+                      AND s.embedding_model = %s
+                )
+                OR NOT EXISTS (
+                    SELECT 1
+                    FROM crawldb.page_segment_long l
+                    WHERE l.page_id = crawldb.page.id
+                      AND l.embedding_model = %s
+                )
+          )
+        """
 
     limit_clause = "" if limit == 0 else f"LIMIT {int(limit)}"
 
@@ -205,7 +233,10 @@ def fetch_html_pages(conn: psycopg2.extensions.connection, *, limit: int, force:
     """
 
     with conn.cursor() as cur:
-        cur.execute(sql)
+        if force:
+            cur.execute(sql)
+        else:
+            cur.execute(sql, (embedding_model, embedding_model))
         rows = cur.fetchall()
 
     return [HtmlPageRow(page_id=row[0], url=row[1], html_content=row[2]) for row in rows]

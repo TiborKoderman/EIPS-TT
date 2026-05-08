@@ -2,6 +2,7 @@ import argparse
 import psycopg2
 from sentence_transformers import SentenceTransformer
 import logging
+from device_utils import resolve_torch_device
 
 logging.basicConfig(level=logging.INFO, format='%(levelname)s: %(message)s')
 
@@ -47,10 +48,18 @@ def main():
     parser.add_argument("--db-host", default="localhost")
     parser.add_argument("--model-name", default="sentence-transformers/LaBSE")
     parser.add_argument("--batch-size", type=int, default=100)
+    parser.add_argument("--device", default=None, help="Torch device override (e.g. cpu, cuda)")
+    parser.add_argument(
+        "--table",
+        choices=["page_segment_short", "page_segment_long", "both"],
+        default="both",
+        help="Which segment table to embed",
+    )
     args = parser.parse_args()
 
-    logging.info(f"Loading model: {args.model_name}")
-    model = SentenceTransformer(args.model_name)
+    device = resolve_torch_device(args.device)
+    logging.info(f"Loading model: {args.model_name} on device={device}")
+    model = SentenceTransformer(args.model_name, device=device)
 
     conn = psycopg2.connect(
         dbname=args.db_name,
@@ -64,12 +73,13 @@ def main():
     from pgvector.psycopg2 import register_vector
     register_vector(conn)
 
-    process_table(cur, model, 'page_segment_short', args.batch_size)
-    process_table(cur, model, 'page_segment_long', args.batch_size)
+    if args.table in {"page_segment_short", "both"}:
+        process_table(cur, model, 'page_segment_short', args.batch_size)
+    if args.table in {"page_segment_long", "both"}:
+        process_table(cur, model, 'page_segment_long', args.batch_size)
 
     cur.close()
     conn.close()
 
 if __name__ == "__main__":
     main()
-

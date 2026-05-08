@@ -67,6 +67,7 @@ def build_parser() -> argparse.ArgumentParser:
         default="sentence-transformers/LaBSE",
         help="Embedding model (must match what was used to populate the index).",
     )
+    parser.add_argument("--device", default=None, help="Torch device override for embedding/reranking (e.g. cpu, cuda)")
     parser.add_argument(
         "--embedding-model-tag",
         default=None,
@@ -102,9 +103,11 @@ def main() -> int:
         return 1
 
     from sentence_transformers import SentenceTransformer
+    from device_utils import resolve_torch_device
 
-    print(f"[demo] loading embedding model: {args.model_name}", file=sys.stderr)
-    embedder = SentenceTransformer(args.model_name)
+    device = resolve_torch_device(args.device)
+    print(f"[demo] loading embedding model: {args.model_name} on device={device}", file=sys.stderr)
+    embedder = SentenceTransformer(args.model_name, device=device)
 
     reranker = None
     if args.rerank:
@@ -158,6 +161,7 @@ def main() -> int:
                     text_field="segment_text",
                     score_field="score",
                     model_name=args.rerank_model,
+                    device=device,
                     top_k=args.top_k,
                 )
                 rerank_results = [
