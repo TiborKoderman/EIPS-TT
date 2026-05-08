@@ -30,3 +30,4 @@ ManagerApp/obj
 .github
 pa1/db
 !pa1/db
+.playwright-cli

@@ -76,6 +76,23 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--rerank", action="store_true")
     parser.add_argument("--rerank-model", default="BAAI/bge-reranker-v2-m3")
     parser.add_argument(
+        "--rerank-candidates",
+        type=int,
+        default=None,
+        help="How many initial vector hits to fetch before reranking. Defaults to 4x top-k.",
+    )
+    parser.add_argument(
+        "--intent-filter",
+        choices=("all", "good", "bad"),
+        default="all",
+        help="Optional filter when loading a queries file.",
+    )
+    parser.add_argument(
+        "--corpus-fingerprint",
+        default=None,
+        help="Optional manager-provided corpus fingerprint to persist in saved run metadata.",
+    )
+    parser.add_argument(
         "--graph-context",
         action="store_true",
         help="Augment results with linked articles from article_link_graph (knowledge graph expansion).",
@@ -129,6 +146,9 @@ def main() -> int:
         "top_k": args.top_k,
         "rerank": args.rerank,
         "rerank_model": args.rerank_model if args.rerank else None,
+        "rerank_candidates": args.rerank_candidates,
+        "intent_filter": args.intent_filter,
+        "corpus_fingerprint": args.corpus_fingerprint,
         "queries": [],
     }
 
@@ -148,7 +168,7 @@ def main() -> int:
                 table=args.table,
                 metric=args.metric,
                 query_vec=embedder.encode([query])[0].tolist(),
-                top_k=max(args.top_k * 4, args.top_k) if args.rerank else args.top_k,
+                top_k=_initial_candidate_count(args),
                 embedding_model_tag=args.embedding_model_tag,
             )
 
@@ -299,7 +319,21 @@ def _load_queries(args: argparse.Namespace) -> list[dict]:
         data = json.load(fh)
     if isinstance(data, dict):
         data = data.get("queries", [])
-    return [q for q in data if q.get("query")]
+    queries = [q for q in data if q.get("query")]
+    if args.intent_filter != "all":
+        queries = [
+            q for q in queries
+            if str(q.get("intent", "")).strip().lower() == args.intent_filter
+        ]
+    return queries
+
+
+def _initial_candidate_count(args: argparse.Namespace) -> int:
+    if not args.rerank:
+        return args.top_k
+    if args.rerank_candidates is not None:
+        return max(args.rerank_candidates, args.top_k)
+    return max(args.top_k * 4, args.top_k)
 
 
 def _preview(text: str, n: int = 200) -> str:

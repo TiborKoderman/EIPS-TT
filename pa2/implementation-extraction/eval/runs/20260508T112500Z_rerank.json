@@ -1,0 +1,90 @@
+{
+  "timestamp": "2026-05-08T11:24:25.838011Z",
+  "embedding_model": "sentence-transformers/LaBSE",
+  "metric": "cosine",
+  "table": "page_segment_long",
+  "top_k": 5,
+  "rerank": true,
+  "rerank_model": "BAAI/bge-reranker-v2-m3",
+  "queries": [
+    {
+      "label": "ad-hoc",
+      "query": "proteini",
+      "expected": "",
+      "initial": [
+        {
+          "page_id": 1987,
+          "url": "https://medover.zurnal24.si/kako-pri-hujsanju-zmanjsati-izgubo-misic/",
+          "score": 0.5630514286129807,
+          "preview": "ustrezno prehransko podporo, pri čemer imajo eno pomembnejših vlog beljakovine. Telo prehranske beljakovine razgradi v aminokisline, ki jih uporablja za izgradnjo mišic. “Priporočljivo je, da dnevnega…"
+        },
+        {
+          "page_id": 130,
+          "url": "https://medover.zurnal24.si/ogljikovi-hidrati-polnozrnata-zivila-husanje/",
+          "score": 0.6075162291526794,
+          "preview": "da se lažje držite načrta in uspešneje uravnavate svojo težo. “ Na nacionalnem portalu preverjenih informacij Prehrana.si pišejo, da opazovalne študije kažejo, da ima vsakodnevno uživanje polnozrnatih…"
+        },
+        {
+          "page_id": 2023,
+          "url": "https://medover.zurnal24.si/razblinjamo-mite-ali-sladkor-in-stres-povzrocata-sladkorno-bolezen/",
+          "score": 0.6320848057295323,
+          "preview": "dolgoročnemu zagotavljanju energije in telo bolj izčrpajo (npr. razgradijo mišice, maščobne dele celic ipd.). Zato prehrane, ki vsebuje (pre)malo ogljikovih hidratov dolgoročno ne priporočamo. ” Dodaj…"
+        },
+        {
+          "page_id": 1910,
+          "url": "https://medover.zurnal24.si/velikonocni-pirhi-kako-dolgo-zdrzijo/",
+          "score": 0.6335431337356567,
+          "preview": "zmernost – en praznični obrok ali nekaj dodatnih pirhov ne bo imelo večjih posledic za zdravje. Pomembno pa je, da hrano pravilno shranjujemo, skrbimo za higieno v kuhinji in ostanke hrane porabimo pr…"
+        },
+        {
+          "page_id": 611,
+          "url": "https://medover.zurnal24.si/forum/tema/medrol-2-2142052/",
+          "score": 0.6464027973173375,
+          "preview": "Reply 15 | Edi P | 26.01.2009 ob 15:08 Spoštovani! Ne vidim zadržkov za proteinske napitke, ne priporočam pa hormonskih dodatkov. Lp"
+        }
+      ],
+      "rerank": [
+        {
+          "page_id": 2260,
+          "url": "https://medover.zurnal24.si/dnevna-zaspanost-kako-do-vec-energije-cez-dan/",
+          "score": 0.6642024219036102,
+          "rerank_score": 0.09443122893571854,
+          "preview": "Za več energije čez dan naredite te tri stvari Dnevna zaspanost je pogosta težava, vendar lahko tri preproste navade pomagajo povečati raven energije čez dan. “Dnevna zaspanost je pogosta težava, ki l…",
+          "segment_text": "Za več energije čez dan naredite te tri stvari Dnevna zaspanost je pogosta težava, vendar lahko tri preproste navade pomagajo povečati raven energije čez dan. “Dnevna zaspanost je pogosta težava, ki lahko negativno vpliva na razpoloženje, delovno učinkovitost in kakovost življenja, ” je povedal dr. Eric Olson , profesor medicine na Mayo Clinic Alix School of Medicine , poroča The Independent . A strokovnjaki pravijo, da lahko tri preproste navade pomagajo povečati raven energije čez dan. “Ali bi se odpravili na dolgo pot z avtomobilom s praznim rezervoarjem?” sprašuje dietetičarka Beth Czerwony s klinike Cleveland . “Na enak način razmišljajte o zajtrku. Od telesa pričakujete, da bo začelo delovati, ne da bi mu zagotovili gorivo, zato mora črpati iz zalog. “ Kot navaja nacionalni portal preverjenih informacij Prehrana.si , potrebuje odrasel človek med 0,8 in 1,9 gramov beljakovin na kilogram telesne mase. Vnos beljakovin naj bi predstavljal približno 10–15 odstotkov skupnega energijskega vnosa. Povprečen odrasli naj bi tako zaužil vsaj 50 g beljakovin dnevno . Starejši, otroci, nosečnice in doječe matere jih potrebujejo več. Čeprav voda sama po sebi ne zagotavlja energije, nezadosten vnos tekočin vodi v utrujenost in občutek, da smo ‘brez moči’. Voda je ključna za prenos hranil do telesnih celic in skoraj vsi glavni telesni sistemi so od nje odvisni za pravilno delovanje. “Brez zadostne količine vode električni signali ne morejo potovati po telesu, hranila se ne morejo prenašati, prav tako se ne more proizvajati energija, ” opozarja dietetičarka Lacy Puttuck."
+        },
+        {
+          "page_id": 1987,
+          "url": "https://medover.zurnal24.si/kako-pri-hujsanju-zmanjsati-izgubo-misic/",
+          "score": 0.5630514286129807,
+          "rerank_score": 0.07081381231546402,
+          "preview": "ustrezno prehransko podporo, pri čemer imajo eno pomembnejših vlog beljakovine. Telo prehranske beljakovine razgradi v aminokisline, ki jih uporablja za izgradnjo mišic. “Priporočljivo je, da dnevnega…",
+          "segment_text": "ustrezno prehransko podporo, pri čemer imajo eno pomembnejših vlog beljakovine. Telo prehranske beljakovine razgradi v aminokisline, ki jih uporablja za izgradnjo mišic. “Priporočljivo je, da dnevnega vnosa beljakovin ne zaužijemo v enem samem obroku, temveč ga razporedimo čez ves dan in beljakovine vključimo v vsak obrok, ” poudarja dr. Apovianova. Ko zdravniki predpišejo zdravila za hujšanje, običajno začnejo z nižjim odmerkom predvsem zato, da zmanjšajo stranske učinke. Hkrati pa to pomaga preprečevati prehitro izgubo telesne teže, ki lahko pospeši razgradnjo mišičnih beljakovin namesto maščobe. Ob počasnem hujšanju — približno 0,5 do 1 kg na teden — lahko ob redni vadbi za moč in ustreznem vnosu beljakovin mišično maso ohranimo ali celo povečamo. Odrasel človek potrebuje med 0,8 in 1,9 g beljakovin na kilogram telesne mase. Vnos beljakovin naj bi predstavljal približno 10–15 % skupnega energijskega vnosa,"
+        },
+        {
+          "page_id": 2023,
+          "url": "https://medover.zurnal24.si/razblinjamo-mite-ali-sladkor-in-stres-povzrocata-sladkorno-bolezen/",
+          "score": 0.6320848057295323,
+          "rerank_score": 0.042834773659706116,
+          "preview": "dolgoročnemu zagotavljanju energije in telo bolj izčrpajo (npr. razgradijo mišice, maščobne dele celic ipd.). Zato prehrane, ki vsebuje (pre)malo ogljikovih hidratov dolgoročno ne priporočamo. ” Dodaj…",
+          "segment_text": "dolgoročnemu zagotavljanju energije in telo bolj izčrpajo (npr. razgradijo mišice, maščobne dele celic ipd.). Zato prehrane, ki vsebuje (pre)malo ogljikovih hidratov dolgoročno ne priporočamo. ” Dodaja, da je pomembno, da se uživanje ogljikovih hidratov kombinira s proteini, vlakninami in nenasičenimi maščobami, ki poskrbijo, da se glukoza v krvi zviša počasneje. Osebe s sladkorno boleznijo zelo rade uživajo sadje, ker se jim zdi zdravo, kar je deloma res, vendar pa se je treba zavedati, da tudi fruktoza v sadju precej zviša raven glukoze v krvi, poudarja Ajda Urbas. “Osebam s sladkorno boleznijo svetujemo, da sadje uživajo v zmernih količinah, en sadež na dan ali največ dva. Priporočljivo je, da ga uživajo skupaj z maščobami in proteini, saj mešani obroki vplivajo na manjši porast glukoze v krvi. Predvsem pa svetujemo, da osebe s sladkorno boleznijo uživajo celo sadje in ne sokov ali smutijev,” opozarja. Čeprav so sadni sokovi in smutiji ‘le’ spasirano sadje, pa uživanje sadnih sokov in smutijev ni enako kot uživanje celega sadja, še opozarja sogovornica: “Pojemo ponavadi en ali dva sadeža, da si pripravimo sok iz stisnjenega sadja ali smuti rabimo več sadežev. Poleg tega sadje v tekoči obliki hitreje zviša raven glukoze, kot če isti sadež pojemo. ” “Novejša raziskava je pokazala, da je uživanje sadnih sokov v katerem koli delu življenja, tudi v otroštvu, povezano s kognitivnim upadom, Alzheimerjevo demenco, ki jo v literaturi že poimenujejo diabetes tipa 3,” pravi Ajda Urbas."
+        },
+        {
+          "page_id": 1977,
+          "url": "https://medover.zurnal24.si/beljakovine-perimenopavza-menopavza-koliko-potrebujemo/",
+          "score": 0.657675405879294,
+          "rerank_score": 0.03563346341252327,
+          "preview": "vadbe za moč! Ena najpogostejših situacij v tem obdobju je hujšanje. In tukaj imajo beljakovine jasen smisel: pomagajo ohranjati mišično maso med kaloričnim deficitom, povečajo sitost in olajšajo vztr…",
+          "segment_text": "vadbe za moč! Ena najpogostejših situacij v tem obdobju je hujšanje. In tukaj imajo beljakovine jasen smisel: pomagajo ohranjati mišično maso med kaloričnim deficitom, povečajo sitost in olajšajo vztrajanje pri dieti. Priporočila so tedaj višja – pogosto 1,6 grama ali več. A spet: brez vadbe za moč učinek ni popoln. Veliko žensk v tem obdobju skuša rešiti stvari zgolj s prehrano – več beljakovin, bolj “čista” hrana, več kontrole nad jedilnikom. Brez gibanja, zlasti brez vadbe za moč, to za dolgoročno ohranjanje mišic in presnove ne zadostuje. Beljakovine so pomembne. Niso pa čarobna rešitev. Največjo razliko naredi kombinacija: dovolj beljakovin in redna vadba za moč. In morda najpomembnejše sporočilo: ni treba slediti ekstremom z družbenih omrežij. Že majhne, a dosledne spremembe – malo več beljakovin in nekaj rednega treninga – lahko naredijo ogromno razliko. Doroteja Riahi je svetovalka za prehrano, vadbo in osebno rast ter ustanoviteljica projekta Fit Meal Slovenija . Pri svojem delu ženskam pomaga razumeti, zakaj diete, ekstremi in kratkoročni izzivi pogosto ne prinesejo trajnih rezultatov. Najdete jo na Facebook profilu FIT MEAL by Doroteja Riahi, vprašanje pa ji lahko zastavite tudi na našem forumu GIBANJE, OBLIKOVANJE IN KREPITEV TELESA. Za ženske v perimenopavzi in menopavzi Riahijeva priporoča:"
+        },
+        {
+          "page_id": 1673,
+          "url": "https://medover.zurnal24.si/5-zivil-ki-skrbijo-za-zdravje-vasih-oci/",
+          "score": 0.6542377471923828,
+          "rerank_score": 0.022478606551885605,
+          "preview": "5 živil, ki skrbijo za zdravje vaših oči Nekaterih hranil, pomembnih za zdravje naših oči, telo ne proizvaja samo, zato jih moramo dobiti iz hrane. Uravnotežena prehrana vpliva na mnoge vidike našega…",
+          "segment_text": "5 živil, ki skrbijo za zdravje vaših oči Nekaterih hranil, pomembnih za zdravje naših oči, telo ne proizvaja samo, zato jih moramo dobiti iz hrane. Uravnotežena prehrana vpliva na mnoge vidike našega življenja – od kvalitetnega spanca, soočanja s stresom, splošnega dobrega počutja in stabilne energije do močnega imunskega sistema in zdrave prebave. Hkrati pa igra pomembno vlogo tudi pri ohranjanju zdravih oči in zmanjšanju tveganj za razvoj očesnih obolenj. Preverite, kako lahko prava prehrana podpira zdravje vaših oči in katera živila ne smejo manjkati na vašem krožniku. Na portalu Healthline poročajo, da lahko z uravnoteženo prehrano pomagate zmanjšati tveganje za: Priporočljivo je, da v svoj jedilnik vključite različne vire beljakovin, mlečne izdelke ter dovolj sadja in zelenjave. Poskusite jesti raznolika in pisana živila ter omejite predelano hrano, ki vsebuje nasičene maščobe in veliko sladkorja. Za ohranjanje zdravja oči imajo posebno vlogo nekateri antioksidanti. Med njimi so: lutein, zeaksantin, vitamini A, C in E, beta karoten, omega-3 maščobne kisline in cink. Predstavljamo vam 5 najboljših živil za ohranjanje zdravja vaših oči. Večina je na voljo skozi vse leto in po ugodni ceni, uživate pa jih lahko kot samostojne prigrizke ali kot del različnih jedi. Verjetno smo mnogi izmed nas kot otroci slišali, da korenje krepi oči. Čeprav je bil to učinkovit način, da so nas starši prepričali, da pojemo zelenjavno kosilo, ima korenje resnične koristi za zdravje oči."
+        }
+      ]
+    }
+  ]
+}

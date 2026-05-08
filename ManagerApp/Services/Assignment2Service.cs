@@ -1,7 +1,11 @@
 using System.Diagnostics;
 using System.Globalization;
 using System.Text.Json;
+using System.Text.Json.Nodes;
 using System.Text.RegularExpressions;
+using System.Collections.Concurrent;
+using System.Security.Cryptography;
+using System.Text;
 using ManagerApp.Data;
 using ManagerApp.Models;
 using Microsoft.EntityFrameworkCore;
@@ -12,6 +16,8 @@ namespace ManagerApp.Services;
 
 public sealed class Assignment2Service : IAssignment2Service
 {
+    private sealed record DemoRunCacheEntry(string CorpusFingerprint, Assignment2DemoRunResultDto Result);
+
     private const string ContentTypeCaseSql = """
         CASE
             WHEN COALESCE(stats.has_forum, 0) = 1 THEN 'forum'
@@ -66,6 +72,7 @@ public sealed class Assignment2Service : IAssignment2Service
     {
         PropertyNameCaseInsensitive = true,
     };
+    private static readonly ConcurrentDictionary<string, DemoRunCacheEntry> DemoRunCache = new(StringComparer.Ordinal);
 
     private readonly CrawldbContext _context;
     private readonly IConfiguration _configuration;
@@ -204,7 +211,9 @@ public sealed class Assignment2Service : IAssignment2Service
         await using var command = new NpgsqlCommand(sql, connection);
         command.Parameters.Add("search", NpgsqlDbType.Text).Value = (object?)normalizedSearch ?? DBNull.Value;
         command.Parameters.Add("has_cleaned", NpgsqlDbType.Boolean).Value = (object?)hasCleanedText ?? DBNull.Value;
-        command.Parameters.Add("content_type", NpgsqlDbType.Text).Value = (object?)normalizedType ?? DBNull.Value;
+        command.Parameters.Add("content_type", NpgsqlDbType.Text).Value = string.IsNullOrWhiteSpace(normalizedType)
+            ? DBNull.Value
+            : normalizedType;
         command.Parameters.AddWithValue("skip", Math.Max(0, skip));
         command.Parameters.AddWithValue("take", Math.Clamp(take, 1, 500));
 
@@ -278,37 +287,65 @@ public sealed class Assignment2Service : IAssignment2Service
 
     public async Task<Assignment2DemoRunResultDto> RunAssignment2DemoAsync(string? query = null, bool rerank = false, bool useOfficialQueries = true)
     {
-        var pythonExecutable = (_configuration["CrawlerApi:PythonExecutable"] ?? "python3").Trim();
-        var demoScriptPath = Path.Combine(GetRepositoryRoot(), "pa2", "implementation-extraction", "demo.py");
-        var queriesFilePath = Path.Combine(GetRepositoryRoot(), "pa2", "implementation-extraction", "eval", "queries.json");
-        var runsDirectory = Path.Combine(GetRepositoryRoot(), "pa2", "implementation-extraction", "eval", "runs");
+        var repositoryRoot = GetRepositoryRoot();
+        var pythonExecutable = ResolvePythonExecutable(repositoryRoot);
+        var demoScriptPath = Path.Combine(repositoryRoot, "pa2", "implementation-extraction", "demo.py");
+        var queriesFilePath = Path.Combine(repositoryRoot, "pa2", "implementation-extraction", "eval", "queries.json");
+        var runsDirectory = Path.Combine(repositoryRoot, "pa2", "implementation-extraction", "eval", "runs");
+        var normalizedQuery = string.IsNullOrWhiteSpace(query) ? null : query.Trim();
+        var corpusFingerprint = await ComputeCorpusFingerprintAsync();
+        var cacheKey = BuildDemoCacheKey(rerank, useOfficialQueries, normalizedQuery);
+
+        if (DemoRunCache.TryGetValue(cacheKey, out var cached)
+            && string.Equals(cached.CorpusFingerprint, corpusFingerprint, StringComparison.Ordinal))
+        {
+            return cached.Result;
+        }
+
+        var latestSaved = await TryLoadLatestMatchingRunAsync(runsDirectory, rerank, useOfficialQueries, normalizedQuery, corpusFingerprint);
+        if (latestSaved is not null)
+        {
+            DemoRunCache[cacheKey] = new DemoRunCacheEntry(corpusFingerprint, latestSaved);
+            return latestSaved;
+        }
 
         var processInfo = new ProcessStartInfo
         {
             FileName = pythonExecutable,
-            WorkingDirectory = GetRepositoryRoot(),
+            WorkingDirectory = repositoryRoot,
             RedirectStandardOutput = true,
             RedirectStandardError = true,
             UseShellExecute = false,
         };
 
         processInfo.ArgumentList.Add(demoScriptPath);
-        if (useOfficialQueries || string.IsNullOrWhiteSpace(query))
+        if (useOfficialQueries || string.IsNullOrWhiteSpace(normalizedQuery))
         {
             processInfo.ArgumentList.Add("--queries-file");
             processInfo.ArgumentList.Add(queriesFilePath);
+            if (rerank)
+            {
+                processInfo.ArgumentList.Add("--intent-filter");
+                processInfo.ArgumentList.Add("bad");
+            }
         }
         else
         {
             processInfo.ArgumentList.Add("--query");
-            processInfo.ArgumentList.Add(query.Trim());
+            processInfo.ArgumentList.Add(normalizedQuery);
         }
 
         processInfo.ArgumentList.Add("--top-k");
         processInfo.ArgumentList.Add("5");
+        processInfo.ArgumentList.Add("--device");
+        processInfo.ArgumentList.Add("cpu");
+        processInfo.ArgumentList.Add("--corpus-fingerprint");
+        processInfo.ArgumentList.Add(corpusFingerprint);
         if (rerank)
         {
             processInfo.ArgumentList.Add("--rerank");
+            processInfo.ArgumentList.Add("--rerank-candidates");
+            processInfo.ArgumentList.Add("10");
         }
 
         ApplyDatabaseEnvironment(processInfo);
@@ -329,11 +366,26 @@ public sealed class Assignment2Service : IAssignment2Service
         }
 
         var runPath = ResolveRunPath(stderr, runsDirectory, rerank, startedAtUtc);
+        await AnnotateRunPayloadAsync(runPath, rerank, useOfficialQueries, normalizedQuery, corpusFingerprint);
         var result = await LoadRunPayloadAsync(runPath);
         result.Stdout = stdout;
         result.Stderr = stderr;
         result.RunPath = runPath;
+        DemoRunCache[cacheKey] = new DemoRunCacheEntry(corpusFingerprint, result);
         return result;
+    }
+
+    public async Task<Assignment2DemoRunResultDto?> GetLatestAssignment2DemoRunAsync(bool rerank)
+    {
+        var repositoryRoot = GetRepositoryRoot();
+        var runsDirectory = Path.Combine(repositoryRoot, "pa2", "implementation-extraction", "eval", "runs");
+        var corpusFingerprint = await ComputeCorpusFingerprintAsync();
+        return await TryLoadLatestMatchingRunAsync(
+            runsDirectory,
+            rerank,
+            useOfficialQueries: true,
+            normalizedQuery: null,
+            corpusFingerprint: corpusFingerprint);
     }
 
     public async Task<List<Assignment2QueryDefinitionDto>> GetAssignment2QueriesAsync()
@@ -460,6 +512,63 @@ public sealed class Assignment2Service : IAssignment2Service
         return Path.GetFullPath(Path.Combine(_environment.ContentRootPath, ".."));
     }
 
+    private async Task<string> ComputeCorpusFingerprintAsync()
+    {
+        await using var connection = await OpenConnectionAsync();
+        if (connection is null)
+        {
+            return "no-db";
+        }
+
+        const string sql = """
+            SELECT
+                (SELECT COUNT(*)::bigint FROM crawldb.page WHERE page_type_code = 'HTML' AND cleaned_content IS NOT NULL AND length(cleaned_content) > 0) AS cleaned_pages,
+                (SELECT COUNT(*)::bigint FROM crawldb.page_segment_long) AS long_segments,
+                (SELECT COUNT(*)::bigint FROM crawldb.page_segment_short) AS short_segments,
+                (SELECT COUNT(DISTINCT page_id)::bigint FROM crawldb.page_segment_long WHERE page_type = 'article') AS article_pages,
+                (SELECT COUNT(DISTINCT page_id)::bigint FROM crawldb.page_segment_long WHERE page_type = 'forum') AS forum_pages,
+                (SELECT COALESCE(MAX(id), 0)::bigint FROM crawldb.page) AS max_page_id,
+                (SELECT COALESCE(MAX(id), 0)::bigint FROM crawldb.page_segment_long) AS max_long_segment_id,
+                (SELECT COALESCE(MAX(id), 0)::bigint FROM crawldb.page_segment_short) AS max_short_segment_id;
+            """;
+
+        await using var command = new NpgsqlCommand(sql, connection);
+        await using var reader = await command.ExecuteReaderAsync();
+        if (!await reader.ReadAsync())
+        {
+            return "unknown";
+        }
+
+        var raw = string.Join("|", Enumerable.Range(0, reader.FieldCount).Select(index => reader.GetInt64(index).ToString(CultureInfo.InvariantCulture)));
+        var hash = SHA256.HashData(Encoding.UTF8.GetBytes(raw));
+        return Convert.ToHexString(hash);
+    }
+
+    private string ResolvePythonExecutable(string repositoryRoot)
+    {
+        var configured = (_configuration["CrawlerApi:PythonExecutable"] ?? string.Empty).Trim();
+        if (!string.IsNullOrWhiteSpace(configured))
+        {
+            if (Path.IsPathRooted(configured) && File.Exists(configured))
+            {
+                return configured;
+            }
+
+            var relativeCandidate = Path.GetFullPath(Path.Combine(repositoryRoot, configured));
+            if (File.Exists(relativeCandidate))
+            {
+                return relativeCandidate;
+            }
+
+            if (!configured.Contains(Path.DirectorySeparatorChar) && !configured.Contains(Path.AltDirectorySeparatorChar))
+            {
+                return configured;
+            }
+        }
+
+        return "python3";
+    }
+
     private void ApplyDatabaseEnvironment(ProcessStartInfo processInfo)
     {
         var builder = new NpgsqlConnectionStringBuilder(_context.Database.GetConnectionString());
@@ -491,6 +600,113 @@ public sealed class Assignment2Service : IAssignment2Service
         }
 
         return candidate.FullName;
+    }
+
+    private static string BuildDemoCacheKey(bool rerank, bool useOfficialQueries, string? normalizedQuery)
+    {
+        return string.Join(
+            "|",
+            rerank ? "rerank" : "baseline",
+            useOfficialQueries ? "official" : "adhoc",
+            normalizedQuery ?? string.Empty);
+    }
+
+    private async Task<Assignment2DemoRunResultDto?> TryLoadLatestMatchingRunAsync(
+        string runsDirectory,
+        bool rerank,
+        bool useOfficialQueries,
+        string? normalizedQuery,
+        string corpusFingerprint)
+    {
+        if (!Directory.Exists(runsDirectory))
+        {
+            return null;
+        }
+
+        var suffix = rerank ? "_rerank.json" : "_baseline.json";
+        var files = new DirectoryInfo(runsDirectory)
+            .EnumerateFiles($"*{suffix}", SearchOption.TopDirectoryOnly)
+            .OrderByDescending(file => file.LastWriteTimeUtc)
+            .Take(20);
+
+        foreach (var file in files)
+        {
+            if (!await RunPayloadMatchesAsync(file.FullName, rerank, useOfficialQueries, normalizedQuery, corpusFingerprint))
+            {
+                continue;
+            }
+
+            var result = await LoadRunPayloadAsync(file.FullName);
+            result.RunPath = file.FullName;
+            return result;
+        }
+
+        return null;
+    }
+
+    private async Task<bool> RunPayloadMatchesAsync(
+        string runPath,
+        bool rerank,
+        bool useOfficialQueries,
+        string? normalizedQuery,
+        string corpusFingerprint)
+    {
+        await using var stream = File.OpenRead(runPath);
+        using var document = await JsonDocument.ParseAsync(stream);
+        var root = document.RootElement;
+
+        if (GetBool(root, "rerank") != rerank)
+        {
+            return false;
+        }
+
+        if (!string.Equals(GetString(root, "manager_corpus_fingerprint"), corpusFingerprint, StringComparison.Ordinal))
+        {
+            return false;
+        }
+
+        var expectedMode = useOfficialQueries ? "official" : "adhoc";
+        if (!string.Equals(GetString(root, "manager_request_mode"), expectedMode, StringComparison.Ordinal))
+        {
+            return false;
+        }
+
+        if (useOfficialQueries)
+        {
+            var expectedIntentFilter = rerank ? "bad" : "all";
+            return string.Equals(GetString(root, "intent_filter") ?? "all", expectedIntentFilter, StringComparison.OrdinalIgnoreCase);
+        }
+
+        return string.Equals(GetString(root, "manager_query") ?? string.Empty, normalizedQuery ?? string.Empty, StringComparison.Ordinal);
+    }
+
+    private static async Task AnnotateRunPayloadAsync(
+        string runPath,
+        bool rerank,
+        bool useOfficialQueries,
+        string? normalizedQuery,
+        string corpusFingerprint)
+    {
+        if (!File.Exists(runPath))
+        {
+            return;
+        }
+
+        var payload = JsonNode.Parse(await File.ReadAllTextAsync(runPath, Encoding.UTF8)) as JsonObject;
+        if (payload is null)
+        {
+            return;
+        }
+
+        payload["manager_request_mode"] = useOfficialQueries ? "official" : "adhoc";
+        payload["manager_query"] = normalizedQuery;
+        payload["manager_corpus_fingerprint"] = corpusFingerprint;
+        payload["manager_cached_at_utc"] = DateTime.UtcNow.ToString("O", CultureInfo.InvariantCulture);
+
+        await File.WriteAllTextAsync(runPath, payload.ToJsonString(new JsonSerializerOptions(JsonSerializerDefaults.Web)
+        {
+            WriteIndented = true,
+        }), Encoding.UTF8);
     }
 
     private async Task<Assignment2DemoRunResultDto> LoadRunPayloadAsync(string runPath)

@@ -56,13 +56,13 @@
         {
             <div class="card mb-lg pages-toolbar-card">
                 <div class="pages-toolbar-row" style="grid-template-columns: minmax(0, 1fr) 180px 180px auto;">
-                    <div class="pages-search-shell">
-                        <span class="mdi mdi-magnify pages-search-icon" aria-hidden="true"></span>
-                        <input class="pages-search-input"
+                    <div class="pages-search-shell assignment2-search-shell">
+                        <input class="pages-search-input assignment2-search-input"
                                type="search"
                                placeholder="Search URL or cleaned text..."
                                value="@corpusSearchTerm"
                                @oninput="OnCorpusSearchChanged" />
+                        <span class="mdi mdi-magnify pages-search-icon assignment2-search-icon" aria-hidden="true"></span>
                     </div>
 
                     <select @bind="corpusContentType" @bind:after="LoadCorpusAsync">
@@ -244,6 +244,8 @@
     {
         overview = await Assignment2Service.GetAssignment2OverviewAsync();
         queryDefinitions = await Assignment2Service.GetAssignment2QueriesAsync();
+        latestBaselineRun = await Assignment2Service.GetLatestAssignment2DemoRunAsync(rerank: false);
+        latestRerankRun = await Assignment2Service.GetLatestAssignment2DemoRunAsync(rerank: true);
         await LoadCorpusAsync();
         isLoading = false;
     }
@@ -424,7 +426,12 @@
                 foreach (var hit in query.Rerank)
                 {
                     builder.OpenElement(seq++, "li");
-                    builder.AddContent(seq++, $"{(hit.RerankScore.HasValue ? hit.RerankScore.Value.ToString("0.000") : "-")} · {hit.Url}");
+                    var scoreText = hit.Score.HasValue ? hit.Score.Value.ToString("0.000") : "-";
+                    var rerankText = hit.RerankScore.HasValue ? hit.RerankScore.Value.ToString("0.000") : "-";
+                    var deltaText = hit.Score.HasValue && hit.RerankScore.HasValue
+                        ? (hit.RerankScore.Value - hit.Score.Value).ToString("+0.000;-0.000;0.000")
+                        : "-";
+                    builder.AddContent(seq++, $"{scoreText} -> {rerankText} ({deltaText}) · {hit.Url}");
                     builder.CloseElement();
                 }
                 builder.CloseElement();

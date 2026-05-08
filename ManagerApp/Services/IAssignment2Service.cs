@@ -8,6 +8,7 @@ public interface IAssignment2Service
     Task<List<Assignment2DocumentSummaryDto>> SearchAssignment2DocumentsAsync(string? searchTerm, string? contentType, bool? hasCleanedText, int skip = 0, int take = 100);
     Task<Assignment2DocumentDetailDto?> GetAssignment2DocumentAsync(int pageId);
     Task<Assignment2DemoRunResultDto> RunAssignment2DemoAsync(string? query = null, bool rerank = false, bool useOfficialQueries = true);
+    Task<Assignment2DemoRunResultDto?> GetLatestAssignment2DemoRunAsync(bool rerank);
     Task<List<Assignment2QueryDefinitionDto>> GetAssignment2QueriesAsync();
     Task<Assignment2SiteMetricsDto> GetAssignment2SiteMetricsAsync(int siteId);
 }
