@@ -11,6 +11,7 @@ Slavic languages; loadable via sentence-transformers CrossEncoder API.
 from __future__ import annotations
 
 from dataclasses import dataclass
+from device_utils import resolve_torch_device
 
 
 @dataclass
@@ -25,12 +26,12 @@ _MODEL = None
 _MODEL_NAME = None
 
 
-def _load(model_name: str):
+def _load(model_name: str, device: str | None = None):
     global _MODEL, _MODEL_NAME
     if _MODEL is None or _MODEL_NAME != model_name:
         from sentence_transformers import CrossEncoder
 
-        _MODEL = CrossEncoder(model_name)
+        _MODEL = CrossEncoder(model_name, device=resolve_torch_device(device))
         _MODEL_NAME = model_name
     return _MODEL
 
@@ -42,6 +43,7 @@ def rerank(
     text_field: str = "segment_text",
     score_field: str = "score",
     model_name: str = "BAAI/bge-reranker-v2-m3",
+    device: str | None = None,
     top_k: int | None = None,
 ) -> list[RerankResult]:
     """Rerank `candidates` by a cross-encoder relevance score.
@@ -52,7 +54,7 @@ def rerank(
     if not candidates:
         return []
 
-    model = _load(model_name)
+    model = _load(model_name, device=device)
     pairs = [(query, c[text_field]) for c in candidates]
     raw_scores = model.predict(pairs)
 
