@@ -74,6 +74,28 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Do not write anything to DB; just print stats.",
     )
+    parser.add_argument(
+        "--forum-only",
+        action="store_true",
+        help="Process only forum thread pages.",
+    )
+    parser.add_argument(
+        "--skip-query-urls",
+        action="store_true",
+        help="Skip URLs containing a query string. Useful for ignoring forum action duplicates.",
+    )
+    parser.add_argument(
+        "--page-id-mod",
+        type=int,
+        default=0,
+        help="Optional modulo shard count for parallel backfills. 0 disables sharding.",
+    )
+    parser.add_argument(
+        "--page-id-rem",
+        type=int,
+        default=0,
+        help="Shard remainder when --page-id-mod is set.",
+    )
     return parser
 
 
@@ -99,6 +121,10 @@ def main() -> int:
             limit=args.limit,
             force=args.force,
             embedding_model=args.embedding_model,
+            forum_only=args.forum_only,
+            skip_query_urls=args.skip_query_urls,
+            page_id_mod=args.page_id_mod,
+            page_id_rem=args.page_id_rem,
         )
         for page in pages:
             processed += 1
@@ -196,6 +222,10 @@ def fetch_html_pages(
     limit: int,
     force: bool,
     embedding_model: str,
+    forum_only: bool,
+    skip_query_urls: bool,
+    page_id_mod: int,
+    page_id_rem: int,
 ) -> list[HtmlPageRow]:
     where = ""
     if not force:
@@ -218,6 +248,16 @@ def fetch_html_pages(
           )
         """
 
+    forum_where = "AND lower(url) LIKE '%%/forum/tema/%%'" if forum_only else ""
+    query_where = "AND position('?' in url) = 0" if skip_query_urls else ""
+    shard_where = ""
+    shard_params: list[int] = []
+    if page_id_mod > 0:
+        if page_id_rem < 0 or page_id_rem >= page_id_mod:
+            raise ValueError("--page-id-rem must be in [0, --page-id-mod)")
+        shard_where = "AND mod(id, %s) = %s"
+        shard_params = [page_id_mod, page_id_rem]
+
     limit_clause = "" if limit == 0 else f"LIMIT {int(limit)}"
 
     sql = f"""
@@ -227,6 +267,9 @@ def fetch_html_pages(
           AND url IS NOT NULL
           AND html_content IS NOT NULL
           AND length(html_content) > 0
+          {forum_where}
+          {query_where}
+          {shard_where}
           {where}
         ORDER BY id
         {limit_clause}
@@ -234,9 +277,9 @@ def fetch_html_pages(
 
     with conn.cursor() as cur:
         if force:
-            cur.execute(sql)
+            cur.execute(sql, shard_params)
         else:
-            cur.execute(sql, (embedding_model, embedding_model))
+            cur.execute(sql, [*shard_params, embedding_model, embedding_model])
         rows = cur.fetchall()
 
     return [HtmlPageRow(page_id=row[0], url=row[1], html_content=row[2]) for row in rows]
