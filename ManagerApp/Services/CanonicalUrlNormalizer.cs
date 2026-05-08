@@ -16,6 +16,12 @@ internal static class CanonicalUrlNormalizer
         "ref_src",
     };
 
+    private static readonly HashSet<string> RejectedQueryKeys = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "_wpnonce",
+        "object_id",
+    };
+
     private const string PathSafeCharacters = "/:@!$&'()*+,;=-._~";
 
     internal static string? Normalize(string? rawUrl, string? baseUrl = null)
@@ -47,7 +53,16 @@ internal static class CanonicalUrlNormalizer
 
         var netloc = resolved.IsDefaultPort ? host : $"{host}:{resolved.Port}";
         var path = NormalizePath(resolved.AbsolutePath);
+        if (string.IsNullOrWhiteSpace(path))
+        {
+            return null;
+        }
+
         var query = NormalizeQuery(resolved.Query);
+        if (query is null)
+        {
+            return null;
+        }
 
         return string.IsNullOrWhiteSpace(query)
             ? $"{scheme}://{netloc}{path}"
@@ -68,10 +83,14 @@ internal static class CanonicalUrlNormalizer
             : null;
     }
 
-    private static string NormalizePath(string rawPath)
+    private static string? NormalizePath(string rawPath)
     {
         var original = string.IsNullOrEmpty(rawPath) ? "/" : rawPath;
         var decoded = Uri.UnescapeDataString(original);
+        if (ContainsEmbeddedAbsoluteUrlTail(decoded))
+        {
+            return null;
+        }
 
         var segments = decoded.Split('/', StringSplitOptions.None);
         var normalizedSegments = new List<string>(segments.Length);
@@ -110,7 +129,7 @@ internal static class CanonicalUrlNormalizer
         return EncodePath(normalized);
     }
 
-    private static string NormalizeQuery(string rawQuery)
+    private static string? NormalizeQuery(string rawQuery)
     {
         var queryText = (rawQuery ?? string.Empty).TrimStart('?');
         if (string.IsNullOrWhiteSpace(queryText))
@@ -126,6 +145,11 @@ internal static class CanonicalUrlNormalizer
                 || TrackingQueryKeys.Contains(lowered))
             {
                 continue;
+            }
+
+            if (ShouldRejectQueryPair(lowered, pair.Value))
+            {
+                return null;
             }
 
             filtered.Add(pair);
@@ -150,6 +174,48 @@ internal static class CanonicalUrlNormalizer
         return string.Join(
             '&',
             filtered.Select(item => $"{EncodeQueryComponent(item.Key)}={EncodeQueryComponent(item.Value)}"));
+    }
+
+    private static bool ShouldRejectQueryPair(string loweredKey, string value)
+    {
+        if (RejectedQueryKeys.Contains(loweredKey))
+        {
+            return true;
+        }
+
+        if (loweredKey.StartsWith("bbp_", StringComparison.Ordinal))
+        {
+            return true;
+        }
+
+        return string.Equals(loweredKey, "action", StringComparison.Ordinal)
+            && value.Trim().StartsWith("bbp_", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static bool ContainsEmbeddedAbsoluteUrlTail(string decodedPath)
+    {
+        if (string.IsNullOrWhiteSpace(decodedPath))
+        {
+            return false;
+        }
+
+        foreach (var rawSegment in decodedPath.Split('/', StringSplitOptions.None))
+        {
+            var segment = rawSegment.Trim();
+            if (string.IsNullOrWhiteSpace(segment))
+            {
+                continue;
+            }
+
+            var stripped = segment.TrimStart('[', ']', '(', ')');
+            if (stripped.StartsWith("http:", StringComparison.OrdinalIgnoreCase)
+                || stripped.StartsWith("https:", StringComparison.OrdinalIgnoreCase))
+            {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     private static IEnumerable<KeyValuePair<string, string>> ParseQueryPairs(string query)

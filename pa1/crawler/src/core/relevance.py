@@ -17,15 +17,26 @@ _ARTICLE_PATH_SIGNALS = (
     "/blog/",
     "/zdravje/",
     "/bolezni/",
+    "/simptomi/",
+    "/diagnoza/",
+    "/zdravljenje/",
+    "/terapija/",
+    "/zdravila/",
+    "/ambulanta/",
+    "/klinika/",
+    "/nosecnost/",
+    "/dojenje/",
+    "/otrok/",
     "/prehrana/",
     "/telovadba/",
     "/vadba/",
     "/fitnes/",
 )
 
-# Forum path signals — forum posts are second-priority content
-_FORUM_PATH_SIGNALS = (
-    "/forum/",
+# Forum thread signals — valuable second-priority content
+_FORUM_THREAD_PATH_SIGNALS = (
+    "/forum/tema/",
+    "/forum/vprasanje/",
     "/tema/",
     "/vprasanje/",
 )
@@ -35,6 +46,10 @@ _LOW_PRIORITY_PATH_SIGNALS = (
     "/iskanje",
     "/search",
     "/kategorija/",
+    "/forum/kategorija/",
+    "/forum/tag/",
+    "/forum/search",
+    "/forum/page/",
     "/category/",
     "/tag/",
     "/stran/",
@@ -42,6 +57,9 @@ _LOW_PRIORITY_PATH_SIGNALS = (
     "/author/",
     "/avtor/",
     "/kontakt",
+    "/prijava",
+    "/registracija",
+    "/wp-",
     "/feed",
     "/rss",
     "/sitemap",
@@ -104,9 +122,11 @@ def score_url(
     if any(sig in path for sig in _ARTICLE_PATH_SIGNALS):
         score += 30.0
 
-    # Forum path signals — valuable secondary content
-    elif any(sig in path for sig in _FORUM_PATH_SIGNALS):
-        score += 15.0
+    # Forum thread signals — valuable secondary content
+    elif any(sig in path for sig in _FORUM_THREAD_PATH_SIGNALS):
+        score += 22.0
+    elif path.startswith("/forum"):
+        score += 4.0
 
     # Topic keyword match in path
     for keyword in policy.keywords:
@@ -116,7 +136,9 @@ def score_url(
 
     # Noise path penalty
     if any(sig in path for sig in _LOW_PRIORITY_PATH_SIGNALS):
-        score -= 10.0
+        score -= 18.0
+    if path in {"/", "/forum", "/forum/"}:
+        score -= 25.0
 
     # Auth/redirect penalties
     has_auth_path = any(token in path for token in AUTH_PATH_SIGNALS)

@@ -18,12 +18,7 @@ def default_seed_entries() -> list["SeedEntry"]:
     """Provide sensible initial seeds for local development and crawling tests."""
     return [
         SeedEntry(url="https://medover.zurnal24.si/", enabled=True, label="Med.Over"),
-        SeedEntry(url="https://www.gov.si/", enabled=False, label="SI Government"),
-        SeedEntry(url="https://nijz.si/", enabled=False, label="NIJZ Public Health"),
-        SeedEntry(url="https://zdravljenjenadom.si/", enabled=False, label="Health Info"),
-        SeedEntry(url="https://www.kclj.si/", enabled=False, label="UKC Ljubljana"),
-        SeedEntry(url="https://www.who.int/", enabled=False, label="WHO"),
-        SeedEntry(url="https://www.ema.europa.eu/", enabled=False, label="EMA"),
+        SeedEntry(url="https://medover.zurnal24.si/forum/", enabled=True, label="Med.Over Forum"),
     ]
 
 
@@ -108,22 +103,35 @@ class GlobalWorkerConfig:
     score_weight_errors: float = 1.0
     topic_keywords: list[str] = field(
         default_factory=lambda: [
-            "fitness",
-            "fitnes",
-            "exercise",
-            "telovadba",
-            "training",
-            "trening",
-            "workout",
-            "wellness",
-            "nutrition",
+            "medicine",
+            "medicina",
+            "medicinski",
+            "health",
+            "zdravje",
+            "zdravst",
+            "doctor",
+            "zdravnik",
+            "specialist",
+            "bolezen",
+            "simptom",
+            "simptomi",
+            "diagnoza",
+            "zdravljenje",
+            "terapija",
+            "pregled",
+            "ambulanta",
+            "klinika",
+            "bolnisnica",
+            "forum",
+            "vprasanje",
+            "odgovor",
+            "nosecnost",
+            "dojenje",
+            "otrok",
             "prehrana",
-            "vadba",
-            "kondicija",
-            "rekreacija",
         ]
     )
-    relevance_allowed_domain_suffixes: list[str] = field(default_factory=list)
+    relevance_allowed_domain_suffixes: list[str] = field(default_factory=lambda: ["medover.zurnal24.si"])
     relevance_same_host_boost: float = 10.0
     relevance_allowed_suffix_boost: float = 20.0
     relevance_keyword_boost: float = 5.0

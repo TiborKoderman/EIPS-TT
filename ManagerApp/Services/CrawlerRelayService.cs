@@ -595,6 +595,22 @@ public sealed class CrawlerRelayService
 
         var isStatusEvent = string.Equals(envelope.Type, "status-change", StringComparison.OrdinalIgnoreCase);
         var isSpawnEvent = string.Equals(envelope.Type, "worker-spawned", StringComparison.OrdinalIgnoreCase);
+        var isRemovedEvent = string.Equals(envelope.Type, "worker-removed", StringComparison.OrdinalIgnoreCase);
+
+        if (isRemovedEvent)
+        {
+            const string deleteSql = """
+                DELETE FROM manager.worker
+                WHERE daemon_id = @daemon_id
+                  AND external_worker_id = @external_worker_id;
+                """;
+
+            await using var deleteCmd = new NpgsqlCommand(deleteSql, connection);
+            deleteCmd.Parameters.AddWithValue("daemon_id", daemonDbId.Value);
+            deleteCmd.Parameters.AddWithValue("external_worker_id", workerId);
+            await deleteCmd.ExecuteNonQueryAsync();
+            return;
+        }
 
         try
         {
@@ -1741,22 +1757,11 @@ public sealed class CrawlerRelayService
             return false;
         }
 
-        foreach (var allowedHost in allowedScopeHosts)
-        {
-            var normalizedAllowed = NormalizeHost(allowedHost);
-            if (string.IsNullOrWhiteSpace(normalizedAllowed))
-            {
-                continue;
-            }
-
-            if (string.Equals(host, normalizedAllowed, StringComparison.OrdinalIgnoreCase)
-                || host.EndsWith($".{normalizedAllowed}", StringComparison.OrdinalIgnoreCase))
-            {
-                return true;
-            }
-        }
-
-        return false;
+        return allowedScopeHosts
+            .Select(NormalizeHost)
+            .Any(normalizedAllowed =>
+                !string.IsNullOrWhiteSpace(normalizedAllowed)
+                && string.Equals(host, normalizedAllowed, StringComparison.OrdinalIgnoreCase));
     }
 
     private static string? NormalizeHost(string? host)

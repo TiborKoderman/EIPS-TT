@@ -19,6 +19,8 @@ def _run_worker_action(
         ok = service.pause_worker(worker_id)
     elif action == "stop":
         ok = service.stop_worker(worker_id)
+    elif action == "remove":
+        ok = service.remove_worker(worker_id)
     else:
         return False, f"Unsupported worker action: {action}"
 
@@ -115,6 +117,9 @@ def handle_reverse_command(service: DaemonWorkerService, payload: dict[str, obje
     if command == "stop-worker" and worker_id is not None:
         ok, err = _run_worker_action(service, action="stop", worker_id=worker_id)
         return ok, err
+    if command == "remove-worker" and worker_id is not None:
+        ok, err = _run_worker_action(service, action="remove", worker_id=worker_id)
+        return ok, err
 
     return False, f"Unsupported or invalid command: {command}"
 
@@ -162,6 +167,14 @@ def handle_reverse_request(
         if worker_id is None:
             return False, None, "Missing workerId."
         return _run_worker_action_with_view(service, action="stop", worker_id=worker_id)
+
+    if normalized_action == "remove-worker":
+        if worker_id is None:
+            return False, None, "Missing workerId."
+        ok, error = _run_worker_action(service, action="remove", worker_id=worker_id)
+        if not ok:
+            return False, None, error
+        return True, {"id": worker_id, "removed": True}, None
 
     if normalized_action == "get-worker-detail":
         if worker_id is None:

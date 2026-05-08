@@ -17,15 +17,26 @@ _ARTICLE_PATH_SIGNALS = (
     "/blog/",
     "/zdravje/",
     "/bolezni/",
+    "/simptomi/",
+    "/diagnoza/",
+    "/zdravljenje/",
+    "/terapija/",
+    "/zdravila/",
+    "/ambulanta/",
+    "/klinika/",
+    "/nosecnost/",
+    "/dojenje/",
+    "/otrok/",
     "/prehrana/",
     "/telovadba/",
     "/vadba/",
     "/fitnes/",
 )
 
-# MedOverNet forum URL patterns — second-highest priority
-_FORUM_PATH_SIGNALS = (
-    "/forum/",
+# MedOverNet forum thread URL patterns — second-highest priority
+_FORUM_THREAD_PATH_SIGNALS = (
+    "/forum/tema/",
+    "/forum/vprasanje/",
     "/tema/",
     "/vprasanje/",
 )
@@ -35,6 +46,10 @@ _LOW_PRIORITY_PATH_SIGNALS = (
     "/iskanje",
     "/search",
     "/kategorija/",
+    "/forum/kategorija/",
+    "/forum/tag/",
+    "/forum/search",
+    "/forum/page/",
     "/category/",
     "/tag/",
     "/stran/",
@@ -44,6 +59,7 @@ _LOW_PRIORITY_PATH_SIGNALS = (
     "/kontakt",
     "/prijava",
     "/registracija",
+    "/wp-",
     "/account",
     "/admin",
     "/feed",
@@ -65,7 +81,7 @@ class PreferentialScorer:
     """Score links by relevance to crawl topic and scope.
 
     Scoring tiers (cumulative):
-      base=50, article-path+50, forum-path+30, topic-keyword+20,
+      base=50, article-path+50, forum-thread+40, topic-keyword+20,
       preferred-host+20, noise-path-20, binary-ext-35
     """
 
@@ -76,17 +92,14 @@ class PreferentialScorer:
         preferred_hosts: list[str] | None = None,
     ) -> None:
         self._topic_keywords = [kw.lower() for kw in (topic_keywords or [
-            # fitness / wellness (primary domain focus)
-            "fitness", "fitnes",
-            "exercise", "telovadba",
-            "training", "trening",
-            "workout", "wellness",
-            "nutrition", "prehrana",
-            "vadba", "kondicija",
-            "rekreacija", "šport", "sport",
-            "shujsati", "hujsanje", "kalorij", "beljakovine",
-            # secondary: health topics that intersect fitness
-            "dieta", "zdravje", "vitamin",
+            "medicine", "medicina", "medicinski",
+            "health", "zdravje", "zdravst",
+            "doctor", "zdravnik", "specialist",
+            "bolezen", "simptom", "simptomi",
+            "diagnoza", "zdravljenje", "terapija",
+            "pregled", "ambulanta", "klinika",
+            "bolnisnica", "forum", "vprasanje", "odgovor",
+            "nosecnost", "dojenje", "otrok", "prehrana",
         ])]
         self._preferred_hosts = [host.lower() for host in (preferred_hosts or [])]
 
@@ -108,10 +121,13 @@ class PreferentialScorer:
         if any(sig in path for sig in _ARTICLE_PATH_SIGNALS):
             value += 50
             reasons.append("article-path+50")
-        # Forum path signals — valuable for PA2 forum extraction
-        elif any(sig in path for sig in _FORUM_PATH_SIGNALS):
-            value += 30
-            reasons.append("forum-path+30")
+        # Forum thread signals — valuable for PA2 forum extraction
+        elif any(sig in path for sig in _FORUM_THREAD_PATH_SIGNALS):
+            value += 40
+            reasons.append("forum-thread+40")
+        elif path.startswith("/forum"):
+            value += 5
+            reasons.append("forum-shell+5")
 
         # Topic keyword match in URL or anchor text
         if any(kw in lowered_url or kw in lowered_anchor for kw in self._topic_keywords):
@@ -127,6 +143,9 @@ class PreferentialScorer:
         if any(sig in path for sig in _LOW_PRIORITY_PATH_SIGNALS):
             value -= 20
             reasons.append("noise-path-20")
+        if path in {"/", "/forum", "/forum/"}:
+            value -= 35
+            reasons.append("root-shell-35")
 
         # Binary / document extensions
         if any(path.endswith(ext) for ext in LOW_PRIORITY_EXTENSIONS):

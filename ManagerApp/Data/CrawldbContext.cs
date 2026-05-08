@@ -86,6 +86,10 @@ public partial class CrawldbContext : DbContext
             entity.Property(e => e.ContentHash)
                 .HasMaxLength(64)
                 .HasColumnName("content_hash");
+            entity.Property(e => e.CleanedContent).HasColumnName("cleaned_content");
+            entity.Property(e => e.CleanedContentHash)
+                .HasMaxLength(64)
+                .HasColumnName("cleaned_content_hash");
             entity.Property(e => e.DuplicateOfPageId).HasColumnName("duplicate_of_page_id");
             entity.Property(e => e.HtmlContent).HasColumnName("html_content");
             entity.Property(e => e.HttpStatusCode).HasColumnName("http_status_code");

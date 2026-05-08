@@ -133,17 +133,14 @@ class DaemonWorkerService(WorkerControlService):
                 queue_mode="server",
                 strategy_mode="balanced",
                 topic_keywords=[
-                    # fitness / wellness (primary domain focus)
-                    "fitness", "fitnes",
-                    "exercise", "telovadba",
-                    "training", "trening",
-                    "workout", "wellness",
-                    "nutrition", "prehrana",
-                    "vadba", "kondicija",
-                    "rekreacija", "sport",
-                    "shujsati", "hujsanje", "kalorij", "beljakovine",
-                    # secondary: health topics overlapping fitness
-                    "dieta", "zdravje", "vitamin",
+                    "medicine", "medicina", "medicinski",
+                    "health", "zdravje", "zdravst",
+                    "doctor", "zdravnik", "specialist",
+                    "bolezen", "simptom", "simptomi",
+                    "diagnoza", "zdravljenje", "terapija",
+                    "pregled", "ambulanta", "klinika",
+                    "bolnisnica", "forum", "vprasanje", "odgovor",
+                    "nosecnost", "dojenje", "otrok", "prehrana",
                 ],
                 avoid_duplicate_paths_across_daemons=True,
                 worker_ids=[1],
@@ -410,6 +407,46 @@ class DaemonWorkerService(WorkerControlService):
                 "status-change",
                 worker_id=worker_id,
                 payload={"status": "Stopped", "previousStatus": "Active", "reason": "manual-stop"},
+            )
+            return True
+
+    def remove_worker(self, worker_id: int) -> bool:
+        with self._lock:
+            worker = self._workers.get(worker_id)
+            if worker is None:
+                return False
+
+            previous_status = worker.status
+            self._release_claim_for_worker(worker_id, requeue=True, reason="worker-removed")
+            self._terminate_process_if_running(worker_id)
+            self._stop_thread_worker(worker_id, reason="worker-removed")
+
+            requeued_urls = 0
+            for url, metadata in self._drain_worker_local_frontier_locked(worker_id):
+                if self._enqueue_frontier_url(
+                    url,
+                    source_url=metadata.source_url,
+                    depth=metadata.depth,
+                    explicit_priority=metadata.priority,
+                ):
+                    requeued_urls += 1
+
+            self._logs.pop(worker_id, None)
+            self._workers.pop(worker_id, None)
+
+            for group in self._groups.values():
+                if worker_id in group.worker_ids:
+                    group.worker_ids = [item for item in group.worker_ids if item != worker_id]
+
+            self._emit_manager_event(
+                "worker-removed",
+                worker_id=worker_id,
+                payload={
+                    "workerId": worker_id,
+                    "name": worker.name,
+                    "previousStatus": previous_status,
+                    "requeuedLocalUrls": requeued_urls,
+                },
             )
             return True
 
@@ -1395,6 +1432,77 @@ class DaemonWorkerService(WorkerControlService):
         )
 
     @staticmethod
+    def _normalize_scope_host(raw_value: str | None) -> str | None:
+        if not raw_value:
+            return None
+
+        candidate = raw_value.strip()
+        if not candidate:
+            return None
+
+        if "://" in candidate:
+            try:
+                host = (urlsplit(candidate).hostname or "").strip().lower()
+            except Exception:
+                return None
+            return host or None
+
+        return candidate.lower().lstrip(".") or None
+
+    def _build_allowed_scope_hosts(self) -> set[str]:
+        with self._lock:
+            cfg = self._global_config
+            seed_entries = list(cfg.seed_entries)
+            seed_urls = list(cfg.seed_urls)
+            relevance_hosts = list(cfg.relevance_allowed_domain_suffixes)
+
+        hosts: set[str] = set()
+        for entry in seed_entries:
+            if not entry.enabled:
+                continue
+            host = self._normalize_scope_host(entry.url)
+            if host:
+                hosts.add(host)
+
+        for seed_url in seed_urls:
+            host = self._normalize_scope_host(seed_url)
+            if host:
+                hosts.add(host)
+
+        if not hosts:
+            for raw_host in relevance_hosts:
+                host = self._normalize_scope_host(raw_host)
+                if host:
+                    hosts.add(host)
+
+        if not hosts:
+            for raw_host in self._crawler_config.relevance_allowed_domain_suffixes:
+                host = self._normalize_scope_host(raw_host)
+                if host:
+                    hosts.add(host)
+
+        return hosts
+
+    def _is_url_within_scope(self, candidate_url: str, source_url: str | None) -> tuple[bool, set[str]]:
+        try:
+            candidate_host = (urlsplit(candidate_url).hostname or "").strip().lower()
+        except Exception:
+            return False, set()
+
+        if not candidate_host:
+            return False, set()
+
+        allowed_hosts = self._build_allowed_scope_hosts()
+        if allowed_hosts:
+            return candidate_host in allowed_hosts, allowed_hosts
+
+        source_host = self._normalize_scope_host(source_url)
+        if source_host:
+            return candidate_host == source_host, {source_host}
+
+        return True, set()
+
+    @staticmethod
     def _choose_best_candidate(
         queue: deque[str],
         metadata: dict[str, FrontierMetadata],
@@ -1470,6 +1578,24 @@ class DaemonWorkerService(WorkerControlService):
 
         self._purge_expired_frontier_state()
         if self._is_tombstoned(candidate):
+            return None
+
+        in_scope, allowed_hosts = self._is_url_within_scope(candidate, source_url)
+        if not in_scope:
+            payload = {
+                "url": candidate,
+                "reason": "out-of-scope",
+                "sourceUrl": source_url,
+                "allowedHosts": sorted(allowed_hosts),
+            }
+            if worker_id is not None:
+                payload["workerId"] = worker_id
+
+            self._emit_manager_event(
+                "frontier-prune",
+                worker_id=worker_id,
+                payload=payload,
+            )
             return None
 
         robots_allowed, robots_policy = self._robots_policy_allows_enqueue(candidate)
@@ -2063,6 +2189,44 @@ class DaemonWorkerService(WorkerControlService):
             },
         )
 
+    def _drain_worker_local_frontier_locked(self, worker_id: int) -> list[tuple[str, FrontierMetadata]]:
+        queue = self._worker_local_queues.pop(worker_id, deque())
+        metadata = self._worker_local_metadata.pop(worker_id, {})
+        known_urls = self._worker_local_known_urls.pop(worker_id, set())
+
+        drained: list[tuple[str, FrontierMetadata]] = []
+        seen: set[str] = set()
+
+        for candidate in queue:
+            if candidate in seen:
+                continue
+            seen.add(candidate)
+            drained.append((
+                candidate,
+                metadata.get(candidate) or FrontierMetadata(
+                    priority=0,
+                    depth=0,
+                    source_url=None,
+                    discovered_at_monotonic=time.monotonic(),
+                ),
+            ))
+
+        for candidate in known_urls:
+            if candidate in seen:
+                continue
+            seen.add(candidate)
+            drained.append((
+                candidate,
+                metadata.get(candidate) or FrontierMetadata(
+                    priority=0,
+                    depth=0,
+                    source_url=None,
+                    discovered_at_monotonic=time.monotonic(),
+                ),
+            ))
+
+        return drained
+
     def _purge_expired_frontier_state(self) -> None:
         now = time.monotonic()
 
@@ -2563,13 +2727,17 @@ class DaemonWorkerService(WorkerControlService):
         score += min(segment_count * 5, 40)
 
         if candidate_path.startswith("/forum"):
-            score += 300
-            if "/forum/kategorija/" in candidate_path:
-                score += 180
+            score += 120
             if "/forum/tema/" in candidate_path:
-                score += 260
+                score += 360
+            if "/forum/vprasanje/" in candidate_path:
+                score += 320
+            if "/forum/kategorija/" in candidate_path:
+                score -= 120
+            if "/forum/tag/" in candidate_path or "/forum/search" in candidate_path:
+                score -= 140
             if "/forum/page/" in candidate_path:
-                score += 80
+                score -= 90
 
             tail = candidate_path.rstrip("/").split("/")[-1]
             if "-" in tail and tail.rsplit("-", 1)[-1].isdigit():
@@ -2587,6 +2755,8 @@ class DaemonWorkerService(WorkerControlService):
             score -= 90
         if candidate_path.startswith("/wp-"):
             score -= 180
+        if "_wpnonce=" in candidate_query or "object_id=" in candidate_query or "action=bbp_" in candidate_query:
+            score -= 500
         if "utm_" in candidate_query:
             score -= 40
 

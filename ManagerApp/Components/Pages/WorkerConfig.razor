@@ -8,8 +8,8 @@
 <div class="page-header">
     <div class="page-header-main">
         <div>
-            <h1 class="page-title">Worker Global Config</h1>
-            <p class="page-subtitle">Default settings shared across all workers</p>
+            <h1 class="page-title">Crawler Setup</h1>
+            <p class="page-subtitle">Recommended Med.Over crawl defaults and advanced daemon controls</p>
         </div>
         <a class="btn" href="/workers/groups">
             <span class="mdi mdi-account-group"></span>
@@ -30,12 +30,21 @@
     else
     {
         <div class="card mb-lg">
-            <h2 class="card-title">Defaults</h2>
-            <div class="flex items-center gap-sm mb-sm">
-                <button class="btn" type="button" @onclick="ApplyWebsocketPreset">
-                    <span class="mdi mdi-flask-outline"></span>
-                    Apply Websocket Daemon Preset
-                </button>
+            <div class="card-header-inline mb-sm">
+                <div>
+                    <h2 class="card-title mb-0">Basic Setup</h2>
+                    <p class="text-small text-muted">Recommended Assignment 2 crawl defaults for the Med.Over.Net medical corpus.</p>
+                </div>
+                <div class="flex items-center gap-sm">
+                    <button class="btn" type="button" @onclick="ApplyWebsocketPreset">
+                        <span class="mdi mdi-flask-outline"></span>
+                        Use Assignment 2 Preset
+                    </button>
+                    <button class="btn" type="button" @onclick="GenerateRecommendedSeeds">
+                        <span class="mdi mdi-link-variant-plus"></span>
+                        Use MedOver Seeds
+                    </button>
+                </div>
             </div>
             <div class="workers-config-grid">
                 <label>
@@ -43,23 +52,11 @@
                     <input type="number" min="1" @bind="config.MaxConcurrentWorkers" />
                 </label>
                 <label>
-                    <span class="text-small text-muted">Request Timeout (seconds)</span>
-                    <input type="number" min="1" @bind="config.RequestTimeoutSeconds" />
-                </label>
-                <label>
                     <span class="text-small text-muted">Crawl Delay (ms)</span>
                     <input type="number" min="0" @bind="config.CrawlDelayMilliseconds" />
                 </label>
                 <label>
-                    <span class="text-small text-muted">User Agent</span>
-                    <input type="text" @bind="config.UserAgent" />
-                </label>
-                <label>
-                    <span class="text-small text-muted">Queue Mode</span>
-                    <input type="text" value="Server (manager-owned frontier)" readonly />
-                </label>
-                <label>
-                    <span class="text-small text-muted">Strategy Mode</span>
+                    <span class="text-small text-muted">Priority Strategy</span>
                     <select @bind="config.StrategyMode">
                         <option value="balanced">Balanced</option>
                         <option value="coverage">Coverage</option>
@@ -67,29 +64,21 @@
                         <option value="freshness">Freshness</option>
                     </select>
                 </label>
-                <label>
-                    <span class="text-small text-muted">Max Frontier In-Memory</span>
-                    <input type="number" min="100" step="100" @bind="config.MaxFrontierInMemory" />
-                </label>
             </div>
 
             <label class="mt-md">
-                <span class="text-small text-muted">Default Seed URLs (one per line)</span>
-                <textarea rows="5" @bind="config.SeedUrlsText"></textarea>
+                <span class="text-small text-muted">Crawl Scope (one host per line)</span>
+                <textarea rows="3" @bind="config.RelevanceAllowedDomainSuffixesText"></textarea>
             </label>
 
             <div class="mt-md">
                 <div class="flex items-center justify-between gap-sm mb-sm">
-                    <span class="text-small text-muted">Seed List (enabled rows are active)</span>
-                    <div class="flex gap-sm">
-                        <button class="btn" type="button" @onclick="AddSeedRow">
-                            <span class="mdi mdi-plus"></span> Add Seed
-                        </button>
-                        <button class="btn" type="button" @onclick="GenerateRecommendedSeeds">
-                            <span class="mdi mdi-lightbulb-on-outline"></span> Generate Sensible Seeds
-                        </button>
-                    </div>
+                    <span class="text-small text-muted">Seed URLs (enabled rows are active)</span>
+                    <button class="btn" type="button" @onclick="AddSeedRow">
+                        <span class="mdi mdi-plus"></span> Add Seed
+                    </button>
                 </div>
+                <div class="text-small text-muted mb-sm">Use the site root and forum root as the normal starting points.</div>
                 @if (config.SeedEntries.Count == 0)
                 {
                     <p class="text-small text-muted">No seed entries configured.</p>
@@ -125,43 +114,9 @@
                 }
             </div>
 
-            <label class="mt-md">
-                <span class="text-small text-muted">Topic Keywords (one per line)</span>
-                <textarea rows="5" @bind="config.TopicKeywordsText"></textarea>
-            </label>
-
-            <div class="workers-config-grid mt-md">
-                <label>
-                    <span class="text-small text-muted">Relevance Same Host Boost</span>
-                    <input type="number" min="0" step="0.1" @bind="config.RelevanceSameHostBoost" />
-                </label>
-                <label>
-                    <span class="text-small text-muted">Relevance Allowed Suffix Boost</span>
-                    <input type="number" min="0" step="0.1" @bind="config.RelevanceAllowedSuffixBoost" />
-                </label>
-                <label>
-                    <span class="text-small text-muted">Relevance Keyword Boost</span>
-                    <input type="number" min="0" step="0.1" @bind="config.RelevanceKeywordBoost" />
-                </label>
-                <label>
-                    <span class="text-small text-muted">Relevance Depth Penalty</span>
-                    <input type="number" min="0" step="0.01" @bind="config.RelevanceDepthPenalty" />
-                </label>
-            </div>
-
-            <label class="mt-md">
-                <span class="text-small text-muted">Allowed Domain Suffixes For Relevance (one per line)</span>
-                <textarea rows="4" @bind="config.RelevanceAllowedDomainSuffixesText"></textarea>
-            </label>
-
             <label class="mt-md flex items-center gap-sm">
                 <input type="checkbox" @bind="config.RespectRobotsTxt" style="width:auto;" />
                 <span>Respect robots.txt</span>
-            </label>
-
-            <label class="mt-md flex items-center gap-sm">
-                <input type="checkbox" @bind="config.AvoidDuplicatePathsAcrossDaemons" style="width:auto;" />
-                <span>Avoid duplicate paths across daemons</span>
             </label>
 
             <div class="mt-md flex gap-sm">
@@ -176,51 +131,102 @@
             </div>
         </div>
 
-        <div class="placeholder-note">
-            <div class="placeholder-note-title">
-                <span class="mdi mdi-information-outline"></span> Integration note
-            </div>
-            <ul class="placeholder-note-list">
-                <li>Websocket daemon mode uses manager-owned frontier queueing, scheduling, and command dispatch.</li>
-                <li>Strategy mode tunes crawler behavior for coverage, freshness, focused crawling, or balanced operation.</li>
-            </ul>
+        <div class="card mb-lg">
+            <details>
+                <summary class="card-title" style="cursor:pointer;">Advanced Settings</summary>
+                <p class="text-small text-muted mb-sm">Crawler tuning, fallback keyword scoring, and daemon coordination options.</p>
+                <div class="workers-config-grid">
+                    <label>
+                        <span class="text-small text-muted">Request Timeout (seconds)</span>
+                        <input type="number" min="1" @bind="config.RequestTimeoutSeconds" />
+                    </label>
+                    <label>
+                        <span class="text-small text-muted">User Agent</span>
+                        <input type="text" @bind="config.UserAgent" />
+                    </label>
+                    <label>
+                        <span class="text-small text-muted">Queue Mode</span>
+                        <input type="text" value="Server (manager-owned frontier)" readonly />
+                    </label>
+                    <label>
+                        <span class="text-small text-muted">Max Frontier In-Memory</span>
+                        <input type="number" min="100" step="100" @bind="config.MaxFrontierInMemory" />
+                    </label>
+                </div>
+
+                <label class="mt-md">
+                    <span class="text-small text-muted">Topic Keywords (one per line)</span>
+                    <textarea rows="6" @bind="config.TopicKeywordsText"></textarea>
+                </label>
+
+                <div class="workers-config-grid mt-md">
+                    <label>
+                        <span class="text-small text-muted">Relevance Same Host Boost</span>
+                        <input type="number" min="0" step="0.1" @bind="config.RelevanceSameHostBoost" />
+                    </label>
+                    <label>
+                        <span class="text-small text-muted">Relevance Scope Boost</span>
+                        <input type="number" min="0" step="0.1" @bind="config.RelevanceAllowedSuffixBoost" />
+                    </label>
+                    <label>
+                        <span class="text-small text-muted">Relevance Keyword Boost</span>
+                        <input type="number" min="0" step="0.1" @bind="config.RelevanceKeywordBoost" />
+                    </label>
+                    <label>
+                        <span class="text-small text-muted">Relevance Depth Penalty</span>
+                        <input type="number" min="0" step="0.01" @bind="config.RelevanceDepthPenalty" />
+                    </label>
+                </div>
+
+                <label class="mt-md flex items-center gap-sm">
+                    <input type="checkbox" @bind="config.AvoidDuplicatePathsAcrossDaemons" style="width:auto;" />
+                    <span>Avoid duplicate paths across daemons</span>
+                </label>
+
+                <label class="mt-md">
+                    <span class="text-small text-muted">Enabled Seed URL List (generated from the seed rows above)</span>
+                    <textarea rows="4" readonly>@config.SeedUrlsText</textarea>
+                </label>
+            </details>
         </div>
 
         <div class="card mt-md">
-            <h2 class="card-title">Daemon Start/Registration Script</h2>
-            <p class="text-small text-muted mb-sm">
-                Use this script on a worker host to start crawler websocket mode and register with this manager.
-            </p>
-            <div class="workers-config-grid">
+            <details>
+                <summary class="card-title" style="cursor:pointer;">Advanced / Diagnostics and Remote Daemon Script</summary>
+                <p class="text-small text-muted mb-sm">
+                    Use this script on a worker host to start crawler websocket mode and register with this manager.
+                </p>
+                <div class="workers-config-grid">
+                    <label>
+                        <span class="text-small text-muted">Command Format</span>
+                        <select @bind="daemonCommandFormat">
+                            <option value="bash">Bash</option>
+                            <option value="docker">Docker</option>
+                        </select>
+                    </label>
+                    <label>
+                        <span class="text-small text-muted">Daemon ID</span>
+                        <input type="text" @bind="daemonIdOverride" placeholder="local-default" />
+                    </label>
+                    <label>
+                        <span class="text-small text-muted">Manager IP / URL</span>
+                        <input type="text" @bind="managerEndpointOverride" placeholder="http://127.0.0.1:5175" />
+                    </label>
+                    <label>
+                        <span class="text-small text-muted">Channel Token (auto-generated if empty)</span>
+                        <input type="text" @bind="daemonTokenOverride" placeholder="Bearer token configured in manager" />
+                    </label>
+                </div>
                 <label>
-                    <span class="text-small text-muted">Command Format</span>
-                    <select @bind="daemonCommandFormat">
-                        <option value="bash">Bash</option>
-                        <option value="docker">Docker</option>
-                    </select>
+                    <span class="text-small text-muted">Generated Script</span>
+                    <textarea rows="8" readonly>@daemonStartScript</textarea>
                 </label>
-                <label>
-                    <span class="text-small text-muted">Daemon ID</span>
-                    <input type="text" @bind="daemonIdOverride" placeholder="local-default" />
-                </label>
-                <label>
-                    <span class="text-small text-muted">Manager IP / URL</span>
-                    <input type="text" @bind="managerEndpointOverride" placeholder="http://127.0.0.1:5175" />
-                </label>
-                <label>
-                    <span class="text-small text-muted">Channel Token (auto-generated if empty)</span>
-                    <input type="text" @bind="daemonTokenOverride" placeholder="Bearer token configured in manager" />
-                </label>
-            </div>
-            <label>
-                <span class="text-small text-muted">Generated Script</span>
-                <textarea rows="8" readonly>@daemonStartScript</textarea>
-            </label>
-            <div class="mt-sm flex gap-sm">
-                <button class="btn" type="button" @onclick="RefreshDaemonStartScript">
-                    <span class="mdi mdi-refresh"></span> Refresh Script
-                </button>
-            </div>
+                <div class="mt-sm flex gap-sm">
+                    <button class="btn" type="button" @onclick="RefreshDaemonStartScript">
+                        <span class="mdi mdi-refresh"></span> Refresh Script
+                    </button>
+                </div>
+            </details>
         </div>
     }
 </div>
@@ -362,10 +368,6 @@
         {
             new() { Url = "https://medover.zurnal24.si/", Enabled = true, Label = "Med.Over.Net" },
             new() { Url = "https://medover.zurnal24.si/forum/", Enabled = true, Label = "Med.Over Forum" },
-            new() { Url = "https://nijz.si/", Enabled = true, Label = "NIJZ Public Health" },
-            new() { Url = "https://www.kclj.si/", Enabled = false, Label = "UKC Ljubljana" },
-            new() { Url = "https://www.gov.si/", Enabled = false, Label = "SI Government" },
-            new() { Url = "https://e-uprava.gov.si/", Enabled = false, Label = "eUprava" },
         };
 
         config.SeedUrlsText = string.Join("\n", config.SeedEntries.Where(entry => entry.Enabled).Select(entry => entry.Url));
@@ -388,24 +390,18 @@
         config.AvoidDuplicatePathsAcrossDaemons = true;
         config.TopicKeywordsText = string.Join("\n", new[]
         {
-            // fitness / wellness (primary domain focus)
-            "fitness", "fitnes",
-            "exercise", "telovadba",
-            "training", "trening",
-            "workout", "wellness",
-            "nutrition", "prehrana",
-            "vadba", "kondicija",
-            "rekreacija", "sport",
-            "shujsati", "hujsanje", "kalorij", "beljakovine",
-            // secondary: health topics overlapping fitness
-            "dieta", "zdravje", "vitamin",
+            "medicine", "medicina", "medicinski",
+            "health", "zdravje", "zdravst",
+            "doctor", "zdravnik", "specialist",
+            "bolezen", "simptom", "simptomi",
+            "diagnoza", "zdravljenje", "terapija",
+            "pregled", "ambulanta", "klinika",
+            "bolnisnica", "forum", "vprasanje", "odgovor",
+            "nosecnost", "dojenje", "otrok", "prehrana",
         });
         config.RelevanceAllowedDomainSuffixesText = string.Join("\n", new[]
         {
-            "medover.net",
-            "zurnal24.si",
-            "nijz.si",
-            "kclj.si",
+            "medover.zurnal24.si",
         });
         config.RelevanceSameHostBoost = 10;
         config.RelevanceAllowedSuffixBoost = 20;
@@ -416,13 +412,10 @@
         {
             new() { Url = "https://medover.zurnal24.si/", Enabled = true, Label = "Med.Over.Net" },
             new() { Url = "https://medover.zurnal24.si/forum/", Enabled = true, Label = "Med.Over Forum" },
-            new() { Url = "https://nijz.si/", Enabled = true, Label = "NIJZ" },
-            new() { Url = "https://www.kclj.si/", Enabled = false, Label = "UKC" },
-            new() { Url = "https://www.gov.si/", Enabled = false, Label = "Gov SI" },
         };
 
         config.SeedUrlsText = string.Join("\n", config.SeedEntries.Where(entry => entry.Enabled).Select(entry => entry.Url));
-        statusMessage = "Websocket daemon preset applied. Save to persist.";
+        statusMessage = "Assignment 2 preset applied. Save to persist.";
     }
 
     private void RefreshDaemonStartScript()

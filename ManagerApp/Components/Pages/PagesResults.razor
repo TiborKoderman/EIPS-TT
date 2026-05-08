@@ -9,7 +9,7 @@
 
 <div class="page-header">
     <h1 class="page-title">Collected Pages</h1>
-    <p class="page-subtitle">Search indexed pages and inspect crawl metadata</p>
+    <p class="page-subtitle">Search indexed pages, cleaned text, and Assignment 2 extraction coverage</p>
     <div class="mt-sm">
         <a class="btn" href="/relevance">
             <span class="mdi mdi-chart-bell-curve-cumulative"></span>
@@ -91,6 +91,20 @@
                 <option value="best_score">Order by best score</option>
             </select>
 
+            <select class="pages-order-select" @bind="Assignment2TypeFilter" @bind:after="OnAssignment2FilterChangedAsync">
+                <option value="ALL">All PA2 content</option>
+                <option value="article">Articles</option>
+                <option value="forum">Forum threads</option>
+                <option value="listing">Listing / skipped</option>
+                <option value="unknown">Unknown</option>
+            </select>
+
+            <select class="pages-order-select" @bind="CleanedTextFilter" @bind:after="OnCleanedTextFilterChangedAsync">
+                <option value="ALL">All cleaned states</option>
+                <option value="YES">Has cleaned text</option>
+                <option value="NO">Missing cleaned text</option>
+            </select>
+
             <button class="btn btn-primary pages-search-button" @onclick="() => ReloadAsync(keepSelection: true)">
                 <span class="mdi mdi-magnify"></span>
                 <span>Search</span>
@@ -118,6 +132,7 @@
                                 <th>Type</th>
                                 <th>HTTP</th>
                                 <th>Score</th>
+                                <th>PA2</th>
                                 <th>URL</th>
                             </tr>
                         </thead>
@@ -136,6 +151,15 @@
                                     </td>
                                     <td>@(row.HttpStatus?.ToString() ?? "-")</td>
                                     <td>@row.RelevanceScore.ToString("0.00")</td>
+                                    <td>
+                                        <div class="flex flex-col gap-xs">
+                                            <span class="badge @GetAssignment2BadgeClass(row.Assignment2ContentType)">@row.Assignment2ContentType</span>
+                                            <span class="text-small text-muted">
+                                                @(row.HasCleanedContent ? $"{row.CleanedContentLength} chars" : "no cleaned text")
+                                            </span>
+                                            <span class="text-small text-muted">@($"{row.ShortSegmentCount} / {row.LongSegmentCount}")</span>
+                                        </div>
+                                    </td>
                                     <td>
                                         <div class="page-url-row">
                                             <button type="button"
@@ -266,6 +290,17 @@
                             @(SelectedRow.HasSameHostEvidence ? " same-host" : "")
                             @(SelectedRow.FrontierDepth.HasValue ? $" depth={SelectedRow.FrontierDepth.Value}" : string.Empty)
                         </div>
+                        <div class="policy-block">
+                            <div><strong>Assignment 2</strong></div>
+                            <div><strong>Content type:</strong> @SelectedRow.Assignment2ContentType</div>
+                            <div><strong>Cleaned text:</strong> @(SelectedRow.HasCleanedContent ? $"{SelectedRow.CleanedContentLength} characters" : "Not stored")</div>
+                            <div><strong>Segments:</strong> @($"{SelectedRow.ShortSegmentCount} short / {SelectedRow.LongSegmentCount} long")</div>
+                            @if (!string.IsNullOrWhiteSpace(SelectedPage.CleanedContent))
+                            {
+                                var cleanedPreview = BuildPreviewText(SelectedPage.CleanedContent, maxLines: 18, maxChars: 2600);
+                                <pre class="policy-pre">@cleanedPreview.Text</pre>
+                            }
+                        </div>
                     }
                     @if (SelectedBacklinkStats is not null)
                     {
@@ -378,6 +413,8 @@
     private string SearchTerm { get; set; } = "";
     private string PageTypeFilter { get; set; } = "ALL";
     private string OrderBy { get; set; } = "latest";
+    private string Assignment2TypeFilter { get; set; } = "ALL";
+    private string CleanedTextFilter { get; set; } = "ALL";
     private int Total;
     private bool ShowFilterDropdown;
     private string? _copiedUrl;
@@ -463,11 +500,23 @@
         await ReloadAsync(keepSelection: true);
     }
 
+    private async Task OnAssignment2FilterChangedAsync()
+    {
+        await ReloadAsync(keepSelection: true);
+    }
+
+    private async Task OnCleanedTextFilterChangedAsync()
+    {
+        await ReloadAsync(keepSelection: true);
+    }
+
     private async Task ReloadAsync(bool keepSelection)
     {
         var selectedId = keepSelection ? SelectedPage?.Id : null;
-        Rows = await PageService.SearchPagesAsync(SearchTerm, PageTypeFilter, OrderBy, 0, 120);
-        Total = await PageService.GetSearchResultsCountAsync(SearchTerm, PageTypeFilter);
+        var assignment2Filter = NormalizeAssignment2TypeFilter(Assignment2TypeFilter);
+        var cleanedFilter = ParseCleanedTextFilter(CleanedTextFilter);
+        Rows = await PageService.SearchPagesAsync(SearchTerm, PageTypeFilter, OrderBy, 0, 120, assignment2Filter, cleanedFilter);
+        Total = await PageService.GetSearchResultsCountAsync(SearchTerm, PageTypeFilter, assignment2Filter, cleanedFilter);
         var binaryCountsTask = StatisticsService.GetBinaryFileCountsAsync();
         var imageCountsTask = StatisticsService.GetImageFileCountsAsync();
         await Task.WhenAll(binaryCountsTask, imageCountsTask);
@@ -625,6 +674,39 @@
     {
         var hashIndex = line.IndexOf('#');
         return hashIndex >= 0 ? line[..hashIndex].Trim() : line.Trim();
+    }
+
+    private static string NormalizeAssignment2TypeFilter(string value)
+    {
+        return (value ?? string.Empty).Trim().ToLowerInvariant() switch
+        {
+            "article" => "article",
+            "forum" => "forum",
+            "listing" => "listing",
+            "unknown" => "unknown",
+            _ => string.Empty,
+        };
+    }
+
+    private static bool? ParseCleanedTextFilter(string value)
+    {
+        return (value ?? string.Empty).Trim().ToUpperInvariant() switch
+        {
+            "YES" => true,
+            "NO" => false,
+            _ => null,
+        };
+    }
+
+    private static string GetAssignment2BadgeClass(string? contentType)
+    {
+        return (contentType ?? string.Empty).Trim().ToLowerInvariant() switch
+        {
+            "article" => "badge-success",
+            "forum" => "badge-info",
+            "listing" => "badge-warning",
+            _ => "badge-info",
+        };
     }
 
     private static bool RobotsRuleMatchesPath(string path, string rawRule)

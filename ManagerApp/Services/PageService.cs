@@ -15,6 +15,53 @@ public class PageService : IPageService
 {
     private readonly CrawldbContext _context;
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
+    private const string Assignment2ContentTypeCaseSql = """
+        CASE
+            WHEN COALESCE(stats.has_forum, 0) = 1 THEN 'forum'
+            WHEN COALESCE(stats.has_article, 0) = 1 THEN 'article'
+            WHEN lower(COALESCE(p.url, '')) LIKE '%/forum/%'
+              OR lower(COALESCE(p.url, '')) LIKE '%/kategorija/%'
+              OR lower(COALESCE(p.url, '')) LIKE '%/tag/%'
+              OR lower(COALESCE(p.url, '')) LIKE '%/search%'
+              OR lower(COALESCE(p.url, '')) LIKE '%/feed%'
+              OR lower(COALESCE(p.url, '')) LIKE '%/prijava%'
+              OR lower(COALESCE(p.url, '')) LIKE '%/registracija%'
+              THEN 'listing'
+            WHEN COALESCE(length(nullif(p.cleaned_content, '')), 0) > 0 THEN 'article'
+            ELSE 'unknown'
+        END
+        """;
+    private const string Assignment2SegmentStatsCteSql = """
+        WITH short_stats AS (
+            SELECT
+                page_id,
+                COUNT(*)::int AS short_count,
+                MAX(CASE WHEN page_type = 'article' THEN 1 ELSE 0 END)::int AS has_article,
+                MAX(CASE WHEN page_type = 'forum' THEN 1 ELSE 0 END)::int AS has_forum
+            FROM crawldb.page_segment_short
+            GROUP BY page_id
+        ),
+        long_stats AS (
+            SELECT
+                page_id,
+                COUNT(*)::int AS long_count,
+                MAX(CASE WHEN page_type = 'article' THEN 1 ELSE 0 END)::int AS has_article,
+                MAX(CASE WHEN page_type = 'forum' THEN 1 ELSE 0 END)::int AS has_forum
+            FROM crawldb.page_segment_long
+            GROUP BY page_id
+        ),
+        stats AS (
+            SELECT
+                COALESCE(short_stats.page_id, long_stats.page_id) AS page_id,
+                COALESCE(short_stats.short_count, 0) AS short_count,
+                COALESCE(long_stats.long_count, 0) AS long_count,
+                GREATEST(COALESCE(short_stats.has_article, 0), COALESCE(long_stats.has_article, 0)) AS has_article,
+                GREATEST(COALESCE(short_stats.has_forum, 0), COALESCE(long_stats.has_forum, 0)) AS has_forum
+            FROM short_stats
+            FULL OUTER JOIN long_stats
+                ON long_stats.page_id = short_stats.page_id
+        )
+        """;
 
     public PageService(CrawldbContext context)
     {
@@ -30,74 +77,12 @@ public class PageService : IPageService
         string? pageType,
         string? orderBy = null,
         int skip = 0,
-        int take = 50)
+        int take = 50,
+        string? assignment2ContentType = null,
+        bool? hasCleanedContent = null)
     {
-        var query = _context.Pages.AsQueryable();
-
-        // Filter by page type if specified
-        if (!string.IsNullOrWhiteSpace(pageType) && pageType != "ALL")
-        {
-            var normalizedType = pageType.Trim().ToUpperInvariant();
-            if (normalizedType == "DUPLICATE")
-            {
-                query = query.Where(p => p.DuplicateOfPageId != null);
-            }
-            else
-            {
-                query = query.Where(p => p.PageTypeCode != null && p.PageTypeCode.ToUpper() == normalizedType);
-            }
-        }
-
-        // Fuzzy search on URL and HTML content (case-insensitive)
-        if (!string.IsNullOrWhiteSpace(searchTerm))
-        {
-            var pattern = $"%{searchTerm.Trim()}%";
-            query = query.Where(p =>
-                (p.Url != null && EF.Functions.ILike(p.Url, pattern)) ||
-                (p.HtmlContent != null && EF.Functions.ILike(p.HtmlContent, pattern))
-            );
-        }
-
-        var candidates = await query
-            .Include(p => p.Site)
-            .Select(p => new PageSearchDto
-            {
-                Id = p.Id,
-                Url = p.Url ?? "",
-                PageType = p.PageTypeCode ?? "HTML",
-                HttpStatus = p.HttpStatusCode,
-                AccessedTime = p.AccessedTime,
-                SiteDomain = p.Site != null ? p.Site.Domain : null,
-                IsDuplicate = p.DuplicateOfPageId != null
-            })
-            .ToListAsync();
-
-        if (candidates.Count == 0)
-        {
-            return candidates;
-        }
-
-        var policy = await LoadRelevancePolicyAsync();
-        var frontierHints = await LoadFrontierHintsAsync(candidates.Select(row => row.Url));
-
-        foreach (var row in candidates)
-        {
-            var hint = frontierHints.GetValueOrDefault(row.Url);
-            var score = ScorePageUrl(
-                row.Url,
-                hint.SourceUrl,
-                hint.Depth,
-                policy,
-                out var hasKeyword,
-                out var hasAllowedSuffix,
-                out var hasSameHost);
-
-            row.RelevanceScore = score;
-            row.HasKeywordEvidence = hasKeyword;
-            row.HasAllowedSuffixEvidence = hasAllowedSuffix;
-            row.HasSameHostEvidence = hasSameHost;
-            row.FrontierDepth = hint.Depth;
-        }
+        var candidates = await LoadPageSearchRowsAsync(searchTerm, pageType);
+        ApplyAssignment2Filters(candidates, assignment2ContentType, hasCleanedContent);
 
         var normalizedOrder = (orderBy ?? "latest").Trim().ToLowerInvariant();
         IEnumerable<PageSearchDto> ordered = normalizedOrder == "best_score"
@@ -125,7 +110,8 @@ public class PageService : IPageService
             var pattern = $"%{searchTerm.Trim()}%";
             query = query.Where(p =>
                 (p.Url != null && EF.Functions.ILike(p.Url, pattern)) ||
-                (p.HtmlContent != null && EF.Functions.ILike(p.HtmlContent, pattern))
+                (p.HtmlContent != null && EF.Functions.ILike(p.HtmlContent, pattern)) ||
+                (p.CleanedContent != null && EF.Functions.ILike(p.CleanedContent, pattern))
             );
         }
 
@@ -351,7 +337,18 @@ public class PageService : IPageService
     /// Get total count of search results for pagination
     /// Uses same filtering logic as SearchPagesAsync
     /// </summary>
-    public async Task<int> GetSearchResultsCountAsync(string? searchTerm, string? pageType)
+    public async Task<int> GetSearchResultsCountAsync(
+        string? searchTerm,
+        string? pageType,
+        string? assignment2ContentType = null,
+        bool? hasCleanedContent = null)
+    {
+        var rows = await LoadPageSearchRowsAsync(searchTerm, pageType);
+        ApplyAssignment2Filters(rows, assignment2ContentType, hasCleanedContent);
+        return rows.Count;
+    }
+
+    private async Task<List<PageSearchDto>> LoadPageSearchRowsAsync(string? searchTerm, string? pageType)
     {
         var query = _context.Pages.AsQueryable();
 
@@ -373,11 +370,100 @@ public class PageService : IPageService
             var pattern = $"%{searchTerm.Trim()}%";
             query = query.Where(p =>
                 (p.Url != null && EF.Functions.ILike(p.Url, pattern)) ||
-                (p.HtmlContent != null && EF.Functions.ILike(p.HtmlContent, pattern))
+                (p.HtmlContent != null && EF.Functions.ILike(p.HtmlContent, pattern)) ||
+                (p.CleanedContent != null && EF.Functions.ILike(p.CleanedContent, pattern))
             );
         }
 
-        return await query.CountAsync();
+        var candidates = await query
+            .Include(p => p.Site)
+            .Select(p => new PageSearchDto
+            {
+                Id = p.Id,
+                Url = p.Url ?? "",
+                PageType = p.PageTypeCode ?? "HTML",
+                HttpStatus = p.HttpStatusCode,
+                AccessedTime = p.AccessedTime,
+                SiteDomain = p.Site != null ? p.Site.Domain : null,
+                IsDuplicate = p.DuplicateOfPageId != null,
+            })
+            .ToListAsync();
+
+        if (candidates.Count == 0)
+        {
+            return candidates;
+        }
+
+        var policy = await LoadRelevancePolicyAsync();
+        var frontierHints = await LoadFrontierHintsAsync(candidates.Select(row => row.Url));
+        var assignment2Stats = await LoadAssignment2PageStatsAsync(candidates.Select(row => row.Id));
+
+        foreach (var row in candidates)
+        {
+            var hint = frontierHints.GetValueOrDefault(row.Url);
+            var score = ScorePageUrl(
+                row.Url,
+                hint.SourceUrl,
+                hint.Depth,
+                policy,
+                out var hasKeyword,
+                out var hasAllowedSuffix,
+                out var hasSameHost);
+
+            row.RelevanceScore = score;
+            row.HasKeywordEvidence = hasKeyword;
+            row.HasAllowedSuffixEvidence = hasAllowedSuffix;
+            row.HasSameHostEvidence = hasSameHost;
+            row.FrontierDepth = hint.Depth;
+
+            if (assignment2Stats.TryGetValue(row.Id, out var assignment2))
+            {
+                row.Assignment2ContentType = assignment2.ContentType;
+                row.HasCleanedContent = assignment2.CleanedContentLength > 0;
+                row.CleanedContentLength = assignment2.CleanedContentLength;
+                row.ShortSegmentCount = assignment2.ShortSegmentCount;
+                row.LongSegmentCount = assignment2.LongSegmentCount;
+            }
+        }
+
+        return candidates;
+    }
+
+    private static void ApplyAssignment2Filters(List<PageSearchDto> rows, string? assignment2ContentType, bool? hasCleanedContent)
+    {
+        var normalizedContentType = NormalizeAssignment2ContentTypeFilter(assignment2ContentType);
+        if (string.IsNullOrWhiteSpace(normalizedContentType) && !hasCleanedContent.HasValue)
+        {
+            return;
+        }
+
+        rows.RemoveAll(row =>
+        {
+            if (!string.IsNullOrWhiteSpace(normalizedContentType)
+                && !string.Equals(row.Assignment2ContentType, normalizedContentType, StringComparison.OrdinalIgnoreCase))
+            {
+                return true;
+            }
+
+            if (hasCleanedContent.HasValue && row.HasCleanedContent != hasCleanedContent.Value)
+            {
+                return true;
+            }
+
+            return false;
+        });
+    }
+
+    private static string NormalizeAssignment2ContentTypeFilter(string? assignment2ContentType)
+    {
+        return (assignment2ContentType ?? string.Empty).Trim().ToLowerInvariant() switch
+        {
+            "article" => "article",
+            "forum" => "forum",
+            "listing" => "listing",
+            "unknown" => "unknown",
+            _ => string.Empty,
+        };
     }
 
     public async Task<PageEvaluationSummaryDto> GetEvaluationSummaryAsync()
@@ -567,6 +653,25 @@ public class PageService : IPageService
         public string? SitemapContent { get; init; }
     }
 
+    private sealed class Assignment2PageStatsRow
+    {
+        public int PageId { get; init; }
+        public string ContentType { get; init; } = "unknown";
+        public int CleanedContentLength { get; init; }
+        public int ShortSegmentCount { get; init; }
+        public int LongSegmentCount { get; init; }
+    }
+
+    private sealed class Assignment2SiteMetricsRow
+    {
+        public int SiteId { get; init; }
+        public int CleanedPages { get; init; }
+        public int ArticlePages { get; init; }
+        public int ForumPages { get; init; }
+        public int ShortSegments { get; init; }
+        public int LongSegments { get; init; }
+    }
+
     private sealed class RelevancePolicySnapshot
     {
         public List<string> Keywords { get; init; } = new();
@@ -575,6 +680,113 @@ public class PageService : IPageService
         public double AllowedSuffixBoost { get; init; } = 20.0;
         public double KeywordBoost { get; init; } = 5.0;
         public double DepthPenalty { get; init; } = 0.2;
+    }
+
+    private async Task<Dictionary<int, Assignment2PageStatsRow>> LoadAssignment2PageStatsAsync(IEnumerable<int> pageIds)
+    {
+        var ids = pageIds
+            .Distinct()
+            .ToArray();
+        var result = new Dictionary<int, Assignment2PageStatsRow>();
+        if (ids.Length == 0)
+        {
+            return result;
+        }
+
+        await using var connection = new NpgsqlConnection(_context.Database.GetConnectionString());
+        await connection.OpenAsync();
+
+        var sql = $"""
+            {Assignment2SegmentStatsCteSql}
+            SELECT
+                p.id,
+                {Assignment2ContentTypeCaseSql} AS content_type,
+                COALESCE(length(nullif(p.cleaned_content, '')), 0)::int AS cleaned_length,
+                COALESCE(stats.short_count, 0)::int AS short_count,
+                COALESCE(stats.long_count, 0)::int AS long_count
+            FROM crawldb.page p
+            LEFT JOIN stats ON stats.page_id = p.id
+            WHERE p.id = ANY(@page_ids);
+            """;
+
+        await using var command = new NpgsqlCommand(sql, connection);
+        command.Parameters.Add("page_ids", NpgsqlDbType.Array | NpgsqlDbType.Integer).Value = ids;
+
+        await using var reader = await command.ExecuteReaderAsync();
+        while (await reader.ReadAsync())
+        {
+            var row = new Assignment2PageStatsRow
+            {
+                PageId = reader.GetInt32(0),
+                ContentType = reader.IsDBNull(1) ? "unknown" : reader.GetString(1),
+                CleanedContentLength = reader.IsDBNull(2) ? 0 : reader.GetInt32(2),
+                ShortSegmentCount = reader.IsDBNull(3) ? 0 : reader.GetInt32(3),
+                LongSegmentCount = reader.IsDBNull(4) ? 0 : reader.GetInt32(4),
+            };
+            result[row.PageId] = row;
+        }
+
+        return result;
+    }
+
+    private async Task<Dictionary<int, Assignment2SiteMetricsRow>> LoadAssignment2SiteMetricsAsync(IEnumerable<int> siteIds)
+    {
+        var ids = siteIds
+            .Distinct()
+            .ToArray();
+        var result = new Dictionary<int, Assignment2SiteMetricsRow>();
+        if (ids.Length == 0)
+        {
+            return result;
+        }
+
+        await using var connection = new NpgsqlConnection(_context.Database.GetConnectionString());
+        await connection.OpenAsync();
+
+        var sql = $"""
+            {Assignment2SegmentStatsCteSql}
+            SELECT
+                p.site_id,
+                COUNT(*) FILTER (
+                    WHERE p.page_type_code = 'HTML'
+                      AND p.cleaned_content IS NOT NULL
+                      AND length(p.cleaned_content) > 0
+                )::int AS cleaned_pages,
+                COUNT(*) FILTER (
+                    WHERE {Assignment2ContentTypeCaseSql} = 'article'
+                      AND COALESCE(stats.long_count, 0) > 0
+                )::int AS article_pages,
+                COUNT(*) FILTER (
+                    WHERE {Assignment2ContentTypeCaseSql} = 'forum'
+                      AND COALESCE(stats.long_count, 0) > 0
+                )::int AS forum_pages,
+                COALESCE(SUM(COALESCE(stats.short_count, 0)), 0)::int AS short_segments,
+                COALESCE(SUM(COALESCE(stats.long_count, 0)), 0)::int AS long_segments
+            FROM crawldb.page p
+            LEFT JOIN stats ON stats.page_id = p.id
+            WHERE p.site_id = ANY(@site_ids)
+            GROUP BY p.site_id;
+            """;
+
+        await using var command = new NpgsqlCommand(sql, connection);
+        command.Parameters.Add("site_ids", NpgsqlDbType.Array | NpgsqlDbType.Integer).Value = ids;
+
+        await using var reader = await command.ExecuteReaderAsync();
+        while (await reader.ReadAsync())
+        {
+            var row = new Assignment2SiteMetricsRow
+            {
+                SiteId = reader.IsDBNull(0) ? 0 : reader.GetInt32(0),
+                CleanedPages = reader.IsDBNull(1) ? 0 : reader.GetInt32(1),
+                ArticlePages = reader.IsDBNull(2) ? 0 : reader.GetInt32(2),
+                ForumPages = reader.IsDBNull(3) ? 0 : reader.GetInt32(3),
+                ShortSegments = reader.IsDBNull(4) ? 0 : reader.GetInt32(4),
+                LongSegments = reader.IsDBNull(5) ? 0 : reader.GetInt32(5),
+            };
+            result[row.SiteId] = row;
+        }
+
+        return result;
     }
 
     private async Task<Dictionary<string, FrontierHint>> LoadFrontierHintsAsync(IEnumerable<string> urls)
@@ -634,10 +846,13 @@ public class PageService : IPageService
                 "hospital", "bolnis", "bolnisnica",
                 "treatment", "zdravljenje",
                 "disease", "bolezen",
+                "symptom", "simptom", "simptomi",
+                "pregled", "diagno", "terap",
                 "cepl", "preven", "higi",
-                "fitness", "fitnes", "exercise", "training", "workout", "wellness", "nutrition", "prehrana", "vadba"
+                "forum", "vprasanje", "odgovor",
+                "nosec", "dojen", "otrok", "prehrana"
             ],
-            AllowedSuffixes = ["gov.si", "nijz.si", "kclj.si", "zdravljenjenadom.si"],
+            AllowedSuffixes = ["medover.zurnal24.si"],
         };
 
         try
@@ -864,6 +1079,7 @@ public class PageService : IPageService
             : await LoadFrontierHintsAsync(rows.Select(row => row.Url));
         var outboundCounts = await LoadSiteLinkCountsAsync(backlinksOnly: false);
         var backlinkCounts = await LoadSiteLinkCountsAsync(backlinksOnly: true);
+        var assignment2SiteMetrics = await LoadAssignment2SiteMetricsAsync(filteredSiteIds);
 
         var grouped = rows
             .GroupBy(row => new { row.SiteId, row.Domain })
@@ -902,6 +1118,7 @@ public class PageService : IPageService
             var top = scores.Count > 0 ? scores[^1] : 0;
             var pageCount = siteRows.Count;
             var relevanceScore = (average * 0.65) + (top * 0.35) + Math.Min(3.0, Math.Log10(pageCount + 1));
+            var pa2Metrics = assignment2SiteMetrics.GetValueOrDefault(site.SiteId);
 
             result.Add(new CollectedSiteSummaryDto
             {
@@ -917,6 +1134,11 @@ public class PageService : IPageService
                 LastPageAccessed = lastAccessed,
                 RobotsContent = site.RobotsContent,
                 SitemapContent = site.SitemapContent,
+                Assignment2CleanedPages = pa2Metrics?.CleanedPages ?? 0,
+                Assignment2ArticlePages = pa2Metrics?.ArticlePages ?? 0,
+                Assignment2ForumPages = pa2Metrics?.ForumPages ?? 0,
+                Assignment2ShortSegments = pa2Metrics?.ShortSegments ?? 0,
+                Assignment2LongSegments = pa2Metrics?.LongSegments ?? 0,
             });
         }
 
