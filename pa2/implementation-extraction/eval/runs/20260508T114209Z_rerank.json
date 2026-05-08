@@ -1,0 +1,255 @@
+﻿{
+  "timestamp": "2026-05-08T11:41:36.294272Z",
+  "embedding_model": "sentence-transformers/LaBSE",
+  "metric": "cosine",
+  "table": "page_segment_long",
+  "top_k": 5,
+  "rerank": true,
+  "rerank_model": "BAAI/bge-reranker-v2-m3",
+  "rerank_candidates": 10,
+  "intent_filter": "bad",
+  "corpus_fingerprint": "740231B10C88D629D02A90E01811A08D6F9FF317338A859B7CE865CBBEB3DBF3",
+  "queries": [
+    {
+      "label": "bad_1_ambiguous_pain",
+      "query": "Boli me",
+      "expected": "Too short and ambiguous; expected to return generic medical chatter.",
+      "initial": [
+        {
+          "page_id": 343,
+          "url": "https://medover.zurnal24.si/forum/tema/bownova-terapija-2-1506994/",
+          "score": 0.6670928100998879,
+          "preview": "Reply 13 | LucijaB | 09.08.2010 ob 17:20 Iz navodil Bowenove terapije: bole\u010Dine (po po\u0161kodbah, motnje v mi\u0161i\u010Dno-vezivnem sistemu vklu\u010Dno z miofascialnimi pro\u017Eilnimi to\u010Dkami, f i b r o m i a l g i ja)"
+        },
+        {
+          "page_id": 1760,
+          "url": "https://medover.zurnal24.si/napake-ki-jih-delamo-ko-nas-bolijo-sklepi-ali-hrbet/",
+          "score": 0.6782334255119213,
+          "preview": "je, da so pogosto kroni\u010Dne. Za vsako kroni\u010Dno bole\u010Dino pa velja, da jo je te\u017Eko odpraviti. Razlog je, da kroni\u010Dna bole\u010Dina postane avtonomna \u2013 \u017Eiv\u010Dne poti, ki prena\u0161ajo signal iz bole\u010Dih struktur v gl\u2026"
+        },
+        {
+          "page_id": 1521,
+          "url": "https://medover.zurnal24.si/kronicne-bolecine-so-mnogokrat-povezane-s-pomanjkanjem-teh-hranil/",
+          "score": 0.6865726037708026,
+          "preview": "Kroni\u010Dne bole\u010Dine so mnogokrat povezane s pomanjkanjem teh hranil To te\u017Eavo je pogosto la\u017Eje odpraviti, kot si mislite. \u201CKroni\u010Dna bole\u010Dina je pogost, kompleksen in mu\u010Den problem, ki ima globok vpliv n\u2026"
+        },
+        {
+          "page_id": 343,
+          "url": "https://medover.zurnal24.si/forum/tema/bownova-terapija-2-1506994/",
+          "score": 0.6947780847549438,
+          "preview": "tudi zanimala vse ljudi, ki imajo dolgotrajne bole\u010Dine in \u0161e niso na\u0161li terapije, ki jim bi lahko pomagala. Bownova terapija se je izkazala uspe\u0161na pri zdravljenju ali kontroli naslednjih motenj: \u0160por\u2026"
+        },
+        {
+          "page_id": 1623,
+          "url": "https://medover.zurnal24.si/trpi-vsak-peti-med-nami-to-so-nefarmakoloske-oblike-pomoci/",
+          "score": 0.7047426104545593,
+          "preview": "Trpi vsak peti med nami. To so nefarmakolo\u0161ke oblike pomo\u010Di Nefarmakolo\u0161ke mo\u017Enosti zdravljenja kroni\u010Dne bole\u010Dine: ne gre le za zmanj\u0161evanje bole\u010Dine, temve\u010D tudi tehnike, kako s kroni\u010Dno bole\u010Dino la\u017E\u2026"
+        }
+      ],
+      "rerank": [
+        {
+          "page_id": 1521,
+          "url": "https://medover.zurnal24.si/kronicne-bolecine-so-mnogokrat-povezane-s-pomanjkanjem-teh-hranil/",
+          "score": 0.6865726037708026,
+          "rerank_score": 0.2943144142627716,
+          "preview": "Kroni\u010Dne bole\u010Dine so mnogokrat povezane s pomanjkanjem teh hranil To te\u017Eavo je pogosto la\u017Eje odpraviti, kot si mislite. \u201CKroni\u010Dna bole\u010Dina je pogost, kompleksen in mu\u010Den problem, ki ima globok vpliv n\u2026",
+          "segment_text": "Kroni\u010Dne bole\u010Dine so mnogokrat povezane s pomanjkanjem teh hranil To te\u017Eavo je pogosto la\u017Eje odpraviti, kot si mislite. \u201CKroni\u010Dna bole\u010Dina je pogost, kompleksen in mu\u010Den problem, ki ima globok vpliv na posameznike in dru\u017Ebo. Pogosto se pojavi kot posledica bolezni ali po\u0161kodbe; vendar ni zgolj spremljajo\u010Di simptom, temve\u010D samostojno stanje s svojo medicinsko definicijo in taksonomijo. Preu\u010Devanje raz\u0161irjenosti in dejavnikov kroni\u010Dne bole\u010Dine nam omogo\u010Da razumevanje in obvladovanje problema na individualni in populacijski ravni. Ciljno usmerjene in ustrezne strategije prepre\u010Devanja in obvladovanja morajo upo\u0161tevati biolo\u0161ke, psiholo\u0161ke, socialno-demografske in \u017Eivljenjske dejavnike ter posledice bole\u010Dine,\u201D so o kroni\u010Dnih bole\u010Dinah zapisali na spletni strani National Library of Medicine, kjer tudi ugotavljajo, da se breme zaradi kroni\u010Dnih bole\u010Din pove\u010Duje. \u201C1,9 milijarde ljudi trpi zaradi ponavljajo\u010Dih se tenzijskih glavobolov, ki so najpogostej\u0161e simptomatsko kroni\u010Dno stanje. Glede na \u0161tevilo let, pre\u017Eivetih z invalidnostjo, so bole\u010Dine v kri\u017Eu in vratu dosledno vodilni vzroki invalidnosti po vsem svetu.\u201D Zdravila proti bole\u010Dinam pogosto nudijo le kratkoro\u010Dno olaj\u0161anje, operacije tudi, posegi v mnogih primerih niso niti mogo\u010Di. Obstaja pa novo upanje: Po mnenju raziskovalcev Univerze v Arizoni je kroni\u010Dna bole\u010Dina pogosto povezana s pomanjkanjem hranil \u2013 natan\u010Dneje, s pomanjkanjem dolo\u010Denih vitaminov in mineralov."
+        },
+        {
+          "page_id": 1760,
+          "url": "https://medover.zurnal24.si/napake-ki-jih-delamo-ko-nas-bolijo-sklepi-ali-hrbet/",
+          "score": 0.7071108098560084,
+          "rerank_score": 0.2238982617855072,
+          "preview": "Napake, ki jih delamo, ko nas bolijo sklepi ali hrbet Kako postopati v primeru bole\u010Din v sklepih ali hrbtu, da stanja ne poslab\u0161amo, temve\u010D pospe\u0161imo okrevanje? Odgovore smo poiskali pri specialistu f\u2026",
+          "segment_text": "Napake, ki jih delamo, ko nas bolijo sklepi ali hrbet Kako postopati v primeru bole\u010Din v sklepih ali hrbtu, da stanja ne poslab\u0161amo, temve\u010D pospe\u0161imo okrevanje? Odgovore smo poiskali pri specialistu fizikalne in rehabilitacijske medicine dr. Martinu Zorku, dr. med. , iz Klini\u010Dnega in\u0161tituta za medicino dela, prometa in \u0161porta . \u201CPoleg po\u0161kodb je pomemben vzrok za bole\u010Dine v sklepih, denimo v kolenih, gle\u017Enjih, kolkih, artroza oziroma obraba. Pomembno je, da ljudje kljub bole\u010Dinam ostanemo aktivni, saj nam sicer upade fizi\u010Dna zmogljivost oziroma mi\u0161i\u010Dna mo\u010D, s tem pa lahko sklep postane \u0161e manj stabilen in se te\u017Eava lahko \u0161e bolj poglobi,\u201D opozarja. \u201C Po drugi strani pa je potrebno izbrati tak\u0161ne vaje \u2013 po mo\u017Enosti pod nadzorom fizioterapevta \u2013 pri katerih se bole\u010Dina ne slab\u0161a. Slab\u0161anje bole\u010Dine ob vadbi lahko pomeni dodatno po\u0161kodbo sklepa in tudi mi\u0161ic ob bole\u010Dem gibanju ne moremo u\u010Dinkovito natrenirati \u201C. Kadar pride do po\u0161kodbe sklepa in bole\u010Dine niso prehude (\u010De so bole\u010Dine prehude je treba k zdravniku), dr. Zorko svetuje, da po\u010Divamo in prizadeti sklep nekaj dni hladimo preko tkanine vsaki dve uri po 15 minut. \u010Ce je mogo\u010De, naj bo pri tem prizadeti sklep dvignjen. Nato ga za\u010Dnemo postopno obremenjevati (pazimo, da ga ne obremenjujemo preve\u010D!). Po la\u017Ejih po\u0161kodbah ga lahko za\u010Dnemo obremenjevati \u017Ee po nekaj dneh, pri nekoliko te\u017Ejih pa po tednu ali dve tednih. Zelo primerni aktivnosti v takih primerih sta hoja po ravnem in kolesarjenje na sobnem kolesu."
+        },
+        {
+          "page_id": 1665,
+          "url": "https://medover.zurnal24.si/hernija-diska-vzroki-simptomi-zdravljenj/",
+          "score": 0.7106027352091369,
+          "rerank_score": 0.18507955968379974,
+          "preview": "sredi\u0161\u010Da plo\u0161\u010Dice. Hernija diska se lahko pojavi kjerkoli v hrbtenici, vendar je najpogostej\u0161a v spodnjem delu hrbta. Plo\u0161\u010Dica lahko za\u010Dne pritiskati na bli\u017Enje hrbteni\u010Dne \u017Eivce, med drugim tudi na is\u2026",
+          "segment_text": "sredi\u0161\u010Da plo\u0161\u010Dice. Hernija diska se lahko pojavi kjerkoli v hrbtenici, vendar je najpogostej\u0161a v spodnjem delu hrbta. Plo\u0161\u010Dica lahko za\u010Dne pritiskati na bli\u017Enje hrbteni\u010Dne \u017Eivce, med drugim tudi na ishiadi\u010Dni \u017Eivec, kar povzro\u010Di mo\u010Dno bole\u010Dino, ki se lahko \u0161iri po nogi. V za\u010Detni fazi se bole\u010Dina pogosto zdi povsem nedol\u017Ena. \u201CNa za\u010Detku so simptomi hernije diska zelo podobni simptomom nategnjene mi\u0161ice. Nelagodje se lahko pojavi nenadoma ali pa se razvija postopoma. Ker so mi\u0161i\u010Dni nategi pogosti in obi\u010Dajno niso resni, ljudje simptome pogosto prezrejo,\u201D je za Times of India Health povedal dr . Sanjay Kapoor , specialist za ortopedsko kirurgijo v bolni\u0161nici Manipal v Gurugramu. \u0160irjenje bole\u010Dine je pomemben opozorilni znak, saj nakazuje, da je vpleten tudi \u017Eivec. Ve\u010Dina hernij medvreten\u010Dne plo\u0161\u010Dice se pojavi v spodnjem delu hrbta, lahko pa prizadene tudi vratni del hrbtenice. Te\u017Eave obi\u010Dajno prizadenejo le eno stran telesa, simptomi hernije diska pa so odvisni predvsem od tega, kje se plo\u0161\u010Dica nahaja in ali pritiska na \u017Eivec. Na portalu Mayo Clinic med simptome pri\u0161tevajo: Dr. Kapoor pojasnjuje, da v nekaterih primerih zdrs medvreten\u010Dne plo\u0161\u010Dice ne povzro\u010Da opaznih te\u017Eav, zato je pogosto spregledan ali v zgodnji fazi napa\u010Dno diagnosticiran. Poleg tega poudarja, da pravo\u010Dasno prepoznavanje simptomov hernije diska lahko prepre\u010Di dolgotrajne bole\u010Dine in v redkih primerih tudi trajno po\u0161kodbo \u017Eivcev. Hernija diska je najpogosteje posledica postopne obrabe, povezane s staranjem. Ob\u010Dasno je razlog tudi uporaba hrbtnih mi\u0161ic pri dvigovanju te\u017Ekih predmetov, nenaden zasuk, padec ali udarec v hrbet."
+        },
+        {
+          "page_id": 1623,
+          "url": "https://medover.zurnal24.si/trpi-vsak-peti-med-nami-to-so-nefarmakoloske-oblike-pomoci/",
+          "score": 0.7047426104545593,
+          "rerank_score": 0.11491751670837402,
+          "preview": "Trpi vsak peti med nami. To so nefarmakolo\u0161ke oblike pomo\u010Di Nefarmakolo\u0161ke mo\u017Enosti zdravljenja kroni\u010Dne bole\u010Dine: ne gre le za zmanj\u0161evanje bole\u010Dine, temve\u010D tudi tehnike, kako s kroni\u010Dno bole\u010Dino la\u017E\u2026",
+          "segment_text": "Trpi vsak peti med nami. To so nefarmakolo\u0161ke oblike pomo\u010Di Nefarmakolo\u0161ke mo\u017Enosti zdravljenja kroni\u010Dne bole\u010Dine: ne gre le za zmanj\u0161evanje bole\u010Dine, temve\u010D tudi tehnike, kako s kroni\u010Dno bole\u010Dino la\u017Eje \u017Eiveti. Tako pravi predsednica Slovenskega zdru\u017Eenja za zdravljenje bole\u010Dine Bo\u017Eena Jerkovi\u0107 Para\u0107, dr. med., ki poudarja, da je kroni\u010Dna bole\u010Dina bio-psiho-socialna te\u017Eava. \u201CKroni\u010Dna bole\u010Dina vpliva na \u010Dlovekovo psiholo\u0161ko po\u010Dutje, pa tudi njegovo delo, odnose z ljudmi oziroma dru\u017Eabno \u017Eivljenje, prosti \u010Das in spanje. \u201C Po podatkih raziskave Kroni\u010Dna bole\u010Dina v Sloveniji*, ki jo je izvedlo Slovensko zdru\u017Eenje za zdravljenje bole\u010Dine leta 2019, za kroni\u010Dno bole\u010Dino trpi 22 odstotkov Slovencev: 27 odstotkov \u017Eensk in 18 odstotkov mo\u0161kih. Sogovornica pove, da o zdravljenju kroni\u010Dne bole\u010Dine z nefarmakolo\u0161kimi pristopi odlo\u010Da zdravnik algolog \u2013 specialist, ki se ukvarja z zdravljenjem bole\u010Dine. Pri tem je zelo pomembna interdisciplinarna obravnava z razli\u010Dnimi specialisti na sekundarni in terciarni ravni zdravstvene obravnave, ki skupaj z bolnikom, ki ima kroni\u010Dno bole\u010Dino, naredi na\u010Drt zdravljenja. Ta lahko zajema tudi operativne posege, blokade in druge posege, ki delujejo na dolo\u010Den \u017Eiv\u010Dni plete\u017E oziroma podro\u010Dje, ki o\u017Eiv\u010Duje ob\u010Dutek bole\u010Dine. \u201CV Sloveniji je zaenkrat s strani dr\u017Eave podprt le en interdisiciplinarni program za zdravljenje bole\u010Dine, in to je v rehabilitacijskem centru URI- So\u010Da, ki je zelo dober, vendar imajo precej dolge \u010Dakalne dobe,\u201D pravi Bo\u017Eena Jerkovi\u0107 Para\u0107. Dodaja, da se v Slovenskem zdru\u017Eenju za zdravljenje bole\u010Dine zavzemajo, da bi se taki programi uvedli v vseh bolni\u0161nicah v mre\u017Ei javnega zdravstva po Sloveniji."
+        },
+        {
+          "page_id": 1755,
+          "url": "https://medover.zurnal24.si/zakaj-se-pozimi-poslabsajo-bolecine-v-sklepih/",
+          "score": 0.708111745602592,
+          "rerank_score": 0.09802142530679703,
+          "preview": "Zakaj se pozimi poslab\u0161ajo bole\u010Dine v sklepih? Hladno vreme pogosto spremljajo bole\u010Dine v sklepih. Je to le naklju\u010Dje ali obstaja povezava? \u201CPozimi so lahko prizadeti vsi sklepi, vendar so bole\u010Dine po\u2026",
+          "segment_text": "Zakaj se pozimi poslab\u0161ajo bole\u010Dine v sklepih? Hladno vreme pogosto spremljajo bole\u010Dine v sklepih. Je to le naklju\u010Dje ali obstaja povezava? \u201CPozimi so lahko prizadeti vsi sklepi, vendar so bole\u010Dine pogosto bolj izrazite v sklepih z bolj zapleteno zgradbo in tistih, ki so najbolj oddaljeni od trupa \u2013 predvsem v rokah in stopalih, \u201D je za The Independent pojasnil strokovnjak za rehabilitacijo Jon Taberner v Nuffield Health. \u201C \u010Ce so sklepi \u017Ee po\u0161kodovani ali obrabljeni, se bole\u010Dine v hladnem vremenu obi\u010Dajno \u0161e okrepijo. \u201C \u201CZaradi mraza smo pozimi pogosto manj aktivni \u2013 tako na prostem kot notri, \u201D pravi londonski fizioterapevt Ben Lombard . Pojasni, da je posledica zmanj\u0161ane telesne dejavnosti lahko manj sklepne teko\u010Dine in oslabelost mi\u0161ic; oboje pa lahko prispeva k nastanku bole\u010Din v sklepih in njihovi togosti. \u201CPozimi je pogosto ni\u017Eji zra\u010Dni tlak, zaradi \u010Desar lahko mi\u0161ice in kite bolj pritiskajo na sklepe, kar lahko prispeva k bole\u010Dinam,\u201D razlaga Lombard. \u201CKo se ohladi, telo usmeri ve\u010D krvi v vitalne organe, da jih za\u0161\u010Diti in ohrani tople. Posledi\u010Dno je v okon\u010Dinah slab\u0161a prekrvavitev, s tem tudi slab\u0161a prehranjenost s hranili ter slab\u0161a \u201Cpodmazanost\u201D sklepov \u2013 vse to pa lahko pove\u010Da bole\u010Dino,\u201D pojasnjuje Taberner. \u201CBole\u010Dine v sklepih pozimi lahko prizadenejo ljudi vseh starosti, vendar se s staranjem pogosteje pojavljajo,\u201D pravi Taberner. Dodaja, da je to posledica naravne obrabe sklepov, ki se pojavi z leti. \u201CObraba je pogostej\u0161a pri ljudeh, ki so dolga leta opravljali fizi\u010Dno delo oziroma aktivnosti, pri katerih so sklepe mo\u010Dno obremenjevali.\u201D"
+        }
+      ]
+    },
+    {
+      "label": "bad_2_out_of_domain_legal",
+      "query": "Kak\u0161ne so pravne posledice nepla\u010Dila prometne kazni v Sloveniji?",
+      "expected": "Out-of-domain (legal). Expected to return loosely related civic/administrative content if any.",
+      "initial": [
+        {
+          "page_id": 2069,
+          "url": "https://medover.zurnal24.si/zasvojenost-preventiva-je-bolj-ucinkovita-od-kurative/",
+          "score": 0.6763290377055451,
+          "preview": "Ljudska univerza Nova Gorica \u2026) kot tudi programe, projekte in ostale aktivnosti \u0161tevilnih vladnih in nevladnih organizacij (center za socialno delo, NVO na podro\u010Dju \u0161porta, mladine, socialnega varstv\u2026"
+        },
+        {
+          "page_id": 1868,
+          "url": "https://medover.zurnal24.si/ko-obdarujete-otroke-obdarujte-odgovorno/",
+          "score": 0.6904771739528873,
+          "preview": "video vsebine, brez strukture in nadzora, se njegovi mo\u017Egani za\u010Dnejo prilagajati na ni\u017Ejo stopnjo stimulacije iz resni\u010Dnega sveta .\u00AB Da bi to prepre\u010Dili, Kramli svetuje, naj star\u0161i, vzgojitelji in dru\u2026"
+        },
+        {
+          "page_id": 2069,
+          "url": "https://medover.zurnal24.si/zasvojenost-preventiva-je-bolj-ucinkovita-od-kurative/",
+          "score": 0.6985930024738904,
+          "preview": "aktivnosti za \u0161ir\u0161o javnost. Ko sem v lu\u010Di novembrske akcije \u2013 ob mesecu prepre\u010Devanja odvisnosti v MONG \u2013 govorila z direktorico Mladinskega centra in z vodjo Centra za zdravljenje odvisnosti, sta ob\u2026"
+        },
+        {
+          "page_id": 333,
+          "url": "https://medover.zurnal24.si/forum/tema/iscem-partnerko-za-resno-zvezo-6-22317631/",
+          "score": 0.7018882156543855,
+          "preview": "Reply 1 | Skepsa | 04.12.2022 ob 23:21 toksi\u010Dno?"
+        },
+        {
+          "page_id": 2003,
+          "url": "https://medover.zurnal24.si/poletje-in-solske-obveznosti-da-koliko-ali-sploh-ne/",
+          "score": 0.7077570259571055,
+          "preview": "ta nagrada ne pomeni toliko, kot si mislijo star\u0161i. V kolikor se star\u0161i odlo\u010Dijo za nagrado pa naj bo ta zaslu\u017Eena in dobro osmi\u0161ljena. Kaj, zakaj in s kak\u0161nim namenom. \u010Ce ste se vnaprej dogovorili za\u2026"
+        }
+      ],
+      "rerank": [
+        {
+          "page_id": 307,
+          "url": "https://medover.zurnal24.si/forum/tema/sedenje-spredaj-2065677/",
+          "score": 0.7277033166708534,
+          "rerank_score": 5.286045779939741e-05,
+          "preview": "otroka. \u0160tetje ustrezne pripetosti otrok v osebnih avtomobilih v Sloveniji v letu 2002 pa je pokazalo, da niti polovica star\u0161ev ne poskrbi za varno vo\u017Enjo svojih otrok. Kaj lahko naredimo? \u2022 Otroke v\u2026",
+          "segment_text": "otroka. \u0160tetje ustrezne pripetosti otrok v osebnih avtomobilih v Sloveniji v letu 2002 pa je pokazalo, da niti polovica star\u0161ev ne poskrbi za varno vo\u017Enjo svojih otrok. Kaj lahko naredimo? \u2022 Otroke v avtomobilu vedno vozimo name\u0161\u010Dene v otro\u0161kih varnostnih sede\u017Eih. Tudi pri najkraj\u0161ih vo\u017Enjah se prepri\u010Dajmo, da so vsi v avtomobilu pripeti z varnostnimi pasovi. Sami bodimo zgled. \u2022 Dojen\u010Dka nikoli ne vozimo name\u0161\u010Denega v zgornjem delu vozi\u010Dka ali v mehki prenosni torbi, tudi pri najkraj\u0161ih vo\u017Enjah ne. \u2022 Pri nakupu izberemo sede\u017E, ki ustreza otrokovi starosti, velikosti in te\u017Ei. Sede\u017E mora biti homologiran t.j. imeti mora oznako ECE-R 44/04, ki potrjuje, je sede\u017E izdelan v skladu z najnovej\u0161imi varnostnimi predpisi Evropske unije. Pomembno je tudi, katere sede\u017Ee priporo\u010Da proizvajalec na\u0161ega avtomobila, saj se vseh tipov sede\u017Eev ne da dobro pritrditi v vsak avto. \u2022 Pri nabavi rabljenega sede\u017Ea bodimo previdni. Zavrnimo sede\u017E, ki je star ve\u010D kot 5 let ali je bil udele\u017Een v prometni nezgodi. Prav tako se ne odlo\u010Dimo za sede\u017E, ki mu manjkajo deli ali nima oznake proizvajalca o datumu izdelave in \u0161tevilki modela. Pri proizvajalcu preverimo, ali je bil tak tip sede\u017Ea zaradi neustrezne varnosti v zadnjih letih s prepovedjo izlo\u010Den iz prodaje."
+        },
+        {
+          "page_id": 2003,
+          "url": "https://medover.zurnal24.si/poletje-in-solske-obveznosti-da-koliko-ali-sploh-ne/",
+          "score": 0.7077570259571055,
+          "rerank_score": 3.605177698773332e-05,
+          "preview": "ta nagrada ne pomeni toliko, kot si mislijo star\u0161i. V kolikor se star\u0161i odlo\u010Dijo za nagrado pa naj bo ta zaslu\u017Eena in dobro osmi\u0161ljena. Kaj, zakaj in s kak\u0161nim namenom. \u010Ce ste se vnaprej dogovorili za\u2026",
+          "segment_text": "ta nagrada ne pomeni toliko, kot si mislijo star\u0161i. V kolikor se star\u0161i odlo\u010Dijo za nagrado pa naj bo ta zaslu\u017Eena in dobro osmi\u0161ljena. Kaj, zakaj in s kak\u0161nim namenom. \u010Ce ste se vnaprej dogovorili za pogoje, kaj mora otrok dose\u010Di in kaj to\u010Dno bo nagrada, se tega tudi dr\u017Eite. Vpliv zapiranja \u0161ol in dru\u017Ebe se \u0161e vedno pozna med u\u010Denci, oziroma \u010De smo natan\u010Dni, se \u0161ele sedaj res ka\u017Eejo posledice zapiranja \u0161ol in dru\u017Ebe v vsej svoji razse\u017Enosti. Na \u0161oli opa\u017Eamo porast dru\u017Einskih stisk, ki so se zaradi zaprtja dru\u017Ebe in dru\u017Ein potencirale. Vedno ve\u010D je zaradi tega stisk tudi pri otrocih. Predvsem se to ka\u017Ee na podro\u010Dju \u010Dustveno-vedenjskih motenj, ki so v porastu, u\u010Dne neuspe\u0161nosti, ki je pogosto vzro\u010Dno-posledi\u010Dno povezana s \u010Dustveno-vedenjskimi motnjami, in pa slab\u0161e socializacije, ki je povezna z obema prej omenjenima podro\u010Djema."
+        },
+        {
+          "page_id": 1867,
+          "url": "https://medover.zurnal24.si/mladi-in-tveganje-za-zasvojenost-z-igrami-na-sreco-kaj-pravijo-najnovejse-raziskave/",
+          "score": 0.7099327868183123,
+          "rerank_score": 2.7902993679163046e-05,
+          "preview": "Najbolj ogro\u017Eeni so mladi v Severni Ameriki (33,7 %), Zahodni Evropi (26,6 %), Vzhodni Evropi (21,9 %), Afriki (18,9 %), nekoliko manj pa v Vzhodni in JV Azija (10,9 %) in Avstraliji / Novi Zelandiji\u2026",
+          "segment_text": "Najbolj ogro\u017Eeni so mladi v Severni Ameriki (33,7 %), Zahodni Evropi (26,6 %), Vzhodni Evropi (21,9 %), Afriki (18,9 %), nekoliko manj pa v Vzhodni in JV Azija (10,9 %) in Avstraliji / Novi Zelandiji (9,4 %). Najpogostej\u0161i razlogi po podatkih evropskih raziskav ka\u017Eejo, zakaj mladi igrajo igre na sre\u010Do: Mladostni\u0161ko igranje in sodelovanje v problemati\u010Dnih vsebinah lahko vodi v: Raziskave ka\u017Eejo, da so u\u010Dinkoviti programi za otroke, mladostnike in mlade odrasle do 25. leta interaktivni programi in delavnice (ne le predavanja), ki vklju\u010Dujejo ve\u010D metod (delavnice, igre, diskusije), temeljijo na teoriji in strokovnih standardih, jih izvajajo usposobljeni strokovnjaki in so prilagojeni razvojnim zna\u010Dilnostim mladih. Tak\u0161ne programe v Sloveniji izvaja tudi Miha Kramli , ki ozave\u0161\u010Da otroke, mlade ter njihove skrbnike o dejavnikih, ki lahko vodijo do nekemi\u010Dnih zasvojenosti. Predstavili smo ga v \u010Dlanku Odvisnost star\u0161i nehote tlakujejo \u017Ee v zibelki . Mladi so danes izpostavljeni igram na sre\u010Do na na\u010Dine, ki jih prej\u0161nje generacije niso poznale \u2013 preko telefonov, ra\u010Dunalni\u0161kih iger in dru\u017Ebenih omre\u017Eij, ki so odprto dostopni. Tovrstne igre in ponudbe se agresivno ogla\u0161ujejo in mladi so jim izpostavljeni na vsakem koraku. \u010Ceprav so igre na sre\u010Do zakonsko omejene na odrasle in vsako leto potekajo tudi osve\u0161\u010Devalne akcije (primer: Igre na sre\u010Do naj igrajo le odrasli ) podatki, izpostavljeni v raziskavah jasno ka\u017Eejo, da mladostniki redno sodelujejo v hazardiranju, pogosto brez nadzora ali zavedanja o tveganjih."
+        },
+        {
+          "page_id": 2069,
+          "url": "https://medover.zurnal24.si/zasvojenost-preventiva-je-bolj-ucinkovita-od-kurative/",
+          "score": 0.7130186428157452,
+          "rerank_score": 2.496837441867683e-05,
+          "preview": "primarne preventive, namenjene naj\u0161ir\u0161i populaciji, kot so u\u010Denci, dijaki, star\u0161i, strokovni kader, zaposleni, prek nizkopra\u017Enih in visokopra\u017Enih programov do podpore reintegracijskim programom. Tako\u2026",
+          "segment_text": "primarne preventive, namenjene naj\u0161ir\u0161i populaciji, kot so u\u010Denci, dijaki, star\u0161i, strokovni kader, zaposleni, prek nizkopra\u017Enih in visokopra\u017Enih programov do podpore reintegracijskim programom. Tako mo\u010Dno vnemo na tem podro\u010Dju pripisujemo strokovnjakom, ki sodelujejo, ter predvsem dobremu sodelovanju razli\u010Dnih organizacij. Zakaj je tudi na tem podro\u010Dju preventiva veliko bolj u\u010Dinkovita od kurative? Preventiva je bolj u\u010Dinkovita od kurative, ker se na ta na\u010Din pravo\u010Dasno, strokovno, z razli\u010Dnimi prijemi ciljno naslavlja posamezne ciljne skupine o \u0161kodljivih u\u010Dinkih posameznih zasvojenosti. Preventiva se izvaja v obliki mladinskih delavnic, v okviru katerih se na mladim primeren na\u010Din podaja vsebine, ki so zanje aktualne v tem \u017Eivljenjskem obdobju. Organizirana so bila predavanja za star\u0161e, akcije, v katere smo vklju\u010Dili osnovno\u0161olce iz mestne ob\u010Dine. Na opisane na\u010Dine posku\u0161amo zajeti v aktivnosti naj\u0161ir\u0161o populacijo ter na zabaven, pou\u010Den, starosti primeren na\u010Din predstaviti vsebine in pasti, ki bi lahko vodile v zasvojenosti. Katera so bolj vidna prizadevanja na tem podro\u010Dju iz preteklih let \u2013 kaj bi vi osebno najbolj izpostavili?"
+        },
+        {
+          "page_id": 2069,
+          "url": "https://medover.zurnal24.si/zasvojenost-preventiva-je-bolj-ucinkovita-od-kurative/",
+          "score": 0.6763290377055451,
+          "rerank_score": 2.1528427168959752e-05,
+          "preview": "Ljudska univerza Nova Gorica \u2026) kot tudi programe, projekte in ostale aktivnosti \u0161tevilnih vladnih in nevladnih organizacij (center za socialno delo, NVO na podro\u010Dju \u0161porta, mladine, socialnega varstv\u2026",
+          "segment_text": "Ljudska univerza Nova Gorica \u2026) kot tudi programe, projekte in ostale aktivnosti \u0161tevilnih vladnih in nevladnih organizacij (center za socialno delo, NVO na podro\u010Dju \u0161porta, mladine, socialnega varstva, zdravstva \u2026). Za omenjene aktivnosti so vsekakor potrebna tudi sredstva. Kolik\u0161na in od kod jih \u010Drpate? Koliko jih gre v ta namen? Mestna ob\u010Dina Nova Gorica je v letu 2021 za delovanje programov vladnih in nevladnih organizacij, ki delujejo na podro\u010Dju prepovedanih drog, namenila 57.439,80 evra. V ta namen je namenila tudi nefinan\u010Dna sredstva v obliki oddaje lastnih prostorov v brezpla\u010Dno uporabo. Kako \u0161iroka je mre\u017Ea akterjev, ki soustvarja in pomaga pri tovrstnih aktivnostih v MONG? Bistveno je, da mre\u017Ea pokriva preventivne aktivnosti, namenjene naj\u0161ir\u0161emu krogu (u\u010Denci, dijaki, star\u0161i, pedago\u0161ki kader \u2026), kot tudi skupine, ki se \u017Ee sre\u010Dujejo z nekimi te\u017Eavami v odra\u0161\u010Danju, eksperimentirajo s prepovedanimi substancami, do uporabnikov prepovedanih drog (nizkopra\u017Eni in visokopra\u017Eni programi) in reintegracijskih programov, npr. za tiste, ki se vra\u010Dajo z zdravljenja in posku\u0161ajo na novo za\u017Eiveti. Je MONG varna ob\u010Dina za vzgajanje otrok? Vse zgoraj navedeno se izvaja s ciljem varnega in kakovostnega \u017Eivljenja vseh na\u0161ih ob\u010Danov, bodisi s ponudbo razli\u010Dnih programov kot v smislu ustreznega okolja za \u017Eivljenje. Na podro\u010Dju prepre\u010Devanja razli\u010Dnih oblik zasvojenosti je treba z aktivnostmi za\u010Deti \u017Ee zelo zgodaj, tako za otroke kot njihove star\u0161e, da so slednji opremljeni z informacijami, kateri dejavniki lahko vodijo v \u0161kodljiva ravnanja. Otrokom v mestni ob\u010Dini posebno pozornost namenjamo tudi v okviru projekta \u2018Nova Gorica otrokom prijazno Unicefovo mesto\u2019."
+        }
+      ]
+    },
+    {
+      "label": "bad_3_acronym_no_context",
+      "query": "ATM",
+      "expected": "Acronym with multiple meanings (medicine \u002B finance). Expected to surface unrelated content; reranker should at least prefer medical interpretations if any segment matches.",
+      "initial": [
+        {
+          "page_id": 448,
+          "url": "https://medover.zurnal24.si/forum/tema/kako-ste-se-postavile-na-noge-3147606/",
+          "score": 0.6789581967021059,
+          "preview": "vedno ko pa potrebuje denar, molze njo. Zanimivo, do oceta je spostljiv. Skoraj prepricana sem, da ima MOM, narcisticno usmerjen. Hkrati je alkoholik, sam seveda ne vidi tezav, pri nicemer. Pije ker m\u2026"
+        },
+        {
+          "page_id": 1870,
+          "url": "https://medover.zurnal24.si/ko-se-hec-spremeni-v-odvisnost-pot-iz-zasvojenosti-z-igrami-na-sreco/",
+          "score": 0.7200224900205446,
+          "preview": "da imam vse pod nadzorom, da lahko kadar koli neham. [\u2026] V svojih dvajsetih in tridesetih sem na\u0161la novo tola\u017Ebo v nakupovanju. Ni\u010D ni bilo lep\u0161ega kot ob\u010Dutek, ko sem stala pred blagajno z novimi obl\u2026"
+        },
+        {
+          "page_id": 339,
+          "url": "https://medover.zurnal24.si/forum/tema/klepetalnica-za-starejse-2274881/",
+          "score": 0.7427429267474481,
+          "preview": "Reply 8 | gramoznica | 30.05.2009 ob 20:30 Hm, meni ni (vsaj zaenkrat nikoli dolg\u010Das), imam nekaj let ve\u010D kot ti, mo\u017Ea velikega ljubitlja planin, le redko grem z njim v hribe, imam poro\u010Denega sina, ni\u2026"
+        },
+        {
+          "page_id": 381,
+          "url": "https://medover.zurnal24.si/forum/tema/verjamete-v-zivljenje-po-smrti-2248534/",
+          "score": 0.7450423316644872,
+          "preview": "Reply 8 | bati | 24.09.2008 ob 14:46 ja nekaj je na tem\u2026.po smrti mojega brata,\u010Deprav te besede te\u0161ko izgovorim ker preve\u010D v prsih me boli\u2026jaz sem enkrat iskala njegovo knjigo ki sem jo samo jaz sprav\u2026"
+        },
+        {
+          "page_id": 339,
+          "url": "https://medover.zurnal24.si/forum/tema/klepetalnica-za-starejse-2274881/",
+          "score": 0.747962050322108,
+          "preview": "Reply 5 | klepetulja | 08.08.2008 ob 06:59 Na chatih je problem, ker te\u017Eko dobi\u0161 \u017Eensko sogovornico, dobi\u0161 pa \u2013 z veliko sre\u010De \u2013 \u010Disto prijetne mo\u0161ke sogovornike tudi tvojih let. Ok, ve\u010Dina jih i\u0161\u010De a\u2026"
+        }
+      ],
+      "rerank": [
+        {
+          "page_id": 273,
+          "url": "https://medover.zurnal24.si/forum/tema/avtizem-2-2843827/",
+          "score": 0.7529753441258645,
+          "rerank_score": 0.02428284101188183,
+          "preview": "Reply 8 | TetaM | 01.10.2015 ob 10:07 Pozdravljeni, o avtizmu je res veliko napisanega, kar pripomore star\u0161em, da la\u017Eje ugotovijo prve znake, ki bi utegnili nakazovati na avtizem, a je vendarle zelo t\u2026",
+          "segment_text": "Reply 8 | TetaM | 01.10.2015 ob 10:07 Pozdravljeni, o avtizmu je res veliko napisanega, kar pripomore star\u0161em, da la\u017Eje ugotovijo prve znake, ki bi utegnili nakazovati na avtizem, a je vendarle zelo te\u017Eko lo\u010Diti, kaj je tisto, ki je lahko povsem obi\u010Dajno in spremenljivo stanje, kaj pa bi lahko nakazovalo na te\u017Eave v razvoju. Tako je tudi pri nas. V dru\u017Eini imamo dve leti in dva meseca starega fanti\u010Da (moj ne\u010Dak), ki je zelo zelo sr\u010Dkan fantek, a me pri\u010Denja resno skrbeti, da njegov razvoj ne poteka tako, kot bi moral. Na sum avtizma sem pomislila \u017Ee pred meseci, ko okoli enega leta preprosto ni izvajal obi\u010Dajnih stvari za leto dni starega otroka ( ni kazal s prstkom, ni vokaliziral, se ni odzvival na ime).. pa sem nekako opazovala in si mislila, da je \u0161e majhen, da ima \u0161e \u010Das,.. meseci so minevali, napredka pa ni bilo videti. Naj omenim, da v dru\u017Eini nih\u010De ni\u010Desar ni posumil in da njegovi star\u0161i niso ravno dovzetni za mnenja drugih ljudi. Od tod tudi moja bojazen, da bi izustila nekaj, kar bi se izkazalo kot napa\u010Dno in bi si kasneje o\u010Ditala, a \u0161e bolj bi si o\u010Ditala, \u010De bi se izkazalo kot resnica in bi na\u0161ega fanti\u010Dka prikraj\u0161ali za \u010Dim bolj zgodno diagnozo in ustrezno pomo\u010D."
+        },
+        {
+          "page_id": 283,
+          "url": "https://medover.zurnal24.si/forum/tema/partnerjeva-druzina-2568551/",
+          "score": 0.7569150022369603,
+          "rerank_score": 0.01850251480937004,
+          "preview": "\u0161lo vse tako hitro in razmi\u0161ljala sem, da si je dekle na\u0161el zato, ker je videl, kako je njegov brat sre\u010Den v ljubezni in si je tudi sam tega \u017Eelel. Vendar me je \u017Ee od samega za\u010Detka nekaj motilo in ni\u2026",
+          "segment_text": "\u0161lo vse tako hitro in razmi\u0161ljala sem, da si je dekle na\u0161el zato, ker je videl, kako je njegov brat sre\u010Den v ljubezni in si je tudi sam tega \u017Eelel. Vendar me je \u017Ee od samega za\u010Detka nekaj motilo in nisem si znala razlo\u017Eiti, zakaj gre. Te slabe ob\u010Dutke sem potiskala na stran. Obsojala sem se, da sem ljubosumna in da se bojim, da me bo to dekle izrinilo, da bo njunim star\u0161em (star\u0161em mojega fanta in njegovega brata) ljub\u0161a od mene. Nakar je pri\u0161el trenutek, ko mi je fantov brat predstavil svojo punco. Bila je zelo hladna do mene, dobila sem ob\u010Dutek, da me ne mara, vendar se mi je zdelo sme\u0161no, saj me sploh ne pozna. Slabi ob\u010Dutki v meni so nara\u0161\u010Dali in ni\u010D dobrega nisem slutila v zvezi z njo. Fantu se nisem upala ni\u010Desar omeniti, saj sem se bala njegovega odziva, da me ne bi razumel. Tako je \u010Das tekel. Fantov brat je punco predstavil svojim star\u0161em in moram priznati, da sem bila takrat zelo ljubosumna nanjo. Vendar je \u010Das pokazal, da sem pri fantovih star\u0161ih \u0161e vedno na prvem mestu in da sem jim ljub\u0161a od nje. Pa mi to ni dalo zado\u0161\u010Denja, kar zasmilila se mi je, ker si nisem \u017Eelela biti na njenem mestu. \u010Cas pa je tekel in te\u017Eave so se stopnjevale."
+        },
+        {
+          "page_id": 289,
+          "url": "https://medover.zurnal24.si/forum/tema/dolga-zgodba-male-puncke-1-3064069/",
+          "score": 0.7502381279851652,
+          "rerank_score": 0.0039051237981766462,
+          "preview": "zgodilo, \u010De se bi uprla, nisem vedela kako naj se uprem, stara sem bila 11 let on pa mo\u010Dan. Zakaj se nisem uprla, zakaj nisem pobegnila, zakaj nisem nikomur povedala. V\u010Dasih se mi zdi , da sem bila ko\u2026",
+          "segment_text": "zgodilo, \u010De se bi uprla, nisem vedela kako naj se uprem, stara sem bila 11 let on pa mo\u010Dan. Zakaj se nisem uprla, zakaj nisem pobegnila, zakaj nisem nikomur povedala. V\u010Dasih se mi zdi , da sem bila kot otrok bolj neumna (zdaj se do\u017Eivljam kot inteligentno osebo) Ne znam opisati ob\u010Dutkov neprijetnosti, strahu, nelagodja, sramu, za nekatere ob\u010Dutke sploh ne poznam imena. V tisti hi\u0161i je bil vsak dan zame nelagoden, poln vpra\u0161anj, kaj mi prinese naslednji trenutek. Nekomu sem morala zaupati. Toda s takimi besedami, realno in iskreno je prvi\u010D zapisano na tem listu, nobena u\u0161esa tega \u0161e niso sli\u0161ala. V \u0161oli sem eni prijateljici povedala nekaj v tem smislu, da je moj o\u010Dim delal z mano \u00BBtiste stvari\u00AB, ta pa je povedala drugi, in druga spet naprej. Tri pametne so\u0161olke so rekle, da moram povedati mami, \u010De ji ne morem, da ji bodo one. Kot sprogramirana sem vsrkala navodila in doma rekla mami, da mora naslednji dan v \u0161olo, da ji bodo moje so\u0161olke nekaj povedale. Silila je v mene, dokljer nisem s cmokom v grlu rekla, da me je njen mo\u017E posilil. Sledila je panika, pa njeni grozljivi pogledi, pa kreganje doma, in o\u010Dima sem se grozno bala, kaj mi bo naredil, ker sem povedala."
+        },
+        {
+          "page_id": 1870,
+          "url": "https://medover.zurnal24.si/ko-se-hec-spremeni-v-odvisnost-pot-iz-zasvojenosti-z-igrami-na-sreco/",
+          "score": 0.7200224900205446,
+          "rerank_score": 0.001368229161016643,
+          "preview": "da imam vse pod nadzorom, da lahko kadar koli neham. [\u2026] V svojih dvajsetih in tridesetih sem na\u0161la novo tola\u017Ebo v nakupovanju. Ni\u010D ni bilo lep\u0161ega kot ob\u010Dutek, ko sem stala pred blagajno z novimi obl\u2026",
+          "segment_text": "da imam vse pod nadzorom, da lahko kadar koli neham. [\u2026] V svojih dvajsetih in tridesetih sem na\u0161la novo tola\u017Ebo v nakupovanju. Ni\u010D ni bilo lep\u0161ega kot ob\u010Dutek, ko sem stala pred blagajno z novimi obla\u010Dili ali \u010Devlji, \u010Deprav jih nisem potrebovala. Vse se je \u0161e poglobilo s spletnimi nakupi. [\u2026] Vendar sem se zna\u0161la v novi slepi ulici. Pred tremi leti sem prvi\u010D stopila v igralnico. S prijateljico sva \u0161li za hec. Nikoli ne bi stopila tja, \u010De bi vedela, da bo zame tako usodno. \u0160la se iz radovednosti, \u201Cza hec\u201D, z majhnim vlo\u017Ekom, za zabavo. Enkrat, sem si obljubila. Pa se nisem dr\u017Eala. [\u2026] Zakompliciralo se je, ker sem takrat prvi\u010D zadela nekaj deset evrov. Ta zmaga me je zasvojila. [\u2026] V\u010Dasih vzamem denar, ki bi ga morala imeti za polo\u017Enice z obljubo, da ga bom \u201Cvrnila, ko zadenem\u201D. Nikoli ga ne vrnem. [\u2026] Zadnje \u010Dase te\u017Eko spim. \u010Cez dan se te\u017Eko umirim. Sram me je, izogibam se ljudem, v stikih z doma\u010Dimi sem nervozna in razdra\u017Eljiva. Ampak v meni je tudi nekaj, kar se no\u010De predati. Odlo\u010Dila sem se, da poi\u0161\u010Dem pomo\u010D. \u2026 \u201C"
+        },
+        {
+          "page_id": 448,
+          "url": "https://medover.zurnal24.si/forum/tema/kako-ste-se-postavile-na-noge-3147606/",
+          "score": 0.6789581967021059,
+          "rerank_score": 0.0012205534148961306,
+          "preview": "vedno ko pa potrebuje denar, molze njo. Zanimivo, do oceta je spostljiv. Skoraj prepricana sem, da ima MOM, narcisticno usmerjen. Hkrati je alkoholik, sam seveda ne vidi tezav, pri nicemer. Pije ker m\u2026",
+          "segment_text": "vedno ko pa potrebuje denar, molze njo. Zanimivo, do oceta je spostljiv. Skoraj prepricana sem, da ima MOM, narcisticno usmerjen. Hkrati je alkoholik, sam seveda ne vidi tezav, pri nicemer. Pije ker mu pase, zali, ker ga drugi ne cenijo, spostujejo. Ker vidim, da bodo stvari vedno iste, da lezem v se vecje dolgove, ker me izolira od vseh, financno nadzoruje, hkrati je postal fizicno nasilen, sem koncala. On je reagiral z ignoranco, kod da me ni bilo nikoli bilo v njegovem zivljenju. Kar me seveda boli, sem v dolgovih, brez prijateljev, druzine..on pa gre mirno naprej, brez vesti. Dovolj o njem, zanima me, kako ste se pobrale. Ker verjetno imam tudi sama tezave ker sem si dovolila v to godljo. Rada bi kak nasvet, napotek, kako preboleti."
+        }
+      ]
+    }
+  ],
+  "manager_request_mode": "official",
+  "manager_query": null,
+  "manager_corpus_fingerprint": "740231B10C88D629D02A90E01811A08D6F9FF317338A859B7CE865CBBEB3DBF3",
+  "manager_cached_at_utc": "2026-05-08T11:42:10.8794113Z"
+}

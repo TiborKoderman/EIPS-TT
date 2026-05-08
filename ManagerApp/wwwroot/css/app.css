@@ -1206,6 +1206,16 @@ textarea:focus {
     border-radius: var(--radius-md);
 }
 
+.assignment2-search-input {
+    padding-left: 14px;
+    padding-right: 40px;
+}
+
+.assignment2-search-icon {
+    left: auto;
+    right: 12px;
+}
+
 .pages-filter-shell {
     position: relative;
 }

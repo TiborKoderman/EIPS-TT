@@ -1,0 +1,485 @@
+{
+  "timestamp": "2026-05-08T11:19:13.941791Z",
+  "embedding_model": "sentence-transformers/LaBSE",
+  "metric": "cosine",
+  "table": "page_segment_long",
+  "top_k": 5,
+  "rerank": true,
+  "rerank_model": "BAAI/bge-reranker-v2-m3",
+  "queries": [
+    {
+      "label": "good_1_blood_pressure",
+      "query": "Kateri so simptomi visokega krvnega tlaka?",
+      "expected": "Articles about hypertension symptoms (glavobol, vrtoglavica, krvavitve iz nosu).",
+      "initial": [
+        {
+          "page_id": 1738,
+          "url": "https://medover.zurnal24.si/kako-prepoznati-krvne-strdke-trombozo/",
+          "score": 0.45087198766684466,
+          "preview": "pljučne embolije lahko trajno okvarijo pljučne žile, kar vodi v popuščanje srca. Velik del arterijskih tromboz se lahko prepreči z zdravim življenjskim slogom brez kajenja, z zdravo, uravnoteženo preh…"
+        },
+        {
+          "page_id": 140,
+          "url": "https://medover.zurnal24.si/6-kljucnih-nasvetov-za-lazje-obvladovanje-krvnega-tlaka/",
+          "score": 0.4583645897616322,
+          "preview": ", ki prikazuje pritisk v arterijah, ko srce počiva med utripoma in se polni s krvjo. Na spletni strani klinike Mayo Clinic pojasnjujejo, da strokovnjaki krvni tlak razvrščajo v štiri različne skupine:…"
+        },
+        {
+          "page_id": 140,
+          "url": "https://medover.zurnal24.si/6-kljucnih-nasvetov-za-lazje-obvladovanje-krvnega-tlaka/",
+          "score": 0.46882806625449835,
+          "preview": "6 ključnih nasvetov za lažje obvladovanje krvnega tlaka Visok krvni tlak je vse pogostejši problem z resnimi posledicami. Preproste spremembe v vsakdanjem življenju pa lahko naredijo veliko razliko. V…"
+        },
+        {
+          "page_id": 1533,
+          "url": "https://medover.zurnal24.si/kako-in-kdaj-si-meriti-krvni-tlak/",
+          "score": 0.4760790027356424,
+          "preview": "Pogoste napake pri merjenju krvnega tlaka Zvišan krvni tlak (hipertenzija) ne povzroča bolečin, vendar dolgoročno povzroča resne zdravstvene zaplete, zato ga pogosto imenujemo tihi ubijalec. V Sloveni…"
+        },
+        {
+          "page_id": 1648,
+          "url": "https://medover.zurnal24.si/kako-depresija-in-kronicni-stres-vplivata-na-srce-kaj-lahko-naredite-zase/",
+          "score": 0.5125930018778444,
+          "preview": "To NI znak slabosti, ampak odgovorne skrbi zase. Ni dvoma – kronični stres in depresija nista le “stanja duha”, temveč dejavna zdravstvena tveganja, ki vplivajo na srce. Prepoznati, nasloviti in obvla…"
+        }
+      ],
+      "rerank": [
+        {
+          "page_id": 140,
+          "url": "https://medover.zurnal24.si/6-kljucnih-nasvetov-za-lazje-obvladovanje-krvnega-tlaka/",
+          "score": 0.4583645897616322,
+          "rerank_score": 0.9929485321044922,
+          "preview": ", ki prikazuje pritisk v arterijah, ko srce počiva med utripoma in se polni s krvjo. Na spletni strani klinike Mayo Clinic pojasnjujejo, da strokovnjaki krvni tlak razvrščajo v štiri različne skupine:…",
+          "segment_text": ", ki prikazuje pritisk v arterijah, ko srce počiva med utripoma in se polni s krvjo. Na spletni strani klinike Mayo Clinic pojasnjujejo, da strokovnjaki krvni tlak razvrščajo v štiri različne skupine: Če je krvni tlak višji od 180/120 mm Hg, gre za nujno stanje, ki zahteva takojšnjo zdravstveno pomoč. Večina ljudi z visokim krvnim tlakom nima nobenih simptomov, tudi če vrednosti tlaka dosežejo nevarno visoke ravni. Pri nekaterih posameznikih z visokim krvnim tlakom se sicer lahko pojavijo glavoboli, težko dihanje ali krvavitve iz nosu, a gre za nespecifične simptome, ki običajno pokažejo šele, ko je tlak že močno povišan. Merjenje krvnega tlaka je zato pomemben del preventive. Pogostost merjenja je odvisna od zdravstvenega stanja posameznika, zato je priporočljivo spremljati dejavnike, ki povečujejo tveganje za povišan krvni tlak. Med njimi so: Visok krvni tlak lahko resno škoduje našemu zdravju. Višji kot je krvni tlak in dlje časa kot ostaja nenadzorovan, hujše so posledice. Ker obremenjuje naše srce in poškoduje žile, krvni tlak povečuje tveganje za bolezni, kot so srčni infarkt, možganska kap in srčno popuščanje. Poleg tega lahko prizadene tudi druge organe, na primer ledvice, povzroča težave z očmi, lahko vpliva na naše kognitivne sposobnosti in povečuje tveganje za demenco. Prav zaradi možnih zapletov je ključno, da visok krvni tlak pravočasno prepoznamo ter ga z ustreznim načinom življenja in po potrebi z zdravili tudi nadzorujemo."
+        },
+        {
+          "page_id": 1659,
+          "url": "https://medover.zurnal24.si/preprost-test-s-katerim-preverite-zdravje-svojih-ledvic-srca-in-ozilja/",
+          "score": 0.5819243414930408,
+          "rerank_score": 0.5989062786102295,
+          "preview": "dihal je vodilen simptom težka sapa, ki povzroča nevšečnosti in se zato hitreje opazi. Pri KLB pa je eden od najpogostejših znakov zvišan krvni tlak, ki ga večina ljudi meri le občasno. Utrujenost, sl…",
+          "segment_text": "dihal je vodilen simptom težka sapa, ki povzroča nevšečnosti in se zato hitreje opazi. Pri KLB pa je eden od najpogostejših znakov zvišan krvni tlak, ki ga večina ljudi meri le občasno. Utrujenost, slabo počutje in otekanje se razvijejo šele v napredovalni fazi KLB, o poteku bolezni pove dr. Arnol. Delovanje ledvic, srca in ožilja je med seboj tesno povezano, zato okvara enega sistema pomeni okvaro drugega, razlaga nefrolog. Obravnava oseb s sladkorno boleznijo tipa 2 zahteva intenzivno multidisciplinarno sodelovanje med družinskimi zdravniki, diabetologi, nefrologi in kardiologi. “Zato se že pojavlja nov koncept, ki se mu reče kardio-renalni-presnovni sindrom, torej povezava srca, presnove in ledvic. Običajno se začne z nezdravim življenjskim slogom, ki povzroči prekomerno telesno težo in presnovni sindrom z zvišano ravnijo sladkorja v krvi, kar lahko vodi v razvoj sladkorne bolezni, ta pa nato v razvoj KLB in srčno-žilnih bolezni. Zato se tudi multidisciplinarno povezujemo, vse pa se začne na primarni ravni. Pri družinskemu zdravniku se namreč lahko zdravi tri četrtine oseb z začetno do zmerno stopnjo KLB (stopnje 1, 2, 3a), ali blago do zmerno albuminurijo, le četrtina potrebuje obravnavo pri specialistu. “ Po besedah nefrologa se družinski zdravniki pri obravnavi bolnikov s KLB lahko ravnajo po posebni tabeli ogroženosti, pripravljeni v okviru mednarodnih priporočil. Pri začetnih stopnjah KLB lahko družinski zdravnik pacienta redno spremlja, kasneje uvede zdravljenje, pri napredovalih stopnjah pa se posvetuje z nefrologom oziroma napoti bolnika k specialistu."
+        },
+        {
+          "page_id": 1470,
+          "url": "https://medover.zurnal24.si/imate-zaradi-stresa-povisan-krvni-tlak-za-vas-imamo-brezplacno-pomoc/",
+          "score": 0.5565343367020585,
+          "rerank_score": 0.5292564630508423,
+          "preview": "in žilja s pojavnostjo srčnega infarkta, možganske kapi in obolenja ledvic. Tveganje za srčno-žilni dogodek (srčni infarkt, možgansko kap) v povprečju zviša za dva do trikrat. Je vzrok za tretjino vse…",
+          "segment_text": "in žilja s pojavnostjo srčnega infarkta, možganske kapi in obolenja ledvic. Tveganje za srčno-žilni dogodek (srčni infarkt, možgansko kap) v povprečju zviša za dva do trikrat. Je vzrok za tretjino vseh aterosklerotičnih srčno-žilnih dogodkov, zaradi hipertrofije srčne mišice in poznejše dilatacije srca pa je vzrok polovice vseh oblik srčnega popuščanja. Zaradi pogostnosti in pomembnosti za zdravje posameznika in celotnega prebivalstva je osebe z zvišanim krvnim tlakom treba aktivno iskati in zdraviti. Znano je, da na visok krvni tlak in naraščanje krvnega tlaka s starostjo pomembno vpliva nezdrav življenjski slog, kot je: prekomerno uživanje soli, nezadostna telesna dejavnost, nezadostno uživanje zelenjave in sadja, čezmerno uživanje alkohola, prekomerna telesna masa in debelost ter stres – dejavniki tveganja, ki so med prebivalci Slovenije pomembno prisotni, kar vsekakor prispeva tudi k visoki pojavnosti arterijske hipertenzije. Dr. Pauline Swift iz dobrodelne organizacije Blood Pressure UK pravi, da bomo previsok krvni tlak najhitreje znižali z zmanjšanjem vnosa soli, pri čemer je treba biti pozoren na soli, skrite v procesirani hrani. “Prav tako k znižanju krvnega tlaka prispevata uživanje več sadja in zelenjave ter redna telesna aktivnost. “ Iz številnih držav prihajajo dokazi, da na srčno-žilni sistem vpliva tudi onesnažen zrak. Prisluhnite brezplačnim meditacijam na Med.Over.Net – podkast Harmonija"
+        },
+        {
+          "page_id": 140,
+          "url": "https://medover.zurnal24.si/6-kljucnih-nasvetov-za-lazje-obvladovanje-krvnega-tlaka/",
+          "score": 0.46882806625449835,
+          "rerank_score": 0.3390839099884033,
+          "preview": "6 ključnih nasvetov za lažje obvladovanje krvnega tlaka Visok krvni tlak je vse pogostejši problem z resnimi posledicami. Preproste spremembe v vsakdanjem življenju pa lahko naredijo veliko razliko. V…",
+          "segment_text": "6 ključnih nasvetov za lažje obvladovanje krvnega tlaka Visok krvni tlak je vse pogostejši problem z resnimi posledicami. Preproste spremembe v vsakdanjem življenju pa lahko naredijo veliko razliko. Visok krvni tlak ali hipertenzija je eden večjih zdravstvenih problemov današnjega časa. Po podatkih s portala GOV.si se je leta 2019 s to težavo soočalo več kot milijardo ljudi, število pa se je od leta 1990 podvojilo. To je še posebej zaskrbljujoče, saj hipertenzija povečuje tveganje za številne resne zdravstvene težave. Dobra novica pa je, da obstajajo preprosti in učinkoviti načini, s katerimi lahko obvladate visok krvni tlak. Krvni tlak je sila, s katero kri pritiska na stene arterij. Če je krvni tlak previsok, je ta sila stalno previsoka in srce mora delati bolj intenzivno, da ohranja normalen pretok krvi. Krvni tlak meri dve vrednosti: višjo, imenovano sistolični tlak , ki prikazuje pritisk v arterijah, ko se srce skrči in potisne kri po telesu, ter nižjo, imenovano diastolični tlak , ki prikazuje pritisk v arterijah, ko srce počiva med utripoma in se polni s krvjo. Na spletni strani klinike Mayo Clinic pojasnjujejo, da strokovnjaki krvni tlak razvrščajo v štiri različne skupine: Če je krvni tlak višji od 180/120 mm Hg, gre za nujno stanje, ki zahteva takojšnjo zdravstveno pomoč."
+        },
+        {
+          "page_id": 1531,
+          "url": "https://medover.zurnal24.si/mozganska-kap-dejavniki-tveganja-preprecevanje-mozganske-kapi/",
+          "score": 0.5536226497180057,
+          "rerank_score": 0.3041040897369385,
+          "preview": "hitreje kot pri starejših. “Vse več kapi se pojavlja pri ljudeh, mlajših od 55 let, menimo, da so vzroki predvsem povezani z življenjskim slogom. “ Visok krvni tlak je eden najpomembnejših dejavnikov…",
+          "segment_text": "hitreje kot pri starejših. “Vse več kapi se pojavlja pri ljudeh, mlajših od 55 let, menimo, da so vzroki predvsem povezani z življenjskim slogom. “ Visok krvni tlak je eden najpomembnejših dejavnikov tveganja za možgansko kap in je po podatkih Združenja za možgansko kap povezan s približno polovico vseh primerov. Kolodziejeva pojasnjuje, da visok krvni tlak povečuje pritisk na žile po vsem telesu, še posebej v možganih, kjer lahko povzroči krvavitev. “Če pride do razpoka krvne žile, govorimo o hemoragični možganski kapi. Oslabljen pretok krvi in zožene arterije pa lahko povečajo možnost nastanka krvnih strdkov. Če ti strdki potujejo v možgane in tam zamašijo žilo, pride do ishemične možganske kapi. “ Nikoli ni prezgodaj, da začnete spremljati svoj krvni tlak. Gibanje je pomembno, ker spodbuja zdrav pretok krvi. Zdrav pretok krvi ohranja žile prožne, zmanjšuje nastanek strdkov in možnost, da bi žile počile. Pomaga lahko že preprosta telesna aktivnost, kot je hoja. “Ljudje pogosto mislijo, da morajo biti izjemno telesno aktivni, da bi zmanjšali tveganje za možgansko kap, vendar to ne drži, ” pravi Kolodziejeva. “Že kratek sprehod okoli doma ali delo na vrtu lahko pomembno prispevata k zmanjšanju tveganja. “ Sol zvišuje krvni tlak, zato je pomembno, da ste pozorni na to, koliko jo zaužijete. Zlasti bodite pozorni na vsebnost soli v predelanih živilih – tam jo je lahko zelo veliko."
+        }
+      ]
+    },
+    {
+      "label": "good_2_diabetes_diet",
+      "query": "Kakšna prehrana je primerna pri sladkorni bolezni tipa 2?",
+      "expected": "Articles on diabetes diet, low glycemic index foods, sugar substitutes.",
+      "initial": [
+        {
+          "page_id": 2021,
+          "url": "https://medover.zurnal24.si/kardiometabolni-dejavniki-kaj-so-in-kako-vplivajo-na-zdravje/",
+          "score": 0.4069148302078247,
+          "preview": "pa vplivamo na svojo telesno maso, obseg pasu, prehranjevalne navade, telesno aktivnost, kajenje in druge škodljive razvade. Zdrav življenjski slog pri osebah z mejno bazalno glikemijo (mejno zvišanje…"
+        },
+        {
+          "page_id": 2023,
+          "url": "https://medover.zurnal24.si/razblinjamo-mite-ali-sladkor-in-stres-povzrocata-sladkorno-bolezen/",
+          "score": 0.4442639946937561,
+          "preview": "pa svetuje v zmernih količinah ,” pove. Razloži, da je sladkorna bolezen povezana s previsokimi ravnimi krvnega sladkorja (glukoze) v krvi. Glukozo vnesemo s hrano, nahaja pa se v hrani, ki vsebuje og…"
+        },
+        {
+          "page_id": 2023,
+          "url": "https://medover.zurnal24.si/razblinjamo-mite-ali-sladkor-in-stres-povzrocata-sladkorno-bolezen/",
+          "score": 0.44535585912202846,
+          "preview": "razlikujejo od tistih pri sladkorni bolezni tipa 2. To je mit, pomembno je le, da oseba s sladkorno boleznijo pozna svojo bolezen, prepozna simptome in znake hipoglikemije, zna izmeriti sladkor in je…"
+        },
+        {
+          "page_id": 2021,
+          "url": "https://medover.zurnal24.si/kardiometabolni-dejavniki-kaj-so-in-kako-vplivajo-na-zdravje/",
+          "score": 0.477799863946445,
+          "preview": "Zakaj je pri sladkorni bolezni zdrav življenjski slog tako pomemben? Bolezni srca in ožilja so še vedno najpogostejši vzrok umrljivosti v Sloveniji. Raziskave kažejo, da bi jih bilo lahko precej manj,…"
+        },
+        {
+          "page_id": 2019,
+          "url": "https://medover.zurnal24.si/cudezna-tabletka-je-tu/",
+          "score": 0.48576181957266196,
+          "preview": "obolevnosti za sladkorno boleznijo tipa 2 menimo, da strukturirani edukacijski programi lahko pomembno pripomorejo k opolnomočenju oseb s sladkorno boleznijo, saj le to predstavlja temeljni delež v pr…"
+        }
+      ],
+      "rerank": [
+        {
+          "page_id": 2021,
+          "url": "https://medover.zurnal24.si/kardiometabolni-dejavniki-kaj-so-in-kako-vplivajo-na-zdravje/",
+          "score": 0.4069148302078247,
+          "rerank_score": 0.9206574559211731,
+          "preview": "pa vplivamo na svojo telesno maso, obseg pasu, prehranjevalne navade, telesno aktivnost, kajenje in druge škodljive razvade. Zdrav življenjski slog pri osebah z mejno bazalno glikemijo (mejno zvišanje…",
+          "segment_text": "pa vplivamo na svojo telesno maso, obseg pasu, prehranjevalne navade, telesno aktivnost, kajenje in druge škodljive razvade. Zdrav življenjski slog pri osebah z mejno bazalno glikemijo (mejno zvišanje glukoze v krvi od 6.1 do 6.9 mmol/l) in moteno toleranco za glukozo lahko prepreči oziroma odloži razvoj sladkorne bolezni tipa 2. Pri vseh, ki že imajo postavljeno diagnozo sladkorne bolezni, pa zdrav življenjski slog ugodno vpliva na urejenost glukoze v krvi in pridružene dejavnike tveganja. “Moderen pristop k zdravljenju sladkorne bolezni ni več osredotočen le na glukozo v krvi, enako pomembno je treba naslavljati tudi maščobe v krvi, telesno težo, krvni tlak in zdravljenje z zdravili, ki ugodno vplivajo na delovanje srca in ledvic,” uvodoma poudari doc. dr. Janić. “Temelj je seveda zdrav življenjski slog, kamor spadajo zdrav način prehranjevanja, nekajenje, primerna telesna masa in telesna dejavnost.” Ob diagnozi o zdravi in uravnoteženi prehrani ter telesni aktivnosti svetuje usposobljen strokovnjak. Za bolj urejeno glukozo diabetologi svetujejo vsaj 150 minut oziroma 300 minut zmerno intenzivne telesne vadbe na teden, seveda le, če splošno zdravstveno stanje osebe to dovoljuje."
+        },
+        {
+          "page_id": 2021,
+          "url": "https://medover.zurnal24.si/kardiometabolni-dejavniki-kaj-so-in-kako-vplivajo-na-zdravje/",
+          "score": 0.5048016900060511,
+          "rerank_score": 0.90104079246521,
+          "preview": "zdrav način prehranjevanja, nekajenje, primerna telesna masa in telesna dejavnost.” Ob diagnozi o zdravi in uravnoteženi prehrani ter telesni aktivnosti svetuje usposobljen strokovnjak. Za bolj urejen…",
+          "segment_text": "zdrav način prehranjevanja, nekajenje, primerna telesna masa in telesna dejavnost.” Ob diagnozi o zdravi in uravnoteženi prehrani ter telesni aktivnosti svetuje usposobljen strokovnjak. Za bolj urejeno glukozo diabetologi svetujejo vsaj 150 minut oziroma 300 minut zmerno intenzivne telesne vadbe na teden, seveda le, če splošno zdravstveno stanje osebe to dovoljuje. Za marsikoga je spremeniti življenjski slog najtežje, zato so medicinske sestre edukatorice s Kliničnega oddelka za endokrinologijo, diabetes in presnovne bolezni UKC Ljubljana razvile program TABLETKA , namenjen osebam s sladkorno boleznijo tipa 2, ki jemljejo neinzulinska zdravila. “To je interaktiven program, ki naslavlja vse vidike življenjskega sloga, s posebnimi didaktičnimi pripomočki pa skuša iz udeležencev zvabiti čim večjo aktivnost. Da bi udeležence motivirali, jim na zelo plastičen način pokažejo, kaj se dogaja z glukozo v krvi. S tovrstnim pristopom ne prepovedujemo, temveč pojasnjujemo, npr. koliko vrečk sladkorja (kakršnega dobimo ob kavi in običajno vsebuje pet gramov sladkorja) se skriva v njihovem kosilu. Ne postavljamo omejitev, ker želimo, da bi osebe s sladkorno boleznijo živele normalno in kakovostno, ob predpostavki, da razumejo, kaj je optimalna količina zaužitih kalorij,” nam program predstavi sogovornik. “Vsak, ki sem ga napotil na program, je rekel, da je spremenil svoj pogled na glukozo in bolezen.” V programu boste izvedeli, zakaj ni enako, če spijete pomarančni sok ali pojeste pomarančo, koliko gramov sladkorja se skriva v jedeh, ki niso sladice, recimo v lepinji in čevapčičih, pa tudi zakaj bi se bilo pametno po obilnem kosilu odreči kremni rezini."
+        },
+        {
+          "page_id": 2019,
+          "url": "https://medover.zurnal24.si/cudezna-tabletka-je-tu/",
+          "score": 0.48576181957266196,
+          "rerank_score": 0.6818260550498962,
+          "preview": "obolevnosti za sladkorno boleznijo tipa 2 menimo, da strukturirani edukacijski programi lahko pomembno pripomorejo k opolnomočenju oseb s sladkorno boleznijo, saj le to predstavlja temeljni delež v pr…",
+          "segment_text": "obolevnosti za sladkorno boleznijo tipa 2 menimo, da strukturirani edukacijski programi lahko pomembno pripomorejo k opolnomočenju oseb s sladkorno boleznijo, saj le to predstavlja temeljni delež v procesu zdravljenja. V Sloveniji živi več kot 200.000 oseb s sladkorno boleznijo, vendar mnogi za svojo bolezen ne vedo, ker nič ne boli. Program TABLETKA sledi sedmim krovnim temam: o sladkorni bolezni tipa 2, zdravljenje z zdravili, prehrana, gibanje, moj dan , spremljanje oz. samokontrola in zapleti z možnostjo reševanja. Da bi iz udeležencev zvabili čim večjo aktivnost v programu uporabljamo različne didaktične pripomočke, ki smo jih razvili sami. To so ilustrirana podloga na temo Triglavskih sedmerih jezer s pogovornimi karticami ‘drži – ne drži’ s katero dosežemo zabaven in učljiv pogovor o trditvah, ki krožijo med ljudmi in pogosto ne držijo. Znano je, da udeležence najbolj zanima prehrana, kaj lahko jedo in kaj ne. Na ta vprašanja odgovarjamo aktivno s pomočjo Zofkine košare, Florjanovim krožnikom in Zofkinimi tabelami. Še posebno učljiv je Florjanov krožnik modernih in tradicionalnih živil, saj nazorno pokaže, kaj se zgodi s sladkorjem v krvi kadar pojemo zelje z matevžem, ričet ali obaro z žganci ali kakšno od modernih »street food« jedi, kot so burek, burger ali pica. Udeleženci se v programu naučijo pravilne rabe zdravil, izvejo ali njihova zdravila lahko povzročijo hipoglikemijo, spoznajo cilje zdravljenja, uvidijo, kaj lahko storijo za ohranitev ali izboljšanje splošnega zdravja, spoznajo pomen preventivnih pregledov ipd."
+        },
+        {
+          "page_id": 2023,
+          "url": "https://medover.zurnal24.si/razblinjamo-mite-ali-sladkor-in-stres-povzrocata-sladkorno-bolezen/",
+          "score": 0.4442639946937561,
+          "rerank_score": 0.5646986961364746,
+          "preview": "pa svetuje v zmernih količinah ,” pove. Razloži, da je sladkorna bolezen povezana s previsokimi ravnimi krvnega sladkorja (glukoze) v krvi. Glukozo vnesemo s hrano, nahaja pa se v hrani, ki vsebuje og…",
+          "segment_text": "pa svetuje v zmernih količinah ,” pove. Razloži, da je sladkorna bolezen povezana s previsokimi ravnimi krvnega sladkorja (glukoze) v krvi. Glukozo vnesemo s hrano, nahaja pa se v hrani, ki vsebuje ogljikove hidrate. Na nastanek sladkorne bolezni vplivajo različni dejavniki, med drugim tudi genetika, življenjski slog, virusna obolenja … “Res se držim načel zdrave prehrane, nič mastnega nisem pojedel/pojedla, ” je druga stvar, ki jo diabetologinja pogosto sliši v ambulanti. Pove, da maščoba za samo sladkorno bolezen ni tako zelo problematična, saj se glukoza v maščobi topi, zaradi česar počasneje prehaja v kri in je raven glukoze v krvi dejansko nekoliko nižja, kadar jedi kombiniramo z maščobo. “Osebe s sladkorno boleznijo tako spodbujamo, da zaužijejo mešane obroke, ki vsebujejo tudi nekaj zdravih (nenasičenih) maščob. “ Preberite, koliko maščob naj bi zaužili, ter katera živila vsebujejo predvsem omega 3 in katera omega 6 maščobne kisline. Osebe s sladkorno boleznijo lahko uživajo ogljikove hidrate oziroma so priporočeni, pravi Ajda Urbas. “Za človeško telo je glukoza primarni energetski vir, zato so ogljikovi hidrati potrebni. Razervne poti (presnova maščob in beljakovin za energijo) so z razlogom rezervne – niso namenjene dolgoročnemu zagotavljanju energije in telo bolj izčrpajo (npr. razgradijo mišice, maščobne dele celic ipd.). Zato prehrane, ki vsebuje (pre)malo ogljikovih hidratov dolgoročno ne priporočamo. ” Dodaja, da je pomembno, da se uživanje ogljikovih hidratov kombinira s proteini, vlakninami in nenasičenimi maščobami, ki poskrbijo, da se glukoza v krvi zviša počasneje."
+        },
+        {
+          "page_id": 2021,
+          "url": "https://medover.zurnal24.si/kardiometabolni-dejavniki-kaj-so-in-kako-vplivajo-na-zdravje/",
+          "score": 0.477799863946445,
+          "rerank_score": 0.38120725750923157,
+          "preview": "Zakaj je pri sladkorni bolezni zdrav življenjski slog tako pomemben? Bolezni srca in ožilja so še vedno najpogostejši vzrok umrljivosti v Sloveniji. Raziskave kažejo, da bi jih bilo lahko precej manj,…",
+          "segment_text": "Zakaj je pri sladkorni bolezni zdrav življenjski slog tako pomemben? Bolezni srca in ožilja so še vedno najpogostejši vzrok umrljivosti v Sloveniji. Raziskave kažejo, da bi jih bilo lahko precej manj, če bi bili ljudje bolj pozorni na kardiometabolne dejavnike. To so kajenje, neurejena sladkorna bolezen, prekomerna telesna masa, povišane maščobe v krvi in visok krvni tlak, ki lahko odločilno vplivajo na posameznikovo zdravje. Pri osebah s sladkorno boleznijo tipa 2 pa lahko kardiometabolni dejavniki močno povečajo tveganje za srčno-žilne dogodke, kot sta srčni infarkt in možganska kap, pa tudi zaplete periferne arterijske bolezni. O tem, zakaj je prepoznavanje dejavnikov in njihovo zgodnje obvladovanje tako pomembno, smo se pogovarjali z doc. dr. Miodragom Janićem, dr. med., specialistom interne medicine s Kliničnega oddelka za endokrinologijo, diabetes in presnovne bolezni na UKC Ljubljana. Nekaterih dejavnikov, ki vplivajo na nastanek sladkorne bolezni tipa 2, kot sta starost in genetska nagnjenost, ne moremo spremeniti, lahko pa vplivamo na svojo telesno maso, obseg pasu, prehranjevalne navade, telesno aktivnost, kajenje in druge škodljive razvade. Zdrav življenjski slog pri osebah z mejno bazalno glikemijo (mejno zvišanje glukoze v krvi od 6.1 do 6.9 mmol/l) in moteno toleranco za glukozo lahko prepreči oziroma odloži razvoj sladkorne bolezni tipa 2."
+        }
+      ]
+    },
+    {
+      "label": "good_3_insomnia_help",
+      "query": "Kako naravno premagati nespečnost in izboljšati spanec?",
+      "expected": "Sleep hygiene, melatonin, herbal remedies, relaxation tips.",
+      "initial": [
+        {
+          "page_id": 2028,
+          "url": "https://medover.zurnal24.si/lahko-zaradi-pomanjkanja-spanja-zbolimo-odgovor-vas-bo-sokiral/",
+          "score": 0.5256449156086069,
+          "preview": "krepitev pridobljene imunosti. Kakor spanje pomaga možganom pri utrjevanju učenja in spomina, se med spanjem krepi sposobnost imunskega sistema, da si zapomni, kako prepoznati in se odzvati na nevarne…"
+        },
+        {
+          "page_id": 2031,
+          "url": "https://medover.zurnal24.si/nasveti-za-boljsi-spanec/",
+          "score": 0.528906496102005,
+          "preview": "spodbuja proizvodnjo melatonina ponoči. 3. V svoj vsakdan vključite živila bogata z melatoninom , kot so med drugim banane, češnje, orehi in ovseni kosmiči. 5. Poskrbite za redno spalno rutino. Pojdit…"
+        },
+        {
+          "page_id": 1645,
+          "url": "https://medover.zurnal24.si/nocne-ptice-tveganje-za-zdravje-srca-in-ozilja/",
+          "score": 0.5335174977944042,
+          "preview": "bolj nagnjeni k motnjam razpoloženja, kot sta anksioznost in depresija, ki prav tako povečujejo tveganja za bolezni srca in ožilja. Internist dr. John La Puma za Medical News Today pojasnjuje, da veče…"
+        },
+        {
+          "page_id": 2028,
+          "url": "https://medover.zurnal24.si/lahko-zaradi-pomanjkanja-spanja-zbolimo-odgovor-vas-bo-sokiral/",
+          "score": 0.535220128129108,
+          "preview": "Tako spanje vpliva na imunski sistem Spanje in imunski sistem sta dvosmerno povezana. V zadnjih desetletjih se je znanje o spanju izjemno poglobilo in pokazalo daljnosežen pomen spanja na skoraj vse s…"
+        },
+        {
+          "page_id": 1950,
+          "url": "https://medover.zurnal24.si/zakaj-je-zdravje-in-pocutje-tako-pomemben-dosleden-urnik-spanja/",
+          "score": 0.5361617984916385,
+          "preview": "ritmu : notranji uri, ki deluje v 24-urnem ciklu. “Ko se zjutraj zbudimo in odpremo oči, zaznamo svetlobo. Ta jutranja svetloba je zelo pomemben signal za našo notranjo (cirkadiano) uro, ” pojasnjuje…"
+        }
+      ],
+      "rerank": [
+        {
+          "page_id": 2031,
+          "url": "https://medover.zurnal24.si/nasveti-za-boljsi-spanec/",
+          "score": 0.5453748134001979,
+          "rerank_score": 0.9911875128746033,
+          "preview": "7 trikov za boljši spanec – brez tablet! Slabo spite? Morda vašemu telesu primanjkuje melatonina. Odkrijte, kako lahko s 7 preprostimi koraki spodbudite proizvodnjo melatonina in izboljšajte kakovost…",
+          "segment_text": "7 trikov za boljši spanec – brez tablet! Slabo spite? Morda vašemu telesu primanjkuje melatonina. Odkrijte, kako lahko s 7 preprostimi koraki spodbudite proizvodnjo melatonina in izboljšajte kakovost svojega spanca! Dober spanec je ključ do zdravja in dobrega počutja, a nespečnost postaja vse pogostejša težava. Pogosto je za to krivo pomanjkanje melatonina – hormona, ki uravnava naš spanec. Na srečo lahko njegovo proizvodnjo spodbudimo z različnimi naravnimi pristopi in si tako zagotovimo miren spanec. Preverite, kako! Melatonin je hormon, ki izključno v temi nastaja v naših možganih in se nato sprošča v krvni obtok. Njegova glavna naloga je uravnavanje našega cirkadianega ritma , ki nadzoruje cikle spanja in budnosti . Raven melatonina se zviša v temi, kar povzroči občutek zaspanosti, in upade ob svetlobi, kar nas prebudi. Po poročanju portala WebMD melatonin igra pomembno vlogo tudi pri naslednjih procesih, vendar so znanstveni dokazi o njegovih učinkih omejeni: Mnogi zaradi težav s spanjem posegajo po prehranskih dopolnilih z melatoninom, vendar to ni edina rešitev. Obstaja več naravnih načinov za povečanje proizvodnje melatonina v našem telesu. Na spletni strani New York Posta predlagajo teh 7 preprostih korakov: 1. Izpostavite se naravni svetlobi, saj ta telesu pomaga uravnavati vaš notranji bioritem, kar spodbuja proizvodnjo melatonina ponoči. 3. V svoj vsakdan vključite živila bogata z melatoninom , kot so med drugim banane, češnje, orehi in ovseni kosmiči. 5. Poskrbite za redno spalno rutino. Pojdite v posteljo ob isti uri vsak večer in se zbudite ob isti uri zjutraj ter tako spodbudite proizvodnjo melatonina."
+        },
+        {
+          "page_id": 1803,
+          "url": "https://medover.zurnal24.si/rak-dojk-taksno-je-zivljenje-po-bolezni/",
+          "score": 0.5668491462975231,
+          "rerank_score": 0.9113020300865173,
+          "preview": "predstavljal nov izziv. Vsak cilj naj bo takšen, da bo za nas še vedno dosegljiv, zato pazimo, da se ne preobremenimo. Ne očitajmo si, če sprememb v počutju ne bomo opazili takoj. “ Več informacij o u…",
+          "segment_text": "predstavljal nov izziv. Vsak cilj naj bo takšen, da bo za nas še vedno dosegljiv, zato pazimo, da se ne preobremenimo. Ne očitajmo si, če sprememb v počutju ne bomo opazili takoj. “ Več informacij o ustvarjanju novih navad si lahko preberete v rubriki DVIG ENERGIJE IN NOVE NAVADE . Kakovosten spanec je ključnega pomena za dobro počutje, še posebej po zdravljenju raka dojk. Za izboljšanje spanja je priporočljivo ustvariti udoben spalni prostor: spalnica naj bo prezračena, primerne temperature in temna, brez motečega hrupa. “Izdelki, ki vsebujejo kofein, alkoholne pijače in nikotin otežujejo večerno uspavanje, povzročajo nočna prebujanja in vodijo v plitvo spanje,” sporoča Anja Marinšek, mag. psihologije iz UKC Ljubljana. “Kofein na spanje vpliva še skoraj 9 ur po njegovem zaužitju, zaradi česar je smiselno, da ob težavah s spanjem uživanje navedenih substanc zmanjšate ali opustite .” Vzpostavite redno spalno rutino z odhodom v posteljo in zbujanjem ob enakih urah ter se izogibajte aktivnostim, kot so gledanje televizije ali prehranjevanje v postelji, da ohranite povezavo med posteljo in spanjem. Če kljub upoštevanju teh priporočil težave s spanjem vztrajajo, je smiselno poiskati strokovno pomoč. Če se spopadate z nespečnostjo, vam svetujemo, da obiščete rubriko SPANEC ."
+        },
+        {
+          "page_id": 2027,
+          "url": "https://medover.zurnal24.si/sladka-dobra-noc-za-boljsi-spanec-pred-spanjem-jejte-to-sadje/",
+          "score": 0.5800698274394817,
+          "rerank_score": 0.6842765212059021,
+          "preview": "Sladka dobra noč: za boljši spanec pred spanjem jejte to sadje Če imate težave s spanjem, jih poskusite premagati s sadnim prigrizkom. Le tretjina Slovencev dovolj spi . Kronično pomanjkanje spanja pa…",
+          "segment_text": "Sladka dobra noč: za boljši spanec pred spanjem jejte to sadje Če imate težave s spanjem, jih poskusite premagati s sadnim prigrizkom. Le tretjina Slovencev dovolj spi . Kronično pomanjkanje spanja pa škodljivo vpliva na različne vidike zdravja . Nekateri sadeži vsebujejo protivnetne učinkovine, kot sta melatonin in kalij, ki lahko pripomoreta boljšemu spancu. Preverite kateri. Uživanje banan prinaša številne koristi: povečajo energijo, zmanjšajo napihnjenost, če jih uživamo tik pred spanjem, pa učinkujejo podobno kot melatonin in pripomorejo k bolj kakovostnemu spancu. Rumeno sadje nasploh vsebuje veliko magnezija in kalija, ki sproščata mišice, ter triptofana, ki se v telesu pretvori v serotonin in lahko pomaga umiriti možgane. Zadnje čase se veliko piše o pozitivnem vplivu češenj in njenih »sorodnic« višenj na spanje. Vsebujejo namreč melatonin, zato so odlična naravna izbira za izboljšanje kakovosti in trajanje spanja. Ananas vsebuje melatonin, vitamin C, magnezij in vlaknine, ki lahko pomagajo uravnavati cikel spanja in budnosti. Vsebuje tudi bromelain, ki s protivnetnimi lastnostmi pomaga sproščati mišice, zaradi česar lažje zaspimo. Vsakodnevno uživanje kivija je povezano z izboljšanjem kakovosti in trajanjem spanja. Vitamin C in višje ravni serotonina spodbujajo občutek sprostitve, zato so odličen prigrizek za pred spanjem. Uživanje papaje pred spanjem prinaša več koristi, ki pripomorejo k boljši kakovosti spanca. Med drugim vsebuje holin, ki telesu pomaga v procesu uspavanja, podpira pa tudi mišično gibanje, učenje in spomin. Sicer pa papaja vsebuje tudi vitamina C in E, folate ter kalij; slednji pomaga pri sproščanju mišic in prispeva h globljemu spancu."
+        },
+        {
+          "page_id": 1647,
+          "url": "https://medover.zurnal24.si/ko-spimo-mozgani-delajo-zakaj-je-spanec-temelj-zdravja/",
+          "score": 0.5679896683683693,
+          "rerank_score": 0.6825101375579834,
+          "preview": "Dolgotrajno pomanjkanje spanja pa je povezano tudi z: Zgovoren je tudi eksperiment na živalih: miši, ki so bile popolnoma prikrajšane za spanec, so zaradi odpovedi imunskega sistema poginile v nekaj t…",
+          "segment_text": "Dolgotrajno pomanjkanje spanja pa je povezano tudi z: Zgovoren je tudi eksperiment na živalih: miši, ki so bile popolnoma prikrajšane za spanec, so zaradi odpovedi imunskega sistema poginile v nekaj tednih. Spanec je tesno povezan s cirkadianim ritmom – notranjo biološko uro, ki uravnava budnost, telesno temperaturo in izločanje hormonov. Zanimivo in hkrati zaskrbljujoče dejstvo je, da se največ srčno-žilnih zapletov zgodi prav v zgodnjih jutranjih urah , ko: Motnje spanja, zlasti apneje v spanju , dodatno obremenjujejo srce in povečujejo tveganje za možgansko kap ter srčni infarkt. Nespečnost je najpogostejša motnja spanja – vsaj enkrat v življenju jo doživi 30 do 40 % ljudi. Pomembno pa je razumeti, da nespečnost ni bolezen sama po sebi , temveč simptom. Vedno se je treba vprašati: Kaj je vzrok nespečnosti? Stres, anksioznost, depresija, hormonske spremembe, kronične bolezni ali neurejen ritem dneva – vse to lahko poruši spanec. Zato sodobna medicina poudarja, da je prva izbira zdravljenja nespečnosti kognitivno-vedenjska terapija, ne pa takojšnja uporaba uspaval. Zdravila za spanje so namenjena kratkotrajni uporabi (največ nekaj tednov), saj ob dolgotrajnem jemanju prinašajo tveganje za stranske učinke in odvisnost. Osnovna pravila zdravega spanja vključujejo: Pomembno sporočilo strokovnjakov je tudi: pojdi spat pred polnočjo . Spanje v prvem delu noči ima posebno obnovitveno vrednost. Motnje dihanja v spanju, zlasti obstruktivne apneje, so pogoste in pogosto spregledane. Zanje so značilni: Pri sumu na motnje spanja je ključna pravočasna diagnostika in zdravljenje – pogosto že ustrezna terapija bistveno izboljša kakovost življenja."
+        },
+        {
+          "page_id": 2031,
+          "url": "https://medover.zurnal24.si/nasveti-za-boljsi-spanec/",
+          "score": 0.528906496102005,
+          "rerank_score": 0.39328333735466003,
+          "preview": "spodbuja proizvodnjo melatonina ponoči. 3. V svoj vsakdan vključite živila bogata z melatoninom , kot so med drugim banane, češnje, orehi in ovseni kosmiči. 5. Poskrbite za redno spalno rutino. Pojdit…",
+          "segment_text": "spodbuja proizvodnjo melatonina ponoči. 3. V svoj vsakdan vključite živila bogata z melatoninom , kot so med drugim banane, češnje, orehi in ovseni kosmiči. 5. Poskrbite za redno spalno rutino. Pojdite v posteljo ob isti uri vsak večer in se zbudite ob isti uri zjutraj ter tako spodbudite proizvodnjo melatonina. 6. Ne jejte tik pred spanjem . Vaš zadnji obrok naj bo vsaj 2 uri pred spanjem, da omogočite telesu, da se umiri in pripravi na spanje, ter preprečite težave, kot je zgaga. 7. Pred spanjem poskrbite za sprostitev . Aktivnosti, kot so pisanje dnevnika, meditacija, branje, poslušanje glasbe ali topla kopel, vam bodo pomagale umiriti misli in telo. Can’t sleep? 7 steps to boost melatonin production without taking a supplement. New York Post, dostopno na: https://nypost.com/2025/03/10/health/7-ways-to-boost-melatonin-production-without-supplements/ . Zadnji dostop: marec 2025. Melatonin – Uses, Side Effects, and More. WebMD, dostopno na: https://www.webmd.com/vitamins/ai/ingredientmono-940/melatonin . Zadnji dostop: marec 2025. 2. Omejite izpostavljenost modri svetlobi . Zvečer zmanjšajte uporabo elektronskih naprav ali na napravi spremenite nastavitve, saj modra svetloba zavira izločanje melatonina. 4. Uživajte več živil, bogatih s triptofanom . Aminokislina triptofan je ključna pri proizvodnji serotonina, ki se nato pretvori v melatonin. Živila, ki vsebujejo veliko triptofana so na primer puran, piščanec, oreščki, jajca in semena."
+        }
+      ]
+    },
+    {
+      "label": "bad_1_ambiguous_pain",
+      "query": "Boli me",
+      "expected": "Too short and ambiguous; expected to return generic medical chatter.",
+      "initial": [
+        {
+          "page_id": 343,
+          "url": "https://medover.zurnal24.si/forum/tema/bownova-terapija-2-1506994/",
+          "score": 0.6670928100998879,
+          "preview": "Reply 13 | LucijaB | 09.08.2010 ob 17:20 Iz navodil Bowenove terapije: bolečine (po poškodbah, motnje v mišično-vezivnem sistemu vklučno z miofascialnimi prožilnimi točkami, f i b r o m i a l g i ja)"
+        },
+        {
+          "page_id": 1760,
+          "url": "https://medover.zurnal24.si/napake-ki-jih-delamo-ko-nas-bolijo-sklepi-ali-hrbet/",
+          "score": 0.6782334255119213,
+          "preview": "je, da so pogosto kronične. Za vsako kronično bolečino pa velja, da jo je težko odpraviti. Razlog je, da kronična bolečina postane avtonomna – živčne poti, ki prenašajo signal iz bolečih struktur v gl…"
+        },
+        {
+          "page_id": 1521,
+          "url": "https://medover.zurnal24.si/kronicne-bolecine-so-mnogokrat-povezane-s-pomanjkanjem-teh-hranil/",
+          "score": 0.6865726037708026,
+          "preview": "Kronične bolečine so mnogokrat povezane s pomanjkanjem teh hranil To težavo je pogosto lažje odpraviti, kot si mislite. “Kronična bolečina je pogost, kompleksen in mučen problem, ki ima globok vpliv n…"
+        },
+        {
+          "page_id": 343,
+          "url": "https://medover.zurnal24.si/forum/tema/bownova-terapija-2-1506994/",
+          "score": 0.6947780847549438,
+          "preview": "tudi zanimala vse ljudi, ki imajo dolgotrajne bolečine in še niso našli terapije, ki jim bi lahko pomagala. Bownova terapija se je izkazala uspešna pri zdravljenju ali kontroli naslednjih motenj: Špor…"
+        },
+        {
+          "page_id": 1623,
+          "url": "https://medover.zurnal24.si/trpi-vsak-peti-med-nami-to-so-nefarmakoloske-oblike-pomoci/",
+          "score": 0.7047426104545593,
+          "preview": "Trpi vsak peti med nami. To so nefarmakološke oblike pomoči Nefarmakološke možnosti zdravljenja kronične bolečine: ne gre le za zmanjševanje bolečine, temveč tudi tehnike, kako s kronično bolečino laž…"
+        }
+      ],
+      "rerank": [
+        {
+          "page_id": 1523,
+          "url": "https://medover.zurnal24.si/obvladovanje-kronicne-bolecine/",
+          "score": 0.7332840720841837,
+          "rerank_score": 0.30667877197265625,
+          "preview": "To je eden najpogostejših vzrokov za obisk zdravnika Kronična bolečina prizadene milijone posameznikov po svetu, a ženske jo doživljajo pogosteje in intenzivneje kot moški. Zakaj je temu tako in kako…",
+          "segment_text": "To je eden najpogostejših vzrokov za obisk zdravnika Kronična bolečina prizadene milijone posameznikov po svetu, a ženske jo doživljajo pogosteje in intenzivneje kot moški. Zakaj je temu tako in kako se z njo spopasti? Kronična bolečina je bolečina, ki traja več kot tri mesece in se lahko pojavi kjerkoli v telesu. Je eden najpogostejših vzrokov za obisk zdravnika, po podatkih portala eZdravje pa za njo trpi 22 odstotkov odraslih prebivalcev Slovenije. Kronična bolečina bistveno zmanjšuje kakovost življenja posameznikov – omejuje gibanje, otežuje delo, vpliva na odnose, vsakodnevne aktivnosti, razpoloženje, povzroča čustvene stiske, težave s spanjem in celo invalidnost. Kronična bolečina se izraža na različne načine. Pri nekaterih se bolečina kaže kot pekoč, žareč ali utripajoč občutek , pri drugih se pojavi kot zbadanje , nekateri pa poročajo o občutkih stiskanja in togosti . Na spletni strani klinike Cleveland Clinic med najpogostejše vrste kronične bolečine prištevajo: Dejavniki tveganja za kronično bolečino so številni, saj jo lahko povzročijo različna stanja in poškodbe. Pomembno vlogo igrajo genetika , prejšnje poškodbe in starost . Tveganje pa je večje pri tistih, ki opravljajo fizično zahtevna dela , so pod stalnim stresom , kadijo ali imajo prekomerno telesno težo . Raziskave pa kažejo tudi, da kronične bolečine prizadenejo večji delež žensk kot moških po vsem svetu."
+        },
+        {
+          "page_id": 1521,
+          "url": "https://medover.zurnal24.si/kronicne-bolecine-so-mnogokrat-povezane-s-pomanjkanjem-teh-hranil/",
+          "score": 0.6865726037708026,
+          "rerank_score": 0.29431450366973877,
+          "preview": "Kronične bolečine so mnogokrat povezane s pomanjkanjem teh hranil To težavo je pogosto lažje odpraviti, kot si mislite. “Kronična bolečina je pogost, kompleksen in mučen problem, ki ima globok vpliv n…",
+          "segment_text": "Kronične bolečine so mnogokrat povezane s pomanjkanjem teh hranil To težavo je pogosto lažje odpraviti, kot si mislite. “Kronična bolečina je pogost, kompleksen in mučen problem, ki ima globok vpliv na posameznike in družbo. Pogosto se pojavi kot posledica bolezni ali poškodbe; vendar ni zgolj spremljajoči simptom, temveč samostojno stanje s svojo medicinsko definicijo in taksonomijo. Preučevanje razširjenosti in dejavnikov kronične bolečine nam omogoča razumevanje in obvladovanje problema na individualni in populacijski ravni. Ciljno usmerjene in ustrezne strategije preprečevanja in obvladovanja morajo upoštevati biološke, psihološke, socialno-demografske in življenjske dejavnike ter posledice bolečine,” so o kroničnih bolečinah zapisali na spletni strani National Library of Medicine, kjer tudi ugotavljajo, da se breme zaradi kroničnih bolečin povečuje. “1,9 milijarde ljudi trpi zaradi ponavljajočih se tenzijskih glavobolov, ki so najpogostejše simptomatsko kronično stanje. Glede na število let, preživetih z invalidnostjo, so bolečine v križu in vratu dosledno vodilni vzroki invalidnosti po vsem svetu.” Zdravila proti bolečinam pogosto nudijo le kratkoročno olajšanje, operacije tudi, posegi v mnogih primerih niso niti mogoči. Obstaja pa novo upanje: Po mnenju raziskovalcev Univerze v Arizoni je kronična bolečina pogosto povezana s pomanjkanjem hranil – natančneje, s pomanjkanjem določenih vitaminov in mineralov."
+        },
+        {
+          "page_id": 1524,
+          "url": "https://medover.zurnal24.si/bolecine-v-hrbtu-nasveti/",
+          "score": 0.7458380612231452,
+          "rerank_score": 0.2725592255592346,
+          "preview": "Bolečine v hrbtu pri ženskah trajajo bistveno dlje kot pri moških – zakaj? Bolečine v hrbtu so ena najpogostejših težav sodobnega časa. Nepravilna drža, preveč sedenja in premalo gibanja so le nekater…",
+          "segment_text": "Bolečine v hrbtu pri ženskah trajajo bistveno dlje kot pri moških – zakaj? Bolečine v hrbtu so ena najpogostejših težav sodobnega časa. Nepravilna drža, preveč sedenja in premalo gibanja so le nekateri izmed razlogov za bolečino. Ali veste, kako preprečiti težave in poskrbeti za zdravo hrbtenico? Bolečine v hrbtu so vse pogostejša težava, ki mnoge resno omejuje pri vsakodnevnih aktivnostih. Po poročanju klinike Mayo Clinic so bolečine v hrbtu eden najpogostejših razlogov za obisk zdravnika in bolniško odsotnost z dela ter glavni vzrok za invalidnost po vsem svetu. Bolečine v hrbtu pogosto obravnavamo kot neizogibno posledico staranja, resnica pa je, da jih lahko v mnogih primerih preprečimo. Odkrijte vzroke za bolečine, prepoznajte dejavnike tveganja in poskrbite za zdravje svoje hrbtenice! Bolečine v hrbtu se lahko pojavijo v različnih oblikah – lahko gre za mišično bolečino, mravljinčenje, zbadanje, pekoč občutek ali ostro bolečino v hrbtu . Spletna stran Mayo Clinic navaja, da so glavni vzroki za bolečine v hrbtu: Na portalu Revma.net opozarjajo, da v nekaterih primerih vzroka za bolečine v hrbtu kljub rentgenu in drugim temeljitim preiskavam ni mogoče odkriti. V teh primerih se pogosto izkaže, da so bolečine povezane s psihičnimi težavami, kot sta stres ali depresija. Dr. Mary George, specialistka interne medicine, je na portalu Spine Health poudarila, da so bolečine v hrbtu pri ženskah pogosteje kronične , kar pomeni, da trajajo dlje in bolj vplivajo na kakovost njihovega življenja."
+        },
+        {
+          "page_id": 1761,
+          "url": "https://medover.zurnal24.si/ko-bolijo-misice-in-sklepi/",
+          "score": 0.7369639136216688,
+          "rerank_score": 0.2617388367652893,
+          "preview": "Ko bolijo mišice in sklepi Bolečine v mišicah in sklepih so lahko posledica prehladnih obolenj, revmatične bolezni, poškodb ali preobremenitev. Kako jih lahko lajšamo? Če so pri bolečinah v mišicah al…",
+          "segment_text": "Ko bolijo mišice in sklepi Bolečine v mišicah in sklepih so lahko posledica prehladnih obolenj, revmatične bolezni, poškodb ali preobremenitev. Kako jih lahko lajšamo? Če so pri bolečinah v mišicah ali sklepih prisotni znaki vnetja – denimo oteklina, bolečina, rdečina kože nad bolečim delom, povišana telesna temperatura – ter če bolečega sklepa ali če mišice ne moremo premikati ali obremeniti in je bolečina prisotna tudi v mirovanju, moramo obiskati zdravnika. Prav tako je treba na zdravniški pregled, če akutna bolečina ne mine po sedmih dneh samozdravljenja, kronična pa v dveh ali treh mesecih samozdravljenja in če se ponovno pojavi prej kot v enem mesecu po končanem samozdravljenju. Samozdravljenje bolečin v mišicah in sklepih je primerno za osebe stare med 15 in 50 let. Če gre za zdravljenje bolečin, ki so posledica poškodbe, preobremenitve oziroma so pridružene prehladnemu obolenju, se svetuje uporaba zdravil s paracetamolom. Za zdravljenje vnetnih bolečin pa so učinkovitejša nesteroidna protivnetna zdravila, kot sta denimo ibuprofen in naproksen. Protivnetni učinek teh zdravil nastopi šele po nekaj dneh zdravljenja, zato se pri vnetni bolečini v sklepih priporoča redno jemanje večjih odmerkov. Bolečine v mišicah in sklepih lahko zdravilom tudi z zdravili v obliki gelov in krem, ki vsebujejo nesetroidne protivnetne učinkovine (diklofenak, ibuprofen …). Vendar jih je ne smemo nanašati na poškodovani ali vneti koži in pod tesno povitimi povoji. Med uporabo teh mazil in še dva tedna po prenehanju tistih delov kože, na katere smo nanašali pripravek, ne izpostavljamo soncu."
+        },
+        {
+          "page_id": 1760,
+          "url": "https://medover.zurnal24.si/napake-ki-jih-delamo-ko-nas-bolijo-sklepi-ali-hrbet/",
+          "score": 0.7071108098560084,
+          "rerank_score": 0.22389811277389526,
+          "preview": "Napake, ki jih delamo, ko nas bolijo sklepi ali hrbet Kako postopati v primeru bolečin v sklepih ali hrbtu, da stanja ne poslabšamo, temveč pospešimo okrevanje? Odgovore smo poiskali pri specialistu f…",
+          "segment_text": "Napake, ki jih delamo, ko nas bolijo sklepi ali hrbet Kako postopati v primeru bolečin v sklepih ali hrbtu, da stanja ne poslabšamo, temveč pospešimo okrevanje? Odgovore smo poiskali pri specialistu fizikalne in rehabilitacijske medicine dr. Martinu Zorku, dr. med. , iz Kliničnega inštituta za medicino dela, prometa in športa . “Poleg poškodb je pomemben vzrok za bolečine v sklepih, denimo v kolenih, gležnjih, kolkih, artroza oziroma obraba. Pomembno je, da ljudje kljub bolečinam ostanemo aktivni, saj nam sicer upade fizična zmogljivost oziroma mišična moč, s tem pa lahko sklep postane še manj stabilen in se težava lahko še bolj poglobi,” opozarja. “ Po drugi strani pa je potrebno izbrati takšne vaje – po možnosti pod nadzorom fizioterapevta – pri katerih se bolečina ne slabša. Slabšanje bolečine ob vadbi lahko pomeni dodatno poškodbo sklepa in tudi mišic ob bolečem gibanju ne moremo učinkovito natrenirati “. Kadar pride do poškodbe sklepa in bolečine niso prehude (če so bolečine prehude je treba k zdravniku), dr. Zorko svetuje, da počivamo in prizadeti sklep nekaj dni hladimo preko tkanine vsaki dve uri po 15 minut. Če je mogoče, naj bo pri tem prizadeti sklep dvignjen. Nato ga začnemo postopno obremenjevati (pazimo, da ga ne obremenjujemo preveč!). Po lažjih poškodbah ga lahko začnemo obremenjevati že po nekaj dneh, pri nekoliko težjih pa po tednu ali dve tednih. Zelo primerni aktivnosti v takih primerih sta hoja po ravnem in kolesarjenje na sobnem kolesu."
+        }
+      ]
+    },
+    {
+      "label": "bad_2_out_of_domain_legal",
+      "query": "Kakšne so pravne posledice neplačila prometne kazni v Sloveniji?",
+      "expected": "Out-of-domain (legal). Expected to return loosely related civic/administrative content if any.",
+      "initial": [
+        {
+          "page_id": 2069,
+          "url": "https://medover.zurnal24.si/zasvojenost-preventiva-je-bolj-ucinkovita-od-kurative/",
+          "score": 0.6763290377055451,
+          "preview": "Ljudska univerza Nova Gorica …) kot tudi programe, projekte in ostale aktivnosti številnih vladnih in nevladnih organizacij (center za socialno delo, NVO na področju športa, mladine, socialnega varstv…"
+        },
+        {
+          "page_id": 1868,
+          "url": "https://medover.zurnal24.si/ko-obdarujete-otroke-obdarujte-odgovorno/",
+          "score": 0.6904771739528873,
+          "preview": "video vsebine, brez strukture in nadzora, se njegovi možgani začnejo prilagajati na nižjo stopnjo stimulacije iz resničnega sveta .« Da bi to preprečili, Kramli svetuje, naj starši, vzgojitelji in dru…"
+        },
+        {
+          "page_id": 2069,
+          "url": "https://medover.zurnal24.si/zasvojenost-preventiva-je-bolj-ucinkovita-od-kurative/",
+          "score": 0.6985930024738904,
+          "preview": "aktivnosti za širšo javnost. Ko sem v luči novembrske akcije – ob mesecu preprečevanja odvisnosti v MONG – govorila z direktorico Mladinskega centra in z vodjo Centra za zdravljenje odvisnosti, sta ob…"
+        },
+        {
+          "page_id": 333,
+          "url": "https://medover.zurnal24.si/forum/tema/iscem-partnerko-za-resno-zvezo-6-22317631/",
+          "score": 0.7018882156543855,
+          "preview": "Reply 1 | Skepsa | 04.12.2022 ob 23:21 toksično?"
+        },
+        {
+          "page_id": 2003,
+          "url": "https://medover.zurnal24.si/poletje-in-solske-obveznosti-da-koliko-ali-sploh-ne/",
+          "score": 0.7077570259571055,
+          "preview": "ta nagrada ne pomeni toliko, kot si mislijo starši. V kolikor se starši odločijo za nagrado pa naj bo ta zaslužena in dobro osmišljena. Kaj, zakaj in s kakšnim namenom. Če ste se vnaprej dogovorili za…"
+        }
+      ],
+      "rerank": [
+        {
+          "page_id": 307,
+          "url": "https://medover.zurnal24.si/forum/tema/sedenje-spredaj-2065677/",
+          "score": 0.755402245110474,
+          "rerank_score": 0.00047758041182532907,
+          "preview": "Reply 14 | Patricia | 11.10.2007 ob 09:53 Tole je pa najnovejše: je pametno prebrat zakaj toliko otrok umre – ni važna le stran sedenja zadaj…. POTNIK V AVTOMOBILU Kdo je ogrožen? V Sloveniji vsako le…",
+          "segment_text": "Reply 14 | Patricia | 11.10.2007 ob 09:53 Tole je pa najnovejše: je pametno prebrat zakaj toliko otrok umre – ni važna le stran sedenja zadaj…. POTNIK V AVTOMOBILU Kdo je ogrožen? V Sloveniji vsako leto umre okrog 140 ljudi, ki so bili poškodovani v prometu kot vozniki ali potniki v avtomobilu, 2.430 pa jih je sprejetih na zdravljenje v bolnišnico. Poškodovanci, ki so umrli v nezgodi kot osebe v avtomobilu so utrpeli predvsem poškodbe več telesnih področij (31%) in poškodbe glave (znotrajlobanjske poškodbe) (29%), pri hospitaliziranih poškodovancih pa so prevladovale poškodbe glave (40%) in vratu (20%). Najbolj so ogroženi mlajši odrasli, ki se poškodujejo predvsem kot vozniki motornih vozil."
+        },
+        {
+          "page_id": 1904,
+          "url": "https://medover.zurnal24.si/mladi-dostop-do-alkohola-in-tobacnih-nikotinskih-izdelkov/",
+          "score": 0.7369578841588988,
+          "rerank_score": 0.000195932894712314,
+          "preview": "Dodal je, da so v več primerih prodajalci skritim kupcem – mladoletnim osebam in polnoletnim osebam, ki so videti dovolj mlade, da prodajalec brez preverjanja osebnega dokumenta ne more biti prepričan…",
+          "segment_text": "Dodal je, da so v več primerih prodajalci skritim kupcem – mladoletnim osebam in polnoletnim osebam, ki so videti dovolj mlade, da prodajalec brez preverjanja osebnega dokumenta ne more biti prepričan, da so polnoletne – prodali alkoholno pijačo brez vpogleda v osebni dokument, tudi, če so po njem najprej povprašali. Dr. Zala Jeras iz NIJZ je dodala, da so skriti nakupi, ki so jih izvedli med oktobrom in decembrom 2025 v sklopu Projekta skupnega ukrepanja na področju preprečevanja raka in drugih nenalezljivih bolezni (JAPreventNCD) razkrili, da so lahko mlade polnoletne osebe, stare 18─20 let kar v 44 odstotkih (63-krat) kupile tobačni oziroma nikotinski izdelek, ne da bi morale izkazati svojo starost z osebnim dokumentom. “Pitje alkohola med mladostniki v Sloveniji upada, a še vedno je zaskrbljujoče, da je 34 odstotkov petnajstletnikov poročalo, da so svojo prvo alkoholno pijačo popili pri 13 letih ali celo prej,” pa je povedala dr. Maja Roškar z NIJZ. Kot pravi, je to problematično, ker raziskave kažejo, da mlajši, kot je mladostnik ob prvih izkušnjah s pitjem alkohola in opijanjem, večja je verjetnost, da bo imel kasneje v življenju težave zaradi alkohola. Po podatkih ankete iz leta 2023, v kateri so anketirali 1.110 dijakov 2. letnika srednjih šol v Sloveniji (v povprečju so bili stari 16 let) – so trgovci zavrnili nakup tobačnih in nikotinskih izdelkov le v 6 – 12 odstotkih, osebni dokument pa so zahtevali le v 12 – 19 odstotkih."
+        },
+        {
+          "page_id": 307,
+          "url": "https://medover.zurnal24.si/forum/tema/sedenje-spredaj-2065677/",
+          "score": 0.7416928112506849,
+          "rerank_score": 0.00019437693117652088,
+          "preview": "poškodbe glave (znotrajlobanjske poškodbe) (29%), pri hospitaliziranih poškodovancih pa so prevladovale poškodbe glave (40%) in vratu (20%). Najbolj so ogroženi mlajši odrasli, ki se poškodujejo predv…",
+          "segment_text": "poškodbe glave (znotrajlobanjske poškodbe) (29%), pri hospitaliziranih poškodovancih pa so prevladovale poškodbe glave (40%) in vratu (20%). Najbolj so ogroženi mlajši odrasli, ki se poškodujejo predvsem kot vozniki motornih vozil. V zadnjih letih se je zmanjšalo število žrtev v prometu med otroki. V obdobju 2001-2005 so predšolski otroci umrli kar v 45% (5 od 11 umrlih v prometu) primerov kot potniki v avtomobilu, šolski otroci pa v 28% (7 od 25 umrlih v prometu) primerov. To pomeni, da so v Sloveniji med umrlimi, ki so bili udeleženi v nezgodi kot osebe v avtomobilu, vsako leto 2-3 otroci, med hospitaliziranimi pa jih je 80. Rezultati tujih raziskav kažejo, je med umrlimi otroki, potniki v avtomobilu, tretjina takih, ki so umrli zato, ker jih je ob trku vrglo iz vozila in polovica vseh težko poškodovanih ali umrlih otrok je utrpela hude poškodbe glave in obraza. Večino teh poškodb bi lahko preprečili, če bi bil otrok v avtomobilu nameščen v otroškem varnostnem sedežu, saj s tem za 71% zmanjšamo tveganje za nastanek hude telesne poškodbe ali smrti otroka. Štetje ustrezne pripetosti otrok v osebnih avtomobilih v Sloveniji v letu 2002 pa je pokazalo, da niti polovica staršev ne poskrbi za varno vožnjo svojih otrok. Kaj lahko naredimo?"
+        },
+        {
+          "page_id": 1904,
+          "url": "https://medover.zurnal24.si/mladi-dostop-do-alkohola-in-tobacnih-nikotinskih-izdelkov/",
+          "score": 0.7300900220870952,
+          "rerank_score": 0.0001301561133004725,
+          "preview": "podatkih ankete iz leta 2023, v kateri so anketirali 1.110 dijakov 2. letnika srednjih šol v Sloveniji (v povprečju so bili stari 16 let) – so trgovci zavrnili nakup tobačnih in nikotinskih izdelkov l…",
+          "segment_text": "podatkih ankete iz leta 2023, v kateri so anketirali 1.110 dijakov 2. letnika srednjih šol v Sloveniji (v povprečju so bili stari 16 let) – so trgovci zavrnili nakup tobačnih in nikotinskih izdelkov le v 6 – 12 odstotkih, osebni dokument pa so zahtevali le v 12 – 19 odstotkih. Zaskrbljujoč je tudi delež uporabnikov tovrstnih izdelkov: vsaj en tobačni ali nikotinski izdelek je po podatkih ankete uporabljalo kar 41 odstotkov. To je po besedah Helene Koprivnikar iz NIJZ problematično zato, “ ker so mladostniki bolj dovzetni za razvoj zasvojenosti z nikotinom kot odrasli. Mlajši, kot je posameznik ob začetku uporabe nikotina, bolj verjetno bo postal zasvojen in močneje bo zasvojen. Nadalje zato, ker uporaba tobačnih in nikotinskih izdelkov med mladostniki zviša tveganje za zasvojenost z drugimi psihoaktivnimi snovmi, lahko ima trajne škodljive učinke na razvoj možganov, zviša tveganje za začetek in nadaljevanje kajenja cigaret in ima škodljive učinke na zdravje. “ Strokovnjaki so na tiskovni konferenci opozorili tudi, da so na nekaterih prodajnih mestih zaznali kršitev prepovedi razstavljanja tobačnih in nikotinskih izdelkov, pa tudi primere izkoriščanja obstoječe zakonodaje, ki ne omejuje oziroma prepoveduje tržno-komunikacijskih pristopov za pospeševanje prodaje, kot so promocijska znižanja cen alkohola ali oglaševanja alkoholnih pijač znotraj prodajnih mest. Več informacij je na spletni strani NIJZ: https://nijz.si/nijz/tobacni-in-nikotinski-izdelki-so-mladim-zelo-dostopni/ Odstotek nakupa izdelka s starostno omejitvijo brez izkaza osebnega dokumenta je bil v skritih nakupih visok. “ Svetovna zdravstvena organizacija (SZO) omejevanje dostopnosti do alkohola uvršča med najuspešnejše ukrepe alkoholne politike, ki dokazano zmanjšujejo škodo zaradi pitja alkohola. “"
+        },
+        {
+          "page_id": 1866,
+          "url": "https://medover.zurnal24.si/ko-je-vsega-prevec-kaj-oblikuje-nase-nacine-iskanja-olajsanja/",
+          "score": 0.7548547392910407,
+          "rerank_score": 7.198591629276052e-05,
+          "preview": "centri za duševno zdravje: Viri: * Ciljni raziskovalni projekt “Prevalenca in dolgoročni vplivi obremenjujočih izkušenj v otroštvu na funkcioniranje v odraslosti” (V5-1712), dostopno na: https://nijz.…",
+          "segment_text": "centri za duševno zdravje: Viri: * Ciljni raziskovalni projekt “Prevalenca in dolgoročni vplivi obremenjujočih izkušenj v otroštvu na funkcioniranje v odraslosti” (V5-1712), dostopno na: https://nijz.si/wp-content/uploads/2022/07/oio_v_otrostvu_in_posledice_v_odraslosti_-_kratka_strokovna_publikacija_2020_hq.pdf https://youtu.be/gw2U3ez8xNA?si=hY07JTFuPdnI2mGR https://nijz.si/dogodki/4-nacionalna-konferenca-obvladovanja-nekemicnih-zasvojenosti/ https://youtu.be/jTNak9Dv_jg?si=VNpADMPuSzOdtk2X https://nijz.si/zivljenjski-slog/nekemicne-zasvojenosti/razumevanje-nekemicnih-zasvojenosti-v-danasnji-druzbi-od-vzrokov-do-posledic/ Travma se zgodi znotraj človeka kot odziv na to, kar se je zgodilo ali dogajalo. Gre za odziv na zunanje okoliščine. “Nekemične zasvojenosti so relativno dostopne, ne potrebujemo posebne snovi. Pogosto so del naše vsakdanje rabe in so socialno sprejemljive. Predstavljajo mikro regulacije. “ Travma preoblikuje doživljanje samega sebe in okolice ter je eden od pomembnih dejavnikov, ki vplivajo na razvoj zasvojenosti. “Obremenjujoče izkušnje povečujejo tveganje za vse oblike zasvojenosti in slabijo notranjo in odnosno regulacijo. Na drugi strani pozitivne izkušnje zmanjšujejo tveganja, krepijo psihično odpornost (rezilientnost), regulacijo (regulacijski kapital) in občutek varnosti. Razlika med ranljivostjo in odpornostjo se oblikuje zgodaj. “ “Ko mi je bilo vsega preveč, sem preprosto vzela telefon in skrolala do nezavesti. Popolnoma sem se odklopila od sebe, svojih misli in strahov, ki so me prej preplavljali. “"
+        }
+      ]
+    },
+    {
+      "label": "bad_3_acronym_no_context",
+      "query": "ATM",
+      "expected": "Acronym with multiple meanings (medicine + finance). Expected to surface unrelated content; reranker should at least prefer medical interpretations if any segment matches.",
+      "initial": [
+        {
+          "page_id": 448,
+          "url": "https://medover.zurnal24.si/forum/tema/kako-ste-se-postavile-na-noge-3147606/",
+          "score": 0.6789581967021059,
+          "preview": "vedno ko pa potrebuje denar, molze njo. Zanimivo, do oceta je spostljiv. Skoraj prepricana sem, da ima MOM, narcisticno usmerjen. Hkrati je alkoholik, sam seveda ne vidi tezav, pri nicemer. Pije ker m…"
+        },
+        {
+          "page_id": 1870,
+          "url": "https://medover.zurnal24.si/ko-se-hec-spremeni-v-odvisnost-pot-iz-zasvojenosti-z-igrami-na-sreco/",
+          "score": 0.7200224900205446,
+          "preview": "da imam vse pod nadzorom, da lahko kadar koli neham. […] V svojih dvajsetih in tridesetih sem našla novo tolažbo v nakupovanju. Nič ni bilo lepšega kot občutek, ko sem stala pred blagajno z novimi obl…"
+        },
+        {
+          "page_id": 339,
+          "url": "https://medover.zurnal24.si/forum/tema/klepetalnica-za-starejse-2274881/",
+          "score": 0.7427429267474481,
+          "preview": "Reply 8 | gramoznica | 30.05.2009 ob 20:30 Hm, meni ni (vsaj zaenkrat nikoli dolgčas), imam nekaj let več kot ti, moža velikega ljubitlja planin, le redko grem z njim v hribe, imam poročenega sina, ni…"
+        },
+        {
+          "page_id": 381,
+          "url": "https://medover.zurnal24.si/forum/tema/verjamete-v-zivljenje-po-smrti-2248534/",
+          "score": 0.7450423316644872,
+          "preview": "Reply 8 | bati | 24.09.2008 ob 14:46 ja nekaj je na tem….po smrti mojega brata,čeprav te besede teško izgovorim ker preveč v prsih me boli…jaz sem enkrat iskala njegovo knjigo ki sem jo samo jaz sprav…"
+        },
+        {
+          "page_id": 339,
+          "url": "https://medover.zurnal24.si/forum/tema/klepetalnica-za-starejse-2274881/",
+          "score": 0.747962050322108,
+          "preview": "Reply 5 | klepetulja | 08.08.2008 ob 06:59 Na chatih je problem, ker težko dobiš žensko sogovornico, dobiš pa – z veliko sreče – čisto prijetne moške sogovornike tudi tvojih let. Ok, večina jih išče a…"
+        }
+      ],
+      "rerank": [
+        {
+          "page_id": 273,
+          "url": "https://medover.zurnal24.si/forum/tema/avtizem-2-2843827/",
+          "score": 0.7529753441258645,
+          "rerank_score": 0.024282848462462425,
+          "preview": "Reply 8 | TetaM | 01.10.2015 ob 10:07 Pozdravljeni, o avtizmu je res veliko napisanega, kar pripomore staršem, da lažje ugotovijo prve znake, ki bi utegnili nakazovati na avtizem, a je vendarle zelo t…",
+          "segment_text": "Reply 8 | TetaM | 01.10.2015 ob 10:07 Pozdravljeni, o avtizmu je res veliko napisanega, kar pripomore staršem, da lažje ugotovijo prve znake, ki bi utegnili nakazovati na avtizem, a je vendarle zelo težko ločiti, kaj je tisto, ki je lahko povsem običajno in spremenljivo stanje, kaj pa bi lahko nakazovalo na težave v razvoju. Tako je tudi pri nas. V družini imamo dve leti in dva meseca starega fantiča (moj nečak), ki je zelo zelo srčkan fantek, a me pričenja resno skrbeti, da njegov razvoj ne poteka tako, kot bi moral. Na sum avtizma sem pomislila že pred meseci, ko okoli enega leta preprosto ni izvajal običajnih stvari za leto dni starega otroka ( ni kazal s prstkom, ni vokaliziral, se ni odzvival na ime).. pa sem nekako opazovala in si mislila, da je še majhen, da ima še čas,.. meseci so minevali, napredka pa ni bilo videti. Naj omenim, da v družini nihče ničesar ni posumil in da njegovi starši niso ravno dovzetni za mnenja drugih ljudi. Od tod tudi moja bojazen, da bi izustila nekaj, kar bi se izkazalo kot napačno in bi si kasneje očitala, a še bolj bi si očitala, če bi se izkazalo kot resnica in bi našega fantička prikrajšali za čim bolj zgodno diagnozo in ustrezno pomoč."
+        },
+        {
+          "page_id": 283,
+          "url": "https://medover.zurnal24.si/forum/tema/partnerjeva-druzina-2568551/",
+          "score": 0.7569150022369603,
+          "rerank_score": 0.018502483144402504,
+          "preview": "šlo vse tako hitro in razmišljala sem, da si je dekle našel zato, ker je videl, kako je njegov brat srečen v ljubezni in si je tudi sam tega želel. Vendar me je že od samega začetka nekaj motilo in ni…",
+          "segment_text": "šlo vse tako hitro in razmišljala sem, da si je dekle našel zato, ker je videl, kako je njegov brat srečen v ljubezni in si je tudi sam tega želel. Vendar me je že od samega začetka nekaj motilo in nisem si znala razložiti, zakaj gre. Te slabe občutke sem potiskala na stran. Obsojala sem se, da sem ljubosumna in da se bojim, da me bo to dekle izrinilo, da bo njunim staršem (staršem mojega fanta in njegovega brata) ljubša od mene. Nakar je prišel trenutek, ko mi je fantov brat predstavil svojo punco. Bila je zelo hladna do mene, dobila sem občutek, da me ne mara, vendar se mi je zdelo smešno, saj me sploh ne pozna. Slabi občutki v meni so naraščali in nič dobrega nisem slutila v zvezi z njo. Fantu se nisem upala ničesar omeniti, saj sem se bala njegovega odziva, da me ne bi razumel. Tako je čas tekel. Fantov brat je punco predstavil svojim staršem in moram priznati, da sem bila takrat zelo ljubosumna nanjo. Vendar je čas pokazal, da sem pri fantovih starših še vedno na prvem mestu in da sem jim ljubša od nje. Pa mi to ni dalo zadoščenja, kar zasmilila se mi je, ker si nisem želela biti na njenem mestu. Čas pa je tekel in težave so se stopnjevale."
+        },
+        {
+          "page_id": 289,
+          "url": "https://medover.zurnal24.si/forum/tema/dolga-zgodba-male-puncke-1-3064069/",
+          "score": 0.7502381279851652,
+          "rerank_score": 0.0039051363710314035,
+          "preview": "zgodilo, če se bi uprla, nisem vedela kako naj se uprem, stara sem bila 11 let on pa močan. Zakaj se nisem uprla, zakaj nisem pobegnila, zakaj nisem nikomur povedala. Včasih se mi zdi , da sem bila ko…",
+          "segment_text": "zgodilo, če se bi uprla, nisem vedela kako naj se uprem, stara sem bila 11 let on pa močan. Zakaj se nisem uprla, zakaj nisem pobegnila, zakaj nisem nikomur povedala. Včasih se mi zdi , da sem bila kot otrok bolj neumna (zdaj se doživljam kot inteligentno osebo) Ne znam opisati občutkov neprijetnosti, strahu, nelagodja, sramu, za nekatere občutke sploh ne poznam imena. V tisti hiši je bil vsak dan zame nelagoden, poln vprašanj, kaj mi prinese naslednji trenutek. Nekomu sem morala zaupati. Toda s takimi besedami, realno in iskreno je prvič zapisano na tem listu, nobena ušesa tega še niso slišala. V šoli sem eni prijateljici povedala nekaj v tem smislu, da je moj očim delal z mano »tiste stvari«, ta pa je povedala drugi, in druga spet naprej. Tri pametne sošolke so rekle, da moram povedati mami, če ji ne morem, da ji bodo one. Kot sprogramirana sem vsrkala navodila in doma rekla mami, da mora naslednji dan v šolo, da ji bodo moje sošolke nekaj povedale. Silila je v mene, dokljer nisem s cmokom v grlu rekla, da me je njen mož posilil. Sledila je panika, pa njeni grozljivi pogledi, pa kreganje doma, in očima sem se grozno bala, kaj mi bo naredil, ker sem povedala."
+        },
+        {
+          "page_id": 1870,
+          "url": "https://medover.zurnal24.si/ko-se-hec-spremeni-v-odvisnost-pot-iz-zasvojenosti-z-igrami-na-sreco/",
+          "score": 0.7200224900205446,
+          "rerank_score": 0.001368229161016643,
+          "preview": "da imam vse pod nadzorom, da lahko kadar koli neham. […] V svojih dvajsetih in tridesetih sem našla novo tolažbo v nakupovanju. Nič ni bilo lepšega kot občutek, ko sem stala pred blagajno z novimi obl…",
+          "segment_text": "da imam vse pod nadzorom, da lahko kadar koli neham. […] V svojih dvajsetih in tridesetih sem našla novo tolažbo v nakupovanju. Nič ni bilo lepšega kot občutek, ko sem stala pred blagajno z novimi oblačili ali čevlji, čeprav jih nisem potrebovala. Vse se je še poglobilo s spletnimi nakupi. […] Vendar sem se znašla v novi slepi ulici. Pred tremi leti sem prvič stopila v igralnico. S prijateljico sva šli za hec. Nikoli ne bi stopila tja, če bi vedela, da bo zame tako usodno. Šla se iz radovednosti, “za hec”, z majhnim vložkom, za zabavo. Enkrat, sem si obljubila. Pa se nisem držala. […] Zakompliciralo se je, ker sem takrat prvič zadela nekaj deset evrov. Ta zmaga me je zasvojila. […] Včasih vzamem denar, ki bi ga morala imeti za položnice z obljubo, da ga bom “vrnila, ko zadenem”. Nikoli ga ne vrnem. […] Zadnje čase težko spim. Čez dan se težko umirim. Sram me je, izogibam se ljudem, v stikih z domačimi sem nervozna in razdražljiva. Ampak v meni je tudi nekaj, kar se noče predati. Odločila sem se, da poiščem pomoč. … “"
+        },
+        {
+          "page_id": 448,
+          "url": "https://medover.zurnal24.si/forum/tema/kako-ste-se-postavile-na-noge-3147606/",
+          "score": 0.6789581967021059,
+          "rerank_score": 0.0012205534148961306,
+          "preview": "vedno ko pa potrebuje denar, molze njo. Zanimivo, do oceta je spostljiv. Skoraj prepricana sem, da ima MOM, narcisticno usmerjen. Hkrati je alkoholik, sam seveda ne vidi tezav, pri nicemer. Pije ker m…",
+          "segment_text": "vedno ko pa potrebuje denar, molze njo. Zanimivo, do oceta je spostljiv. Skoraj prepricana sem, da ima MOM, narcisticno usmerjen. Hkrati je alkoholik, sam seveda ne vidi tezav, pri nicemer. Pije ker mu pase, zali, ker ga drugi ne cenijo, spostujejo. Ker vidim, da bodo stvari vedno iste, da lezem v se vecje dolgove, ker me izolira od vseh, financno nadzoruje, hkrati je postal fizicno nasilen, sem koncala. On je reagiral z ignoranco, kod da me ni bilo nikoli bilo v njegovem zivljenju. Kar me seveda boli, sem v dolgovih, brez prijateljev, druzine..on pa gre mirno naprej, brez vesti. Dovolj o njem, zanima me, kako ste se pobrale. Ker verjetno imam tudi sama tezave ker sem si dovolila v to godljo. Rada bi kak nasvet, napotek, kako preboleti."
+        }
+      ]
+    }
+  ]
+}

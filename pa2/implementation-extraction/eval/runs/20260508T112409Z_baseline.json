@@ -1,0 +1,49 @@
+{
+  "timestamp": "2026-05-08T11:24:09.673875Z",
+  "embedding_model": "sentence-transformers/LaBSE",
+  "metric": "cosine",
+  "table": "page_segment_long",
+  "top_k": 5,
+  "rerank": false,
+  "rerank_model": null,
+  "queries": [
+    {
+      "label": "ad-hoc",
+      "query": "proteini",
+      "expected": "",
+      "initial": [
+        {
+          "page_id": 1987,
+          "url": "https://medover.zurnal24.si/kako-pri-hujsanju-zmanjsati-izgubo-misic/",
+          "score": 0.5630514286129807,
+          "preview": "ustrezno prehransko podporo, pri čemer imajo eno pomembnejših vlog beljakovine. Telo prehranske beljakovine razgradi v aminokisline, ki jih uporablja za izgradnjo mišic. “Priporočljivo je, da dnevnega…"
+        },
+        {
+          "page_id": 130,
+          "url": "https://medover.zurnal24.si/ogljikovi-hidrati-polnozrnata-zivila-husanje/",
+          "score": 0.6075162291526794,
+          "preview": "da se lažje držite načrta in uspešneje uravnavate svojo težo. “ Na nacionalnem portalu preverjenih informacij Prehrana.si pišejo, da opazovalne študije kažejo, da ima vsakodnevno uživanje polnozrnatih…"
+        },
+        {
+          "page_id": 2023,
+          "url": "https://medover.zurnal24.si/razblinjamo-mite-ali-sladkor-in-stres-povzrocata-sladkorno-bolezen/",
+          "score": 0.6320848057295323,
+          "preview": "dolgoročnemu zagotavljanju energije in telo bolj izčrpajo (npr. razgradijo mišice, maščobne dele celic ipd.). Zato prehrane, ki vsebuje (pre)malo ogljikovih hidratov dolgoročno ne priporočamo. ” Dodaj…"
+        },
+        {
+          "page_id": 1910,
+          "url": "https://medover.zurnal24.si/velikonocni-pirhi-kako-dolgo-zdrzijo/",
+          "score": 0.6335431337356567,
+          "preview": "zmernost – en praznični obrok ali nekaj dodatnih pirhov ne bo imelo večjih posledic za zdravje. Pomembno pa je, da hrano pravilno shranjujemo, skrbimo za higieno v kuhinji in ostanke hrane porabimo pr…"
+        },
+        {
+          "page_id": 611,
+          "url": "https://medover.zurnal24.si/forum/tema/medrol-2-2142052/",
+          "score": 0.6464027973173375,
+          "preview": "Reply 15 | Edi P | 26.01.2009 ob 15:08 Spoštovani! Ne vidim zadržkov za proteinske napitke, ne priporočam pa hormonskih dodatkov. Lp"
+        }
+      ],
+      "rerank": []
+    }
+  ]
+}
