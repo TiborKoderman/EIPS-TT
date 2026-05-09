@@ -28,10 +28,13 @@ import psycopg2
 from psycopg2.extras import execute_values
 
 SRC_DIR = os.path.abspath(os.path.dirname(__file__))
+CORE_DIR = os.path.join(SRC_DIR, "core")
 if SRC_DIR not in sys.path:
     sys.path.insert(0, SRC_DIR)
+if CORE_DIR not in sys.path:
+    sys.path.insert(0, CORE_DIR)
 
-from extractor_xpath import extract_medover_article  # noqa: E402
+from article_extractor_xpath import extract_medover_article  # noqa: E402
 from forum_extractor import extract_forum_thread  # noqa: E402
 from segmenter import build_forum_long_chunks, build_long_word_chunks, build_short_char_chunks  # noqa: E402
 

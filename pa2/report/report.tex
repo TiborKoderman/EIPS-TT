@@ -166,7 +166,7 @@ Table~\ref{tab:queries} shows the top-3 segments returned by the baseline system
 \end{table}
 
 \subsection{Cross-Encoder Reranker}
-To improve retrieval quality on the three poor queries, we implemented a cross-encoder reranking stage (\texttt{pipeline/rerank\_crossencoder.py}) using the \texttt{BAAI/bge-reranker-v2-m3} model. The cross-encoder jointly encodes the query and each candidate segment, producing a relevance score that is superior to the bi-encoder cosine score because it captures query-segment interaction directly.
+To improve retrieval quality on the three poor queries, we implemented a cross-encoder reranking stage (\texttt{pa2/crawler/src/rerank\_crossencoder.py}) using the \texttt{BAAI/bge-reranker-v2-m3} model. The cross-encoder jointly encodes the query and each candidate segment, producing a relevance score that is superior to the bi-encoder cosine score because it captures query-segment interaction directly.
 
 The reranker is invoked with \texttt{--rerank}. It fetches $4\times k$ candidates from the vector index and then applies the cross-encoder to select the final top-$k$.
 
@@ -198,6 +198,6 @@ The legal query \textit{"Kakšne so pravne posledice neplačila prometne kazni v
 \end{itemize}
 
 \section{Conclusion}
-We built a complete end-to-end RAG extraction pipeline for MedOverNet: HTML boilerplate removal via XPath, dual-strategy text segmentation (50-char and 250-word hybrid), LaBSE 768-d embeddings stored in pgvector with IVFFlat cosine indexes, a flexible retrieval demo, and a cross-encoder reranker. The system reliably handles Slovenian medical and wellness content. The three well-formed queries consistently return relevant segments; the three adversarial queries expose the expected failure modes (underspecified input, out-of-domain corpus, ambiguous acronyms) that no retrieval system can fully overcome without richer data.
+We built a complete RAG extraction and retrieval workflow for MedOverNet: HTML boilerplate removal via XPath, dual-strategy text segmentation (50-char and 250-word hybrid), LaBSE 768-d embeddings stored in pgvector with IVFFlat cosine indexes, a flexible retrieval demo, and a cross-encoder reranker. The system reliably handles Slovenian medical and wellness content. The three well-formed queries consistently return relevant segments; the three adversarial queries expose the expected failure modes (underspecified input, out-of-domain corpus, ambiguous acronyms) that no retrieval system can fully overcome without richer data.
 
 \end{document}

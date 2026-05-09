@@ -8,8 +8,8 @@ This enables knowledge-graph-style context expansion in retrieval:
 given a top-k result, fetch its direct neighbors for related-topic hints.
 
 Usage:
-  python pa2/implementation-extraction/pipeline/build_link_graph.py
-  python pa2/implementation-extraction/pipeline/build_link_graph.py --stats
+  python pa2/crawler/src/build_link_graph.py
+  python pa2/crawler/src/build_link_graph.py --stats
 """
 
 from __future__ import annotations

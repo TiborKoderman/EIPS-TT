@@ -25,8 +25,11 @@ from typing import Callable, Any
 import psycopg2
 
 SRC_DIR = os.path.abspath(os.path.dirname(__file__))
+CORE_DIR = os.path.join(SRC_DIR, "core")
 if SRC_DIR not in sys.path:
     sys.path.insert(0, SRC_DIR)
+if CORE_DIR not in sys.path:
+    sys.path.insert(0, CORE_DIR)
 
 from article_extractor import extract_medover_article as extract_medover_article_bs4  # noqa: E402
 from forum_extractor import extract_forum_thread  # noqa: E402
@@ -96,7 +99,7 @@ def build_parser() -> argparse.ArgumentParser:
 def resolve_extractor(name: str) -> ExtractorFn:
     if name == "xpath":
         # Lazy import: xpath backend requires optional parser deps (e.g. html5lib).
-        from extractor_xpath import extract_medover_article as extract_medover_article_xpath  # noqa: E402
+        from article_extractor_xpath import extract_medover_article as extract_medover_article_xpath  # noqa: E402
 
         return extract_medover_article_xpath
     return extract_medover_article_bs4

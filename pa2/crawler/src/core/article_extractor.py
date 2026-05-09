@@ -95,7 +95,7 @@ class ArticleExtractionResult:
 def extract_medover_article(url: str, html: str) -> ArticleExtractionResult:
     """Iz HTML strani izlušči besedilo in metapodatke članka.
 
-    Zakaj tak pipeline:
+    Zakaj tak postopek:
     1) URL filter hitro izloči očitne ne-article strani (manj false positive primerov).
     2) Izbira content-root uporablja več selektorjev + scoring (robustno med template variacijami).
     3) Boilerplate + link-density cleanup odstrani statične/ponavljajoče bloke.

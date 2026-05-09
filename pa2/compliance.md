@@ -16,22 +16,22 @@ Last verified: 2026-05-08. Verified artifact: `pa2/extraction-db/crawldb_pa2.dum
 
 - **Requirement:** use XPath expressions to filter relevant content from HTML pages.
 - **Status:** DONE
-- **Evidence:** `pa2/implementation-extraction/pipeline/extractor_xpath.py` — multi-selector XPath pipeline (`//main//article`, `//article`, `//*[@itemprop='articleBody']`, CMS class containers), score-based root selection, deterministic boilerplate removal via XPath drops + noise-keyword class/id filter.
+- **Evidence:** `pa2/crawler/src/core/article_extractor_xpath.py` — multi-selector XPath extractor (`//main//article`, `//article`, `//*[@itemprop='articleBody']`, CMS class containers), score-based root selection, deterministic boilerplate removal via XPath drops + noise-keyword class/id filter.
 - **Verified:** the PA2 dump contains 10,413 HTML pages. URL gate breakdown from the dump: 9,062 forum threads, 436 forum/category index pages, 128 tag/author/login/search-style pages, and 787 potential articles. Of those 787 potential articles, 779 yielded non-empty `cleaned_content`; the remaining 8 failed the content gate and are intentionally unsegmented.
 
 ### 2.2 Regex extraction
 
 - **Requirement:** use regular expressions as a co-equal extraction technique.
 - **Status:** DONE
-- **Evidence:** `pa2/implementation-extraction/pipeline/extractor_regex.py` — pure-regex extractor for title (`<h1>` / `og:title` / `<title>`), `published_at` (article:published_time meta + ISO fallback), author (meta name=author), and regex-stripped article body. Compared against XPath in report §"Regex-Based Extraction".
+- **Evidence:** `pa2/crawler/src/core/article_extractor_regex.py` — pure-regex extractor for title (`<h1>` / `og:title` / `<title>`), `published_at` (article:published_time meta + ISO fallback), author (meta name=author), and regex-stripped article body. Compared against XPath in report §"Regex-Based Extraction".
 
 ### 2.3 Cleaned plain text + chunking
 
 - **Requirement:** prepare plain text (boilerplate removed); define a thematic chunking strategy with stated advantages/disadvantages.
 - **Status:** DONE
 - **Evidence:**
-  - Cleaned text: `extractor_xpath.py` + `fill_cleaned_content.py` → `crawldb.page.cleaned_content` (migration 07).
-  - Chunking: `segmenter.py` — `build_short_char_chunks` (fixed ≤50 chars, no boundary respect) and `build_long_word_chunks` (~250 words, paragraph + sentence aware, 50-word overlap).
+  - Cleaned text: `pa2/crawler/src/core/article_extractor_xpath.py` + `pa2/crawler/src/fill_cleaned_content.py` → `crawldb.page.cleaned_content` (migration 07).
+  - Chunking: `pa2/crawler/src/core/segmenter.py` — `build_short_char_chunks` (fixed ≤50 chars, no boundary respect) and `build_long_word_chunks` (~250 words, paragraph + sentence aware, 50-word overlap).
   - Report: §"Short segments" and §"Logical & Hybrid Overlapping Segments" cover criteria, advantages, disadvantages for both strategies.
 - **Verified:** 51,394 short + 2,414 long segments in DB. Spot-check: long segments read as coherent Slovenian paragraphs.
 
@@ -49,7 +49,7 @@ Last verified: 2026-05-08. Verified artifact: `pa2/extraction-db/crawldb_pa2.dum
 - **Requirement:** experiment with different embedding models and store 768-d vectors per segment.
 - **Status:** DONE (primary); alt-model noted in report only (schema-incompatible 384-d model)
 - **Evidence:**
-  - Primary: `pipeline/compute_embeddings.py` with `sentence-transformers/LaBSE` (768-d, multilingual). All 53,808 segments embedded.
+  - Primary: `pa2/crawler/src/compute_embeddings.py` with `sentence-transformers/LaBSE` (768-d, multilingual). All 53,808 segments embedded.
   - Verified: `SELECT COUNT(*) FROM crawldb.page_segment_long WHERE embedding IS NULL` = 0; `page_segment_short` = 0.
   - `embedding_model` column set to `sentence-transformers/LaBSE` on all rows.
   - Alt-model: `paraphrase-multilingual-MiniLM-L12-v2` (384-d) is schema-incompatible with `vector(768)`; qualitative comparison documented in report §"Methods Tried but Not Used". No separate DB table created.
@@ -81,7 +81,7 @@ Last verified: 2026-05-08. Verified artifact: `pa2/extraction-db/crawldb_pa2.dum
 - **Requirement:** rerank initial top-k with a stronger model; test on the 3 poor queries.
 - **Status:** DONE
 - **Evidence:**
-  - `pipeline/rerank_crossencoder.py` — `BAAI/bge-reranker-v2-m3` cross-encoder.
+  - `pa2/crawler/src/rerank_crossencoder.py` — `BAAI/bge-reranker-v2-m3` cross-encoder.
   - `eval/runs/20260506T143525Z_rerank.json` — before/after run saved.
   - Improvement observed: insomnia query rank-1 promoted from generic article (cosine 0.465) to melatonin-specific article (rerank 0.991).
   - Remaining failure: legal query — all rerank scores ≈0.0001; zero relevant content in corpus. Documented in report §"Remaining Reranker Failure".
@@ -94,7 +94,7 @@ Last verified: 2026-05-08. Verified artifact: `pa2/extraction-db/crawldb_pa2.dum
 - **Status:** DONE
 - **Evidence:**
   - `pa2/report-extraction.pdf` — 5 pages, 131 kB, built from `pa2/report/report.tex`.
-  - `pa2/README.md` — setup, DB restore, pipeline run order, demo flags, PA1 notes.
+  - `pa2/README.md` — setup, DB restore, manual extraction step order, demo flags, PA1 notes.
   - `pa2/implementation-extraction/demo.py` — present.
   - `pa2/extraction-db/crawldb_pa2.dump` — pg_dump custom-format, gzip-compressed, 710 MiB / 743,512,347 bytes, tracked through Git LFS. Contains the `vector` extension, `crawldb` schema, lookup tables, `crawldb.page`, `crawldb.page_segment_short`, `crawldb.page_segment_long`, and `crawldb.article_link_graph`; excludes raw `link`, `frontier_queue`, `image`, and `page_data` tables.
 - **Pending:** manual step — confirm GitHub user `opbieps` has read access.
@@ -117,10 +117,10 @@ Last verified: 2026-05-08. Verified artifact: `pa2/extraction-db/crawldb_pa2.dum
   - §"Limitations" — artifact scope, IVFFlat probe sensitivity, short-segment quality, Slovenian-only coverage
   - §"Methods Tried but Not Used" — regex-only, MiniLM alt model, HNSW, sentence-only segmentation
 
-## Pipeline orchestration (new, 2026-05-08)
+## Manual extraction workflow (restored, 2026-05-09)
 
 - **Status:** DONE
-- **Evidence:** `pa2/implementation-extraction/pipeline/run_pipeline.py` — single-command end-to-end pipeline: stage 1 `fill_cleaned_content`, stage 2 `segment_pages`, stage 3 `compute_embeddings`, stage 4 `build_link_graph`. All stages idempotent. Flags: `--force`, `--limit`, `--skip-*`, `--dry-run`, `--batch-size`, `--model-name`. Usage: `python pa2/implementation-extraction/pipeline/run_pipeline.py`.
+- **Evidence:** extraction is manual again under the teammate-style layout: `pa2/crawler/src/fill_cleaned_content.py`, `pa2/crawler/src/segment_pages_to_db.py`, `pa2/crawler/src/compute_embeddings.py`, and `pa2/crawler/src/build_link_graph.py`. The single-command `run_pipeline.py` orchestrator was removed; each stage is invoked explicitly from the README.
 
 ## Assignment database dumps (new, 2026-05-08)
 
@@ -166,14 +166,14 @@ Last verified: 2026-05-08. Verified artifact: `pa2/extraction-db/crawldb_pa2.dum
 - Base branch: `test_something` → forked to `assignment2` 2026-05-06.
 - Files brought in from `extractor` branch (latest commit 45c9d34, 2026-05-05):
   - `db/migrations/07_page_cleaned_content_and_segments.sql`
-  - `pa2/implementation-extraction/pipeline/article_extractor.py`
-  - `pa2/implementation-extraction/pipeline/extractor_xpath.py`
-  - `pa2/implementation-extraction/pipeline/segmenter.py`
-  - `pa2/implementation-extraction/pipeline/fill_cleaned_content.py`
-  - `pa2/implementation-extraction/pipeline/segment_pages.py`
-  - `pa2/implementation-extraction/pipeline/compute_embeddings.py`
+  - `pa2/crawler/src/core/article_extractor.py`
+  - `pa2/crawler/src/core/article_extractor_xpath.py`
+  - `pa2/crawler/src/core/segmenter.py`
+  - `pa2/crawler/src/fill_cleaned_content.py`
+  - `pa2/crawler/src/segment_pages_to_db.py`
+  - `pa2/crawler/src/compute_embeddings.py`
   - `pa2/report/report.tex` (base sections only; we extended with all missing sections)
-- Import paths adjusted in all ported files (flat `pipeline/` layout vs. original `core/` package).
+- Import paths restored to the original `pa2/crawler/src/core/` package layout, with later forum/rerank/device/link-graph functionality kept in `pa2/crawler/src`.
 - All behavioral changes from extractor's latest review commit (overlap_words=50, embedded_at fix, metadata enrichment) confirmed present in our versions.
 - Files from `extractor` deliberately NOT brought in: `article_extraction_cli.py`, `article_extraction_validate.py` (debug tools), `insert_demo.py`, validation artifacts (temp), architecture docs (folded into README).
-- Files we authored fresh: `extractor_regex.py`, `demo.py`, `rerank_crossencoder.py`, `eval/queries.json`, `README.md`, `compliance.md`, `TODO.md`.
+- Files we authored fresh: `article_extractor_regex.py`, `forum_extractor.py`, `demo.py`, `rerank_crossencoder.py`, `device_utils.py`, `build_link_graph.py`, `eval/queries.json`, `README.md`, `compliance.md`, `TODO.md`.
