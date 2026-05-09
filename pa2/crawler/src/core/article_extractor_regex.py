@@ -4,7 +4,7 @@ Purpose: satisfies the assignment's "use XPath AND regex" requirement by
 providing a co-equal regex-based extractor that pulls article-level metadata
 (title, author, published_at, body chars) directly from raw HTML without any
 parser. Kept as an alternate technique to compare against the primary
-XPath/HTML5 path in `extractor_xpath.py`.
+XPath/HTML5 path in `article_extractor_xpath.py`.
 
 The output dataclass intentionally mirrors a subset of `ArticleExtractionResult`
 so a side-by-side comparison is trivial in the report.

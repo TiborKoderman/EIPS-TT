@@ -1,4 +1,4 @@
-# PA2 — MedOverNet RAG Extraction Pipeline
+# PA2 — MedOverNet RAG Extraction and Retrieval
 
 **Assignment:** IEPS Programming Assignment 2  
 **Authors:** Dino Džaferagić, Tibor Koderman, Jerneja Krajcar  
@@ -18,20 +18,24 @@ pa2/
 │   └── crawldb_pa2.dump             # Git LFS pg_dump custom-format export
 ├── report/
 │   └── report.tex                   # LaTeX source
+├── crawler/
+│   └── src/
+│       ├── core/
+│       │   ├── article_extractor.py        # BS4-based base extractor
+│       │   ├── article_extractor_xpath.py  # XPath extraction (Section 2.1)
+│       │   ├── article_extractor_regex.py  # regex extraction (Section 2.2)
+│       │   ├── forum_extractor.py          # forum thread extraction
+│       │   └── segmenter.py                # short + long chunking strategies
+│       ├── fill_cleaned_content.py         # manually populate page.cleaned_content
+│       ├── segment_pages_to_db.py          # manually populate segment tables
+│       ├── compute_embeddings.py           # manually compute LaBSE embeddings
+│       ├── build_link_graph.py             # manually build article_link_graph
+│       └── rerank_crossencoder.py          # BAAI/bge-reranker-v2-m3 reranker
 └── implementation-extraction/
     ├── demo.py                      # retrieval demo (Section 4)
     ├── eval/
     │   ├── queries.json             # 3 good + 3 bad Slovenian queries
     │   └── runs/                    # saved JSON run outputs
-    └── pipeline/
-        ├── article_extractor.py     # BS4-based base extractor (ArticleExtractionResult)
-        ├── extractor_xpath.py       # XPath extraction (Section 2.1, primary)
-        ├── extractor_regex.py       # regex extraction (Section 2.2, co-equal alternative)
-        ├── fill_cleaned_content.py  # populate page.cleaned_content from HTML
-        ├── segmenter.py             # two chunking strategies (short ≤50 char, long ~250 word)
-        ├── segment_pages.py         # populate page_segment_short + page_segment_long
-        ├── compute_embeddings.py    # LaBSE 768-d embeddings for both segment tables
-        └── rerank_crossencoder.py   # BAAI/bge-reranker-v2-m3 cross-encoder reranker
 ```
 
 ---
@@ -78,14 +82,14 @@ psql -h localhost -p 5432 -U postgres -d crawldb \
 
 ---
 
-## Running the pipeline
+## Running the manual extraction steps
 
 Run each stage in order from the repo root with the virtualenv active.
 
 ### Stage 1 — Fill cleaned content (XPath extraction)
 
 ```bash
-python pa2/implementation-extraction/pipeline/fill_cleaned_content.py \
+python pa2/crawler/src/fill_cleaned_content.py \
   --host localhost --port 5432 --db crawldb --user postgres --password postgres \
   --extractor xpath --limit 0
 ```
@@ -95,7 +99,7 @@ python pa2/implementation-extraction/pipeline/fill_cleaned_content.py \
 ### Stage 2 — Segment pages
 
 ```bash
-python pa2/implementation-extraction/pipeline/segment_pages.py \
+python pa2/crawler/src/segment_pages_to_db.py \
   --host localhost --port 5432 --db crawldb --user postgres --password postgres \
   --limit 0
 ```
@@ -106,13 +110,20 @@ Populates `crawldb.page_segment_short` (≤50 char chunks) and `crawldb.page_seg
 
 ```bash
 CUDA_VISIBLE_DEVICES="" \
-python pa2/implementation-extraction/pipeline/compute_embeddings.py \
+python pa2/crawler/src/compute_embeddings.py \
   --db-host localhost --db-name crawldb --db-user postgres --db-pass postgres \
   --model-name sentence-transformers/LaBSE --batch-size 100
 ```
 
 Populates the `embedding` column on both segment tables. Runtime: ~3 hours on CPU (53 k segments).  
 Set `CUDA_VISIBLE_DEVICES` to a valid GPU ID to use GPU acceleration.
+
+### Optional — build article link graph
+
+```bash
+python pa2/crawler/src/build_link_graph.py \
+  --host localhost --port 5432 --db crawldb --user postgres --password postgres
+```
 
 ---
 
@@ -152,6 +163,9 @@ Run outputs are saved to `pa2/implementation-extraction/eval/runs/<timestamp>_{b
 | `--model-name` | `sentence-transformers/LaBSE` | Embedding model |
 | `--rerank` | off | Enable cross-encoder reranking (BAAI/bge-reranker-v2-m3) |
 | `--rerank-model` | `BAAI/bge-reranker-v2-m3` | Reranker model name |
+| `--rerank-candidates` | `4 * top-k` | Number of vector hits to fetch before reranking |
+| `--intent-filter` | `all` | Filter query-file entries by `good` or `bad` intent |
+| `--device` | auto | Torch device override, e.g. `cpu` |
 | `--no-save` | off | Do not save run output to `eval/runs/` |
 
 ---

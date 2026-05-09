@@ -8,7 +8,7 @@ from urllib.parse import urlparse
 
 import html5lib
 
-from extractor_xpath import (  # noqa: E402
+from article_extractor_xpath import (  # noqa: E402
     _clean_text,
     _first,
     _node_text,

@@ -27,8 +27,10 @@ from typing import Any
 
 import psycopg2
 
-PIPELINE_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "pipeline")
-sys.path.insert(0, PIPELINE_DIR)
+REPO_ROOT = os.path.abspath(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", ".."))
+PA2_SRC_DIR = os.path.join(REPO_ROOT, "pa2", "crawler", "src")
+if PA2_SRC_DIR not in sys.path:
+    sys.path.insert(0, PA2_SRC_DIR)
 
 
 _METRIC_OPS = {
