@@ -110,6 +110,12 @@ def build_parser() -> argparse.ArgumentParser:
         default=os.path.join(os.path.dirname(os.path.abspath(__file__)), "eval", "runs"),
     )
     parser.add_argument("--no-save", action="store_true")
+    parser.add_argument(
+        "--ivfflat-probes",
+        type=int,
+        default=10,
+        help="IVFFlat probes per query — higher = better recall, slower (default 10).",
+    )
     return parser
 
 
@@ -172,6 +178,7 @@ def main() -> int:
                 query_vec=embedder.encode([query])[0].tolist(),
                 top_k=_initial_candidate_count(args),
                 embedding_model_tag=args.embedding_model_tag,
+                ivfflat_probes=args.ivfflat_probes,
             )
 
             final = initial
@@ -282,6 +289,7 @@ def _vector_search(
     query_vec: list[float],
     top_k: int,
     embedding_model_tag: str | None,
+    ivfflat_probes: int = 10,
 ) -> list[dict]:
     op = _METRIC_OPS[metric]
     score_expr = f"(s.embedding {op} %s::vector)"
@@ -306,6 +314,7 @@ def _vector_search(
         LIMIT %s
     """
     with conn.cursor() as cur:
+        cur.execute(f"SET LOCAL ivfflat.probes = {int(ivfflat_probes)};")
         cur.execute(sql, params)
         rows = cur.fetchall()
     return [

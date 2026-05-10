@@ -8,7 +8,7 @@ Status legend:
 - PARTIAL — partially implemented; concrete gap noted.
 - MISSING — not implemented.
 
-Last verified: 2026-05-08. Verified artifact: `pa2/extraction-db/crawldb_pa2.dump` (PostgreSQL custom format, gzip, 743,512,347 bytes, tracked through Git LFS). Dump state: 10,413 HTML pages, 779 articles with `cleaned_content`, 51,394 short segments, 2,414 long segments, all embedded with LaBSE.
+Last verified: 2026-05-10. Verified artifact: `pa2/extraction-db/crawldb_pa2.dump` (PostgreSQL custom format, gzip, 1,794,589,312 bytes, tracked through Git LFS). Dump state: 10,429 HTML pages, 5,893 pages with `cleaned_content`, 438,793 short segments (articles + forum threads), 36,816 long segments, all embedded with LaBSE. IVFFlat indexes rebuilt: lists=662 (short), lists=192 (long). `html_content` excluded from dump to keep artifact manageable.
 
 ## Section 2 — Identifying and extracting information
 
@@ -33,7 +33,7 @@ Last verified: 2026-05-08. Verified artifact: `pa2/extraction-db/crawldb_pa2.dum
   - Cleaned text: `pa2/crawler/src/core/article_extractor_xpath.py` + `pa2/crawler/src/fill_cleaned_content.py` → `crawldb.page.cleaned_content` (migration 07).
   - Chunking: `pa2/crawler/src/core/segmenter.py` — `build_short_char_chunks` (fixed ≤50 chars, no boundary respect) and `build_long_word_chunks` (~250 words, paragraph + sentence aware, 50-word overlap).
   - Report: §"Short segments" and §"Logical & Hybrid Overlapping Segments" cover criteria, advantages, disadvantages for both strategies.
-- **Verified:** 51,394 short + 2,414 long segments in DB. Spot-check: long segments read as coherent Slovenian paragraphs.
+- **Verified:** 438,793 short + 36,816 long segments in DB (articles + forum threads). Spot-check: long segments read as coherent Slovenian paragraphs.
 
 ## Section 3 — Storing extracted information in a vector database
 
@@ -49,7 +49,7 @@ Last verified: 2026-05-08. Verified artifact: `pa2/extraction-db/crawldb_pa2.dum
 - **Requirement:** experiment with different embedding models and store 768-d vectors per segment.
 - **Status:** DONE (primary); alt-model noted in report only (schema-incompatible 384-d model)
 - **Evidence:**
-  - Primary: `pa2/crawler/src/compute_embeddings.py` with `sentence-transformers/LaBSE` (768-d, multilingual). All 53,808 segments embedded.
+  - Primary: `pa2/crawler/src/compute_embeddings.py` with `sentence-transformers/LaBSE` (768-d, multilingual). All 475,609 segments embedded (438,793 short + 36,816 long).
   - Verified: `SELECT COUNT(*) FROM crawldb.page_segment_long WHERE embedding IS NULL` = 0; `page_segment_short` = 0.
   - `embedding_model` column set to `sentence-transformers/LaBSE` on all rows.
   - Alt-model: `paraphrase-multilingual-MiniLM-L12-v2` (384-d) is schema-incompatible with `vector(768)`; qualitative comparison documented in report §"Methods Tried but Not Used". No separate DB table created.
@@ -60,9 +60,9 @@ Last verified: 2026-05-08. Verified artifact: `pa2/extraction-db/crawldb_pa2.dum
 - **Status:** DONE
 - **Evidence:**
   - IVFFlat indexes on both tables using `vector_cosine_ops` (cosine distance).
-  - `lists` tuned post-load: short=227 (≈√51394), long=49 (≈√2414). Indexes recreated + ANALYZE run.
+  - `lists` tuned post-load: short=662 (≈√438793), long=192 (≈√36816). Indexes rebuilt 2026-05-10 + ANALYZE run.
   - Report §"Similarity Metric and ANN Index" justifies cosine choice (LaBSE produces unit-norm vectors; magnitude-invariant angle metric is correct) and IVFFlat vs HNSW tradeoff (batch-only use case, memory constraint).
-- **Verified:** `\d crawldb.page_segment_long` shows `idx_page_segment_long_embedding_ivfflat` with `lists=49`.
+- **Verified:** `\d crawldb.page_segment_long` shows `idx_page_segment_long_embedding_ivfflat` with `lists=192`.
 
 ## Section 4 — Information retrieval
 
@@ -140,8 +140,8 @@ Last verified: 2026-05-08. Verified artifact: `pa2/extraction-db/crawldb_pa2.dum
 
 ### PA2 dump artifact
 
-- **Verified:** `pg_restore --list pa2/extraction-db/crawldb_pa2.dump` succeeds and shows PostgreSQL custom format with gzip compression.
-- **Contents:** 10,416 pages total (`HTML` 10,413, `BINARY` 1, `DUPLICATE` 2), 779 pages with non-empty `cleaned_content`, 51,394 short segments with embeddings, 2,414 long segments with embeddings, 48,686 article-link graph edges, 6 data types, 4 page types, and 1 site.
+- **Verified:** `pg_restore --list pa2/extraction-db/crawldb_pa2.dump` succeeds and shows PostgreSQL custom format with gzip compression. Tables: article_link_graph, data_type, page, page_segment_long, page_segment_short, page_type, site. vector extension included. IVFFlat indexes included.
+- **Contents:** 10,432 pages total (`HTML` 10,429, `BINARY` 1, `DUPLICATE` 2), 5,893 pages with non-empty `cleaned_content`, 438,793 short segments with embeddings (article=51,189, forum=387,399, unknown=205), 36,816 long segments with embeddings (article=2,263, forum=34,402, unknown=151), 48,686 article-link graph edges, 6 data types, 4 page types, 1 site. `html_content` column is NULL in dump (excluded to keep artifact under ~2 GB).
 
 ## PA1 crawler improvements (new, 2026-05-08)
 
