@@ -91,6 +91,7 @@ def create_app(service: WorkerControlService | None = None) -> Flask:
                     "POST /api/workers/<id>/start",
                     "POST /api/workers/<id>/pause",
                     "POST /api/workers/<id>/stop",
+                    "POST /api/workers/<id>/remove",
                     "POST /api/workers/spawn",
                     "POST /api/workers/reload",
                     "GET /api/daemon",
@@ -191,6 +192,16 @@ def create_app(service: WorkerControlService | None = None) -> Flask:
             return error_response(f"Worker {worker_id} not found.", status_code=404)
         worker = worker_service.get_worker(worker_id)
         return envelope(worker.to_view_model() if worker else {"id": worker_id})
+
+    @app.post("/api/workers/<int:worker_id>/remove")
+    @maybe_auth
+    def remove_worker(worker_id: int):
+        worker = worker_service.get_worker(worker_id)
+        if worker is None:
+            return error_response(f"Worker {worker_id} not found.", status_code=404)
+        if not worker_service.remove_worker(worker_id):
+            return error_response(f"Worker {worker_id} could not be removed.", status_code=409)
+        return envelope({"id": worker_id, "removed": True})
 
     @app.post("/api/workers/spawn")
     @maybe_auth

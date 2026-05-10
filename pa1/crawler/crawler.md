@@ -15,6 +15,7 @@ The crawler module runs a websocket-controlled daemon that executes worker crawl
 - Detect binary document types (PDF/DOC/DOCX/PPT/PPTX) via content-type, URL/query filename hints, and `Content-Disposition` filenames.
 - Optional document payload relay is supported (`CRAWLER_DOWNLOAD_PDF_CONTENT=true`) and forwards base64 bytes for detected document types to manager ingest.
 - Apply preferential relevance scoring to discovered URLs.
+- Suppress likely crawler-trap URLs (for example recursive login redirect/ReturnURL encodings) before queueing.
 
 ## Entrypoint
 
@@ -48,9 +49,30 @@ Queue behavior options (daemon-side):
 ## Default Crawl Presets
 
 - Default seed preset enables `https://medover.zurnal24.si/` and keeps other starter seeds disabled by default.
-- Default relevance keywords include English + Slovenian medical/fitness terms (for example `medicine`, `medicina`, `health`, `zdravje`, `doctor`, `zdravnik`, `hospital`, `bolnisnica`, `fitness`, `fitnes`, `exercise`, `telovadba`, `training`, `trening`, `nutrition`, `prehrana`, `workout`, `vadba`).
+- Default relevance keywords include English + Slovenian medical/fitness terms (for example `health`, `zdravje`, `fitness`, `fitnes`, `exercise`, `telovadba`, `training`, `trening`, `nutrition`, `prehrana`, `workout`, `vadba`).
 - Manager-generated daemon scripts export both `MANAGER_DAEMON_WS_TOKEN` and `MANAGER_INGEST_API_TOKEN` for consistent authenticated relay.
 - Worker politeness enforces a hard minimum 5s per-IP delay (`max(5s, configured, robots, group-rate)`), and reported robots/effective delay values are relayed to manager ingest.
+
+## Report 1 Canonical URL Contract
+
+Canonical URL storage is enforced end-to-end in crawler and manager ingest/frontier paths.
+
+- Supported schemes: `http`, `https`.
+- Canonical host/scheme casing: lowercase.
+- Fragment handling: always removed.
+- Path handling: decode, collapse dot-segments (`.` / `..`), preserve trailing slash semantics, then re-encode.
+- Query handling: parse/sort by `(key, value)` and remove tracking keys (`utm_*`, `fbclid`, `gclid`, `igshid`, `mc_cid`, `mc_eid`, `ref`, `ref_src`).
+- Port handling: strip default ports (`:80` for `http`, `:443` for `https`).
+
+This contract ensures semantically equivalent URL variants collapse to one stored identity in frontier/page persistence.
+
+## Report 1 Scope Guardrails
+
+The current implementation remains intentionally within Report 1 scope.
+
+- In scope now: fetching/parsing pipeline, requests-based retrieval, robots/politeness, canonicalization, dedupe, seed-domain controls, websocket daemon orchestration.
+- Design references only (deferred): notebooks under `notebooks/` that cover PageRank, LSI, Naive Bayes, FastText embeddings, and Q-learning.
+- JavaScript crawling support (Selenium workflow) remains optional and assignment-gated.
 
 ## Docker Packaging and Release
 

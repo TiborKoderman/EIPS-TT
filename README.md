@@ -66,6 +66,7 @@ bash scripts/db-migrate.sh
 python pa2/crawler/src/segment_pages_to_db.py --limit 10000
 python pa2/crawler/src/compute_embeddings.py
 ```
+
 *Note: This will perform HTML boilerplate removal, chop everything into "short" (50 char) and "long" (250 word) segments, and calculate PGVector embeddings (LaBSE model) suitable for semantic searching.*
 
 4. Check status/logs:
@@ -91,3 +92,5 @@ docker compose --profile server --profile crawler down
 
 - [ManagerApp/README.md](ManagerApp/README.md)
 - [pa1/crawler/crawler.md](pa1/crawler/crawler.md)
+- [WORKFLOW.md](WORKFLOW.md)
+

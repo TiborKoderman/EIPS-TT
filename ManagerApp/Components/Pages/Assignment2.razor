@@ -1,0 +1,445 @@
+@page "/assignment2"
+@using ManagerApp.Models
+@using ManagerApp.Services
+@inject IAssignment2Service Assignment2Service
+
+<div class="page-header">
+    <div class="page-header-main">
+        <div>
+            <h1 class="page-title">Assignment 2</h1>
+            <p class="page-subtitle">Extraction, segmentation, and retrieval status for the Med.Over.Net corpus</p>
+        </div>
+    </div>
+</div>
+
+<div class="page-body">
+    <div class="card mb-lg worker-detail-tabs-card">
+        <div class="worker-detail-tabs" role="tablist" aria-label="Assignment 2 sections">
+            @foreach (var tab in Tabs)
+            {
+                <button class="worker-detail-tab @(ActiveTab == tab.Key ? "active" : "")"
+                        type="button"
+                        role="tab"
+                        aria-selected="@(ActiveTab == tab.Key)"
+                        @onclick="() => ActiveTab = tab.Key">
+                    <span class="mdi @tab.Icon"></span>
+                    <span>@tab.Label</span>
+                </button>
+            }
+        </div>
+    </div>
+
+    @if (isLoading)
+    {
+        <div class="card"><p>Loading Assignment 2 data...</p></div>
+    }
+    else
+    {
+        @if (ActiveTab == "overview")
+        {
+            <div class="grid grid-cols-4 mb-lg">
+                <StatCard Label="Articles" Value="@overview.ExtractedArticlePages.ToString()" Footnote="Extracted pages" />
+                <StatCard Label="Forum Threads" Value="@overview.ExtractedForumPages.ToString()" Footnote="Extracted pages" />
+                <StatCard Label="Cleaned Pages" Value="@overview.CleanedPagesTotal.ToString()" Footnote="Non-empty cleaned_content" />
+                <StatCard Label="Embedding Model" Value="@overview.ActiveEmbeddingModel" Footnote="Most common in page_segment_*" />
+            </div>
+
+            <div class="grid grid-cols-4 mb-lg">
+                <StatCard Label="Short Segments" Value="@overview.ShortSegmentTotal.ToString()" Footnote="@($"{overview.EmbeddedShortSegments} embedded")" />
+                <StatCard Label="Long Segments" Value="@overview.LongSegmentTotal.ToString()" Footnote="@($"{overview.EmbeddedLongSegments} embedded")" />
+                <StatCard Label="ANN Index" Value="@overview.AnnIndex" Footnote="Parsed from pgvector index definition" />
+                <StatCard Label="Similarity" Value="@overview.SimilarityMetric" Footnote="@overview.RerankerModel" />
+            </div>
+        }
+
+        @if (ActiveTab == "corpus")
+        {
+            <div class="card mb-lg pages-toolbar-card">
+                <div class="pages-toolbar-row" style="grid-template-columns: minmax(0, 1fr) 180px 180px auto;">
+                    <div class="pages-search-shell assignment2-search-shell">
+                        <input class="pages-search-input assignment2-search-input"
+                               type="search"
+                               placeholder="Search URL or cleaned text..."
+                               value="@corpusSearchTerm"
+                               @oninput="OnCorpusSearchChanged" />
+                        <span class="mdi mdi-magnify pages-search-icon assignment2-search-icon" aria-hidden="true"></span>
+                    </div>
+
+                    <select @bind="corpusContentType" @bind:after="LoadCorpusAsync">
+                        <option value="all">All content</option>
+                        <option value="article">Article</option>
+                        <option value="forum">Forum</option>
+                        <option value="listing">Listing / skipped</option>
+                    </select>
+
+                    <select @bind="corpusCleanedFilter" @bind:after="LoadCorpusAsync">
+                        <option value="all">All cleaned states</option>
+                        <option value="yes">Has cleaned text</option>
+                        <option value="no">Missing cleaned text</option>
+                    </select>
+
+                    <button class="btn btn-primary" type="button" @onclick="LoadCorpusAsync">
+                        <span class="mdi mdi-refresh"></span>
+                        <span>Refresh</span>
+                    </button>
+                </div>
+            </div>
+
+            <div class="grid grid-cols-2">
+                <div class="card">
+                    <h2 class="card-title">Corpus (@corpusRows.Count)</h2>
+                    @if (corpusRows.Count == 0)
+                    {
+                        <p class="text-muted">No Assignment 2 documents match the current filter.</p>
+                    }
+                    else
+                    {
+                        <div class="page-results-table-wrap">
+                            <table class="workers-log-table page-results-table">
+                                <thead>
+                                    <tr>
+                                        <th>Type</th>
+                                        <th>Cleaned</th>
+                                        <th>Segments</th>
+                                        <th>URL</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    @foreach (var row in corpusRows)
+                                    {
+                                        <tr class="page-row @(selectedDocument?.PageId == row.PageId ? "selected" : "")"
+                                            @onclick="() => SelectDocumentAsync(row.PageId)">
+                                            <td><span class="badge badge-info">@row.ContentType</span></td>
+                                            <td>@(row.HasCleanedContent ? row.CleanedContentLength.ToString() : "-")</td>
+                                            <td>@($"{row.ShortSegmentCount} / {row.LongSegmentCount}")</td>
+                                            <td>@CompactUrl(row.Url)</td>
+                                        </tr>
+                                    }
+                                </tbody>
+                            </table>
+                        </div>
+                    }
+                </div>
+
+                <div class="card">
+                    <h2 class="card-title">Document Details</h2>
+                    @if (selectedDocument is null)
+                    {
+                        <p class="text-muted">Select a document to inspect extracted text and segment coverage.</p>
+                    }
+                    else
+                    {
+                        <div class="flex flex-col gap-sm">
+                            <div><strong>Type:</strong> @selectedDocument.ContentType</div>
+                            <div><strong>Site:</strong> @(selectedDocument.SiteDomain ?? "-")</div>
+                            <div><strong>Accessed:</strong> @(selectedDocument.AccessedTime?.ToLocalTime().ToString("yyyy-MM-dd HH:mm:ss") ?? "-")</div>
+                            <div><strong>Segments:</strong> @($"{selectedDocument.ShortSegmentCount} short / {selectedDocument.LongSegmentCount} long")</div>
+                            <div><strong>URL:</strong> <a href="@selectedDocument.Url" target="_blank" rel="noopener noreferrer">@selectedDocument.Url</a></div>
+                            <div><strong>Cleaned text length:</strong> @selectedDocument.CleanedContentLength</div>
+                            <div class="policy-block">
+                                <div><strong>Cleaned Text Preview</strong></div>
+                                <pre class="policy-pre">@BuildCleanedPreview(selectedDocument.CleanedContent)</pre>
+                            </div>
+                        </div>
+                    }
+                </div>
+            </div>
+        }
+
+        @if (ActiveTab == "demos")
+        {
+            <div class="grid grid-cols-2 mb-lg">
+                <div class="card">
+                    <h2 class="card-title">Required Queries</h2>
+                    <div class="flex gap-sm mb-sm">
+                        <button class="btn btn-primary" type="button" @onclick="RunOfficialBaselineAsync" disabled="@demoRunInProgress">
+                            <span class="mdi mdi-play"></span>
+                            <span>Run Baseline</span>
+                        </button>
+                        <button class="btn" type="button" @onclick="RunOfficialRerankAsync" disabled="@demoRunInProgress">
+                            <span class="mdi mdi-swap-vertical"></span>
+                            <span>Run Rerank</span>
+                        </button>
+                    </div>
+
+                    <div class="flex flex-col gap-sm">
+                        @foreach (var query in queryDefinitions)
+                        {
+                            <div class="policy-block">
+                                <div><strong>@query.Label</strong> <span class="badge @(query.Intent == "bad" ? "badge-warning" : "badge-success")">@query.Intent</span></div>
+                                <div>@query.Query</div>
+                                <div class="text-small text-muted">@query.Expected</div>
+                            </div>
+                        }
+                    </div>
+                </div>
+
+                <div class="card">
+                    <h2 class="card-title">Ad-hoc Query</h2>
+                    <label>
+                        <span class="text-small text-muted">Query</span>
+                        <textarea rows="4" @bind="adHocQuery"></textarea>
+                    </label>
+                    <div class="mt-md flex gap-sm">
+                        <button class="btn btn-primary" type="button" @onclick="RunAdHocBaselineAsync" disabled="@demoRunInProgress">
+                            <span class="mdi mdi-magnify"></span>
+                            <span>Run Baseline</span>
+                        </button>
+                        <button class="btn" type="button" @onclick="RunAdHocRerankAsync" disabled="@demoRunInProgress">
+                            <span class="mdi mdi-swap-vertical"></span>
+                            <span>Run Rerank</span>
+                        </button>
+                    </div>
+                    @if (!string.IsNullOrWhiteSpace(demoStatus))
+                    {
+                        <p class="text-small text-muted mt-sm">@demoStatus</p>
+                    }
+                </div>
+            </div>
+
+            @if (latestBaselineRun is not null)
+            {
+                <div class="card mb-lg">
+                    <h2 class="card-title">Latest Baseline Run</h2>
+                    @RenderRun(latestBaselineRun, badOnly: false)
+                </div>
+            }
+
+            @if (latestRerankRun is not null)
+            {
+                <div class="card">
+                    <h2 class="card-title">Latest Rerank Run</h2>
+                    @RenderRun(latestRerankRun, badOnly: true)
+                </div>
+            }
+        }
+    }
+</div>
+
+@code {
+    private static readonly (string Key, string Label, string Icon)[] Tabs =
+    [
+        ("overview", "Overview", "mdi-view-dashboard-outline"),
+        ("corpus", "Corpus", "mdi-file-document-multiple-outline"),
+        ("demos", "Demos", "mdi-flask-outline"),
+    ];
+
+    private string ActiveTab { get; set; } = "overview";
+    private bool isLoading = true;
+    private bool demoRunInProgress;
+    private string? demoStatus;
+    private Assignment2OverviewDto overview = new();
+    private List<Assignment2QueryDefinitionDto> queryDefinitions = new();
+    private List<Assignment2DocumentSummaryDto> corpusRows = new();
+    private Assignment2DocumentDetailDto? selectedDocument;
+    private Assignment2DemoRunResultDto? latestBaselineRun;
+    private Assignment2DemoRunResultDto? latestRerankRun;
+    private string corpusSearchTerm = string.Empty;
+    private string corpusContentType = "all";
+    private string corpusCleanedFilter = "all";
+    private string adHocQuery = string.Empty;
+    private CancellationTokenSource? corpusDebounceCts;
+
+    protected override async Task OnInitializedAsync()
+    {
+        overview = await Assignment2Service.GetAssignment2OverviewAsync();
+        queryDefinitions = await Assignment2Service.GetAssignment2QueriesAsync();
+        latestBaselineRun = await Assignment2Service.GetLatestAssignment2DemoRunAsync(rerank: false);
+        latestRerankRun = await Assignment2Service.GetLatestAssignment2DemoRunAsync(rerank: true);
+        await LoadCorpusAsync();
+        isLoading = false;
+    }
+
+    private async Task LoadCorpusAsync()
+    {
+        corpusRows = await Assignment2Service.SearchAssignment2DocumentsAsync(
+            corpusSearchTerm,
+            corpusContentType,
+            ParseCleanedFilter(corpusCleanedFilter),
+            skip: 0,
+            take: 150);
+
+        if (corpusRows.Count == 0)
+        {
+            selectedDocument = null;
+            return;
+        }
+
+        var selectedId = selectedDocument?.PageId;
+        var targetId = selectedId.HasValue && corpusRows.Any(row => row.PageId == selectedId.Value)
+            ? selectedId.Value
+            : corpusRows[0].PageId;
+        await SelectDocumentAsync(targetId);
+    }
+
+    private async Task SelectDocumentAsync(int pageId)
+    {
+        selectedDocument = await Assignment2Service.GetAssignment2DocumentAsync(pageId);
+    }
+
+    private async Task OnCorpusSearchChanged(ChangeEventArgs args)
+    {
+        corpusSearchTerm = args.Value?.ToString() ?? string.Empty;
+        corpusDebounceCts?.Cancel();
+        corpusDebounceCts?.Dispose();
+        corpusDebounceCts = new CancellationTokenSource();
+
+        try
+        {
+            await Task.Delay(250, corpusDebounceCts.Token);
+            await LoadCorpusAsync();
+        }
+        catch (OperationCanceledException)
+        {
+            // Ignore debounce cancellations.
+        }
+    }
+
+    private async Task RunOfficialBaselineAsync()
+    {
+        await RunDemoAsync(null, rerank: false, useOfficialQueries: true);
+    }
+
+    private async Task RunOfficialRerankAsync()
+    {
+        await RunDemoAsync(null, rerank: true, useOfficialQueries: true);
+    }
+
+    private async Task RunAdHocBaselineAsync()
+    {
+        await RunDemoAsync(adHocQuery, rerank: false, useOfficialQueries: false);
+    }
+
+    private async Task RunAdHocRerankAsync()
+    {
+        await RunDemoAsync(adHocQuery, rerank: true, useOfficialQueries: false);
+    }
+
+    private async Task RunDemoAsync(string? query, bool rerank, bool useOfficialQueries)
+    {
+        demoRunInProgress = true;
+        demoStatus = rerank ? "Running reranked retrieval..." : "Running baseline retrieval...";
+        StateHasChanged();
+
+        try
+        {
+            var run = await Assignment2Service.RunAssignment2DemoAsync(query, rerank, useOfficialQueries);
+            if (rerank)
+            {
+                latestRerankRun = run;
+            }
+            else
+            {
+                latestBaselineRun = run;
+            }
+
+            demoStatus = $"Saved run: {run.RunPath}";
+        }
+        catch (Exception ex)
+        {
+            demoStatus = ex.Message;
+        }
+        finally
+        {
+            demoRunInProgress = false;
+        }
+    }
+
+    private bool? ParseCleanedFilter(string value)
+    {
+        return (value ?? string.Empty).Trim().ToLowerInvariant() switch
+        {
+            "yes" => true,
+            "no" => false,
+            _ => null,
+        };
+    }
+
+    private string CompactUrl(string url)
+    {
+        if (string.IsNullOrWhiteSpace(url))
+        {
+            return "-";
+        }
+
+        return url.Length <= 72 ? url : $"{url[..69]}...";
+    }
+
+    private string BuildCleanedPreview(string? cleanedContent)
+    {
+        if (string.IsNullOrWhiteSpace(cleanedContent))
+        {
+            return "No cleaned text stored for this page.";
+        }
+
+        var preview = cleanedContent.Trim();
+        return preview.Length <= 2400 ? preview : $"{preview[..2400]}...";
+    }
+
+    private RenderFragment RenderRun(Assignment2DemoRunResultDto run, bool badOnly) => builder =>
+    {
+        var queries = badOnly
+            ? run.Queries.Where(query => query.Label.StartsWith("bad_", StringComparison.OrdinalIgnoreCase)).ToList()
+            : run.Queries;
+        var seq = 0;
+        builder.OpenElement(seq++, "div");
+        builder.AddAttribute(seq++, "class", "flex flex-col gap-sm");
+        builder.OpenElement(seq++, "div");
+        builder.AddContent(seq++, $"Run: {run.TimestampUtc?.ToLocalTime().ToString("yyyy-MM-dd HH:mm:ss") ?? "unknown"}");
+        builder.AddContent(seq++, $" · model={run.EmbeddingModel} · metric={run.Metric}");
+        builder.CloseElement();
+
+        foreach (var query in queries)
+        {
+            builder.OpenElement(seq++, "div");
+            builder.AddAttribute(seq++, "class", "policy-block");
+            builder.OpenElement(seq++, "div");
+            builder.AddContent(seq++, query.Label);
+            builder.CloseElement();
+            builder.OpenElement(seq++, "div");
+            builder.AddContent(seq++, query.Query);
+            builder.CloseElement();
+            builder.OpenElement(seq++, "div");
+            builder.AddAttribute(seq++, "class", "text-small text-muted");
+            builder.AddContent(seq++, query.Expected);
+            builder.CloseElement();
+
+            builder.OpenElement(seq++, "ul");
+            builder.AddAttribute(seq++, "class", "placeholder-note-list");
+            foreach (var hit in query.Initial)
+            {
+                builder.OpenElement(seq++, "li");
+                builder.AddContent(seq++, $"{(hit.Score.HasValue ? hit.Score.Value.ToString("0.000") : "-")} · {hit.Url}");
+                builder.CloseElement();
+            }
+            builder.CloseElement();
+
+            if (run.Rerank && query.Rerank.Count > 0)
+            {
+                builder.OpenElement(seq++, "div");
+                builder.AddAttribute(seq++, "class", "text-small text-muted");
+                builder.AddContent(seq++, "Reranked:");
+                builder.CloseElement();
+
+                builder.OpenElement(seq++, "ul");
+                builder.AddAttribute(seq++, "class", "placeholder-note-list");
+                foreach (var hit in query.Rerank)
+                {
+                    builder.OpenElement(seq++, "li");
+                    var scoreText = hit.Score.HasValue ? hit.Score.Value.ToString("0.000") : "-";
+                    var rerankText = hit.RerankScore.HasValue ? hit.RerankScore.Value.ToString("0.000") : "-";
+                    var deltaText = hit.Score.HasValue && hit.RerankScore.HasValue
+                        ? (hit.RerankScore.Value - hit.Score.Value).ToString("+0.000;-0.000;0.000")
+                        : "-";
+                    builder.AddContent(seq++, $"{scoreText} -> {rerankText} ({deltaText}) · {hit.Url}");
+                    builder.CloseElement();
+                }
+                builder.CloseElement();
+            }
+
+            builder.CloseElement();
+        }
+
+        builder.CloseElement();
+    };
+}

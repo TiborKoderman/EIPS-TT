@@ -16,7 +16,21 @@ from urllib import error, request
 import json
 from dataclasses import dataclass
 from typing import Any
-from urllib.parse import urlparse, urlsplit
+from urllib.parse import unquote, urlparse, urlsplit
+
+
+TRAP_REDIRECT_QUERY_KEYS = {
+    "returnurl",
+    "return_url",
+    "return",
+    "redirect",
+    "redirect_uri",
+    "next",
+    "continue",
+    "dest",
+    "destination",
+    "url",
+}
 
 from api.contracts import (
     GlobalWorkerConfig,
@@ -119,16 +133,14 @@ class DaemonWorkerService(WorkerControlService):
                 queue_mode="server",
                 strategy_mode="balanced",
                 topic_keywords=[
-                    "medicine", "medicina",
-                    "health", "zdravje",
-                    "doctor", "zdravnik",
-                    "clinic", "klinika", "ambulanta",
-                    "hospital", "bolnisnica",
-                    "fitness", "fitnes",
-                    "exercise", "telovadba",
-                    "training", "trening",
-                    "nutrition", "prehrana",
-                    "workout", "vadba",
+                    "medicine", "medicina", "medicinski",
+                    "health", "zdravje", "zdravst",
+                    "doctor", "zdravnik", "specialist",
+                    "bolezen", "simptom", "simptomi",
+                    "diagnoza", "zdravljenje", "terapija",
+                    "pregled", "ambulanta", "klinika",
+                    "bolnisnica", "forum", "vprasanje", "odgovor",
+                    "nosecnost", "dojenje", "otrok", "prehrana",
                 ],
                 avoid_duplicate_paths_across_daemons=True,
                 worker_ids=[1],
@@ -179,14 +191,19 @@ class DaemonWorkerService(WorkerControlService):
             )
         self._pending_manager_events: deque[dict[str, object | None]] = deque(maxlen=1000)
         self._manager_event_relay_degraded = False
+        self._next_server_claim_retry_monotonic = 0.0
         allow_local_fallback_raw = os.getenv(
             "CRAWLER_DAEMON_ALLOW_LOCAL_FALLBACK",
             "true",
         )
         self._allow_daemon_local_fallback = str(allow_local_fallback_raw).strip().lower() in {"1", "true", "yes", "on"}
         self._max_extracted_links_per_page = max(
-            5,
-            _coerce_int(os.getenv("CRAWLER_MAX_EXTRACTED_LINKS_PER_PAGE", "30"), 30),
+            30,
+            _coerce_int(os.getenv("CRAWLER_MAX_EXTRACTED_LINKS_PER_PAGE", "200"), 200),
+        )
+        self._max_extracted_images_per_page = max(
+            10,
+            _coerce_int(os.getenv("CRAWLER_MAX_EXTRACTED_IMAGES_PER_PAGE", "40"), 40),
         )
         self._site_next_available_monotonic: dict[str, float] = {}
         self._link_extractor = LinkExtractor()
@@ -393,6 +410,46 @@ class DaemonWorkerService(WorkerControlService):
             )
             return True
 
+    def remove_worker(self, worker_id: int) -> bool:
+        with self._lock:
+            worker = self._workers.get(worker_id)
+            if worker is None:
+                return False
+
+            previous_status = worker.status
+            self._release_claim_for_worker(worker_id, requeue=True, reason="worker-removed")
+            self._terminate_process_if_running(worker_id)
+            self._stop_thread_worker(worker_id, reason="worker-removed")
+
+            requeued_urls = 0
+            for url, metadata in self._drain_worker_local_frontier_locked(worker_id):
+                if self._enqueue_frontier_url(
+                    url,
+                    source_url=metadata.source_url,
+                    depth=metadata.depth,
+                    explicit_priority=metadata.priority,
+                ):
+                    requeued_urls += 1
+
+            self._logs.pop(worker_id, None)
+            self._workers.pop(worker_id, None)
+
+            for group in self._groups.values():
+                if worker_id in group.worker_ids:
+                    group.worker_ids = [item for item in group.worker_ids if item != worker_id]
+
+            self._emit_manager_event(
+                "worker-removed",
+                worker_id=worker_id,
+                payload={
+                    "workerId": worker_id,
+                    "name": worker.name,
+                    "previousStatus": previous_status,
+                    "requeuedLocalUrls": requeued_urls,
+                },
+            )
+            return True
+
     def spawn_worker(
         self,
         *,
@@ -439,10 +496,16 @@ class DaemonWorkerService(WorkerControlService):
             )
             self._workers[worker_id] = worker
             if group_id is None:
-                raise RuntimeError("groupId is required when spawning a worker.")
-            if group_id not in self._groups:
-                raise RuntimeError(f"Group {group_id} not found.")
-            target_group_id = group_id
+                # Backward compatibility for older queued commands that omitted groupId.
+                enabled_groups = [group.id for group in self._groups.values() if group.enabled]
+                fallback_group_id = min(enabled_groups) if enabled_groups else (min(self._groups.keys()) if self._groups else None)
+                if fallback_group_id is None:
+                    raise RuntimeError("No worker groups are configured.")
+                target_group_id = fallback_group_id
+            else:
+                if group_id not in self._groups:
+                    raise RuntimeError(f"Group {group_id} not found.")
+                target_group_id = group_id
             self._groups[target_group_id].worker_ids.append(worker_id)
 
             self._append_log(worker_id, "Info", f"Worker spawned in {requested_mode} mode.")
@@ -598,7 +661,7 @@ class DaemonWorkerService(WorkerControlService):
 
         queue_mode = str(payload.get("queueMode", self._global_config.queue_mode)).strip().lower()
         if queue_mode not in {"local", "server", "both"}:
-            queue_mode = "both"
+            queue_mode = "server"
 
         strategy_mode = str(payload.get("strategyMode", self._global_config.strategy_mode)).strip().lower()
         if strategy_mode not in {"balanced", "coverage", "focused", "freshness"}:
@@ -1108,12 +1171,15 @@ class DaemonWorkerService(WorkerControlService):
         stop_event = threading.Event()
 
         def run() -> None:
+            idle_sleep_seconds = 0.15
             while not stop_event.is_set():
-                time.sleep(1.2)
+                if stop_event.wait(idle_sleep_seconds):
+                    break
 
                 with self._lock:
                     current = self._workers.get(worker_id)
                     if current is None or current.status != "Active":
+                        idle_sleep_seconds = 0.25
                         continue
                     lease = self._claim_next_frontier_url(worker_id)
                     if lease is None:
@@ -1123,6 +1189,7 @@ class DaemonWorkerService(WorkerControlService):
                             reason="waiting-for-queue",
                             current_url=None,
                         )
+                        idle_sleep_seconds = 0.25
                         continue
                     self._set_worker_runtime_state_locked(
                         current,
@@ -1130,12 +1197,19 @@ class DaemonWorkerService(WorkerControlService):
                         reason="fetching",
                         current_url=lease.url,
                     )
+                    # Keep claim cadence tight while queue has available work.
+                    idle_sleep_seconds = 0.05
 
                 processing = self._download_and_extract_links(worker_id, lease.url)
 
                 with self._lock:
                     current = self._workers.get(worker_id)
                     if current is None:
+                        continue
+
+                    # A pause/stop command may arrive while fetch is in flight.
+                    # Do not overwrite control-plane status with post-fetch updates.
+                    if current.status != "Active":
                         continue
 
                     current.current_url = processing["finalUrl"] or lease.url
@@ -1167,18 +1241,64 @@ class DaemonWorkerService(WorkerControlService):
                             f"{failure_stage.capitalize()} failed for {lease.url}: {processing['error']}",
                         )
 
-                    for link in processing["discoveredLinks"]:
-                        self._enqueue_frontier_url(
-                            link,
-                            source_url=str(processing["finalUrl"] or lease.url),
-                            depth=max(lease.depth + 1, 1),
+                    source_for_discovery = str(processing["finalUrl"] or lease.url)
+                    queue_eligible_discovered_links: list[str] = []
+                    next_depth = max(lease.depth + 1, 1)
+                    use_server_batch_discovery = (
+                        self._global_config.queue_mode == "server"
+                        and self._manager_ingest_url is not None
+                        and not self._allow_daemon_local_fallback
+                    )
+
+                    if use_server_batch_discovery:
+                        seen_queue_eligible: set[str] = set()
+                        for link in processing["discoveredLinks"]:
+                            resolved = self._resolve_frontier_enqueue_candidate(
+                                link,
+                                source_url=source_for_discovery,
+                                depth=next_depth,
+                                explicit_priority=None,
+                                worker_id=worker_id,
+                            )
+                            if resolved is None:
+                                continue
+
+                            normalized_link, _ = resolved
+                            if normalized_link in seen_queue_eligible:
+                                continue
+                            seen_queue_eligible.add(normalized_link)
+                            queue_eligible_discovered_links.append(normalized_link)
+
+                        self._emit_manager_event(
+                            "queue-change",
+                            worker_id=worker_id,
+                            payload={
+                                "action": "enqueue-batch-candidates",
+                                "workerId": worker_id,
+                                "queueMode": self._global_config.queue_mode,
+                                "eligibleCount": len(queue_eligible_discovered_links),
+                            },
                         )
+                    else:
+                        for link in processing["discoveredLinks"]:
+                            normalized_link = self._normalize_frontier_url(link, base_url=source_for_discovery)
+                            if not normalized_link:
+                                continue
+
+                            queued = self._enqueue_frontier_url(
+                                normalized_link,
+                                source_url=source_for_discovery,
+                                depth=next_depth,
+                            )
+                            if queued:
+                                queue_eligible_discovered_links.append(normalized_link)
 
                     self._report_page_to_manager(
                         current,
                         lease.url,
                         processing["downloadResult"],
                         processing["discoveredLinks"],
+                        queue_eligible_discovered_links,
                         processing.get("discoveredImages", []),
                     )
                     self._emit_manager_event(
@@ -1312,6 +1432,77 @@ class DaemonWorkerService(WorkerControlService):
         )
 
     @staticmethod
+    def _normalize_scope_host(raw_value: str | None) -> str | None:
+        if not raw_value:
+            return None
+
+        candidate = raw_value.strip()
+        if not candidate:
+            return None
+
+        if "://" in candidate:
+            try:
+                host = (urlsplit(candidate).hostname or "").strip().lower()
+            except Exception:
+                return None
+            return host or None
+
+        return candidate.lower().lstrip(".") or None
+
+    def _build_allowed_scope_hosts(self) -> set[str]:
+        with self._lock:
+            cfg = self._global_config
+            seed_entries = list(cfg.seed_entries)
+            seed_urls = list(cfg.seed_urls)
+            relevance_hosts = list(cfg.relevance_allowed_domain_suffixes)
+
+        hosts: set[str] = set()
+        for entry in seed_entries:
+            if not entry.enabled:
+                continue
+            host = self._normalize_scope_host(entry.url)
+            if host:
+                hosts.add(host)
+
+        for seed_url in seed_urls:
+            host = self._normalize_scope_host(seed_url)
+            if host:
+                hosts.add(host)
+
+        if not hosts:
+            for raw_host in relevance_hosts:
+                host = self._normalize_scope_host(raw_host)
+                if host:
+                    hosts.add(host)
+
+        if not hosts:
+            for raw_host in self._crawler_config.relevance_allowed_domain_suffixes:
+                host = self._normalize_scope_host(raw_host)
+                if host:
+                    hosts.add(host)
+
+        return hosts
+
+    def _is_url_within_scope(self, candidate_url: str, source_url: str | None) -> tuple[bool, set[str]]:
+        try:
+            candidate_host = (urlsplit(candidate_url).hostname or "").strip().lower()
+        except Exception:
+            return False, set()
+
+        if not candidate_host:
+            return False, set()
+
+        allowed_hosts = self._build_allowed_scope_hosts()
+        if allowed_hosts:
+            return candidate_host in allowed_hosts, allowed_hosts
+
+        source_host = self._normalize_scope_host(source_url)
+        if source_host:
+            return candidate_host == source_host, {source_host}
+
+        return True, set()
+
+    @staticmethod
     def _choose_best_candidate(
         queue: deque[str],
         metadata: dict[str, FrontierMetadata],
@@ -1389,6 +1580,24 @@ class DaemonWorkerService(WorkerControlService):
         if self._is_tombstoned(candidate):
             return None
 
+        in_scope, allowed_hosts = self._is_url_within_scope(candidate, source_url)
+        if not in_scope:
+            payload = {
+                "url": candidate,
+                "reason": "out-of-scope",
+                "sourceUrl": source_url,
+                "allowedHosts": sorted(allowed_hosts),
+            }
+            if worker_id is not None:
+                payload["workerId"] = worker_id
+
+            self._emit_manager_event(
+                "frontier-prune",
+                worker_id=worker_id,
+                payload=payload,
+            )
+            return None
+
         robots_allowed, robots_policy = self._robots_policy_allows_enqueue(candidate)
         if not robots_allowed:
             payload: dict[str, object | None] = {
@@ -1399,6 +1608,21 @@ class DaemonWorkerService(WorkerControlService):
             if worker_id is not None:
                 payload["workerId"] = worker_id
 
+            self._emit_manager_event(
+                "frontier-prune",
+                worker_id=worker_id,
+                payload=payload,
+            )
+            return None
+
+        if self._is_likely_trap_url(candidate):
+            payload = {
+                "url": candidate,
+                "reason": "trap-pattern",
+                "pattern": "recursive-redirect-login",
+            }
+            if worker_id is not None:
+                payload["workerId"] = worker_id
             self._emit_manager_event(
                 "frontier-prune",
                 worker_id=worker_id,
@@ -1417,6 +1641,84 @@ class DaemonWorkerService(WorkerControlService):
             )))
 
         return candidate, priority_value
+
+    @staticmethod
+    def _decode_percent_encoded_value(value: str, max_rounds: int = 6) -> tuple[int, str]:
+        depth = 0
+        current = value
+        for _ in range(max_rounds):
+            decoded = unquote(current)
+            if decoded == current:
+                break
+            depth += 1
+            current = decoded
+        return depth, current
+
+    @staticmethod
+    def _is_auth_like_path(path: str) -> bool:
+        lowered = (path or "").lower()
+        return any(token in lowered for token in ("/login", "/signin", "/sign-in", "/auth"))
+
+    def _is_likely_trap_url(self, candidate: str) -> bool:
+        try:
+            parsed = urlsplit(candidate)
+        except Exception:
+            return False
+
+        query = (parsed.query or "").strip()
+        if not query:
+            return False
+
+        if len(query) >= 1500:
+            return True
+
+        path = parsed.path.lower()
+        lower_query = query.lower()
+        login_like_path = self._is_auth_like_path(path)
+
+        if "%252525" in lower_query:
+            return True
+
+        for part in query.split("&"):
+            if not part:
+                continue
+
+            key, _, value = part.partition("=")
+            if not value:
+                continue
+
+            if len(value) >= 1200:
+                return True
+
+            value_lower = value.lower()
+            if value_lower.count("%25") >= 6:
+                return True
+
+            normalized_key = unquote(key).strip().lower()
+            if normalized_key not in TRAP_REDIRECT_QUERY_KEYS:
+                continue
+
+            decode_depth, decoded_value = self._decode_percent_encoded_value(value, max_rounds=6)
+            if normalized_key in {"returnurl", "return_url"}:
+                return True
+
+            if login_like_path:
+                return True
+
+            if decode_depth >= 3:
+                return True
+
+            if decode_depth >= 2 and ("//" in decoded_value or decoded_value.startswith("/")):
+                return True
+
+            if "returnurl=" in decoded_value.lower():
+                return True
+
+            lowered_decoded = decoded_value.lower()
+            if "redirect=" in lowered_decoded or "redirect_uri=" in lowered_decoded or "next=" in lowered_decoded:
+                return True
+
+        return False
 
     def _enqueue_frontier_url(
         self,
@@ -1583,9 +1885,11 @@ class DaemonWorkerService(WorkerControlService):
             return active
 
         if queue_mode in {"server", "both"}:
-            server_lease = self._claim_frontier_url_from_manager(worker_id)
-            if server_lease is not None:
-                return server_lease
+            now = time.monotonic()
+            if now >= self._next_server_claim_retry_monotonic:
+                server_lease = self._claim_frontier_url_from_manager(worker_id)
+                if server_lease is not None:
+                    return server_lease
             if queue_mode == "server" and not self._allow_daemon_local_fallback:
                 return None
 
@@ -1602,6 +1906,21 @@ class DaemonWorkerService(WorkerControlService):
 
             idx, candidate, metadata = best
             del self._frontier_queue[idx]
+
+            if self._is_likely_trap_url(candidate):
+                self._frontier_metadata.pop(candidate, None)
+                self._known_frontier_urls.discard(candidate)
+                self._mark_tombstone(candidate)
+                self._emit_manager_event(
+                    "frontier-prune",
+                    worker_id=worker_id,
+                    payload={
+                        "url": candidate,
+                        "reason": "trap-pattern",
+                        "workerId": worker_id,
+                    },
+                )
+                continue
 
             if self._is_tombstoned(candidate):
                 self._frontier_metadata.pop(candidate, None)
@@ -1653,6 +1972,21 @@ class DaemonWorkerService(WorkerControlService):
 
             idx, candidate, metadata = best
             del queue[idx]
+
+            if self._is_likely_trap_url(candidate):
+                self._worker_local_known_urls[worker_id].discard(candidate)
+                self._worker_local_metadata[worker_id].pop(candidate, None)
+                self._mark_tombstone(candidate)
+                self._emit_manager_event(
+                    "frontier-prune",
+                    worker_id=worker_id,
+                    payload={
+                        "url": candidate,
+                        "reason": "trap-pattern",
+                        "workerId": worker_id,
+                    },
+                )
+                continue
 
             if self._is_tombstoned(candidate):
                 self._worker_local_known_urls[worker_id].discard(candidate)
@@ -1768,7 +2102,7 @@ class DaemonWorkerService(WorkerControlService):
         self._frontier_metadata.pop(url, None)
         self._worker_local_metadata[worker_id].pop(url, None)
 
-        self._completed_tombstones[url] = time.monotonic() + self._tombstone_ttl_seconds
+        self._mark_tombstone(url)
         self._emit_manager_event(
             "frontier-complete",
             worker_id=worker_id,
@@ -1854,6 +2188,44 @@ class DaemonWorkerService(WorkerControlService):
                 "managerSynced": manager_synced,
             },
         )
+
+    def _drain_worker_local_frontier_locked(self, worker_id: int) -> list[tuple[str, FrontierMetadata]]:
+        queue = self._worker_local_queues.pop(worker_id, deque())
+        metadata = self._worker_local_metadata.pop(worker_id, {})
+        known_urls = self._worker_local_known_urls.pop(worker_id, set())
+
+        drained: list[tuple[str, FrontierMetadata]] = []
+        seen: set[str] = set()
+
+        for candidate in queue:
+            if candidate in seen:
+                continue
+            seen.add(candidate)
+            drained.append((
+                candidate,
+                metadata.get(candidate) or FrontierMetadata(
+                    priority=0,
+                    depth=0,
+                    source_url=None,
+                    discovered_at_monotonic=time.monotonic(),
+                ),
+            ))
+
+        for candidate in known_urls:
+            if candidate in seen:
+                continue
+            seen.add(candidate)
+            drained.append((
+                candidate,
+                metadata.get(candidate) or FrontierMetadata(
+                    priority=0,
+                    depth=0,
+                    source_url=None,
+                    discovered_at_monotonic=time.monotonic(),
+                ),
+            ))
+
+        return drained
 
     def _purge_expired_frontier_state(self) -> None:
         now = time.monotonic()
@@ -2010,6 +2382,9 @@ class DaemonWorkerService(WorkerControlService):
             return False
         return True
 
+    def _mark_tombstone(self, url: str) -> None:
+        self._completed_tombstones[url] = time.monotonic() + self._tombstone_ttl_seconds
+
     def _claim_frontier_url_from_manager(self, worker_id: int) -> FrontierLease | None:
         if self._frontier_claim_url is None:
             return None
@@ -2026,7 +2401,24 @@ class DaemonWorkerService(WorkerControlService):
         if not isinstance(data, dict):
             return None
         if not bool(data.get("claimed")):
+            blocked_by_cooldown = bool(data.get("blockedByCooldown"))
+            retry_after_ms = _coerce_int(data.get("retryAfterMilliseconds"), 0)
+            if blocked_by_cooldown:
+                self._emit_manager_event(
+                    "frontier-claim-blocked",
+                    worker_id=worker_id,
+                    payload={
+                        "workerId": worker_id,
+                        "reason": "cooldown",
+                        "retryAfterMilliseconds": retry_after_ms,
+                    },
+                )
+                # Avoid hot-loop polling without sleeping under the daemon lock.
+                delay_seconds = max(0.05, min(1.0, float(retry_after_ms) / 1000.0 if retry_after_ms > 0 else 0.1))
+                self._next_server_claim_retry_monotonic = time.monotonic() + delay_seconds
             return None
+
+        self._next_server_claim_retry_monotonic = 0.0
 
         raw_url = str(data.get("url") or "").strip()
         if not raw_url:
@@ -2233,8 +2625,17 @@ class DaemonWorkerService(WorkerControlService):
             parser_payload: dict[str, object] | None = None
             if download.html_content:
                 extracted = self._link_extractor.extract(download.html_content, download.final_url)
-                discovered_links = extracted.links[: self._max_extracted_links_per_page]
-                discovered_images = extracted.images[: self._max_extracted_links_per_page]
+                discovered_links = self._prioritize_discovered_links(
+                    extracted.links,
+                    source_url=download.final_url,
+                )
+                discovered_images = extracted.images[: self._max_extracted_images_per_page]
+                if len(extracted.links) > len(discovered_links):
+                    self._append_log(
+                        worker_id,
+                        "Info",
+                        f"[discovery-trim] kept={len(discovered_links)} total={len(extracted.links)} strategy=forum-aware",
+                    )
                 parser_payload = {
                     "links": extracted.links,
                     "jsLinks": extracted.js_links,
@@ -2282,6 +2683,84 @@ class DaemonWorkerService(WorkerControlService):
                 "discoveredLinks": [],
                 "discoveredImages": [],
             }
+
+    def _prioritize_discovered_links(self, links: list[str], *, source_url: str) -> list[str]:
+        if not links:
+            return []
+
+        scored: list[tuple[int, int, str]] = []
+        for index, link in enumerate(links):
+            score = self._score_discovered_link(link, source_url=source_url)
+            scored.append((score, index, link))
+
+        scored.sort(key=lambda item: (-item[0], item[1]))
+        limit = min(self._max_extracted_links_per_page, len(scored))
+        return [item[2] for item in scored[:limit]]
+
+    @staticmethod
+    def _score_discovered_link(candidate_url: str, *, source_url: str) -> int:
+        try:
+            candidate = urlsplit(candidate_url)
+        except Exception:
+            return -10_000
+
+        candidate_host = (candidate.hostname or "").strip().lower()
+        candidate_path = (candidate.path or "/").strip().lower()
+        candidate_query = (candidate.query or "").strip().lower()
+        if not candidate_host:
+            return -10_000
+
+        try:
+            source = urlsplit(source_url)
+            source_host = (source.hostname or "").strip().lower()
+        except Exception:
+            source_host = ""
+
+        score = 0
+
+        if source_host and candidate_host == source_host:
+            score += 150
+        elif source_host and candidate_host.endswith("." + source_host):
+            score += 50
+
+        segment_count = len([segment for segment in candidate_path.split("/") if segment])
+        score += min(segment_count * 5, 40)
+
+        if candidate_path.startswith("/forum"):
+            score += 120
+            if "/forum/tema/" in candidate_path:
+                score += 360
+            if "/forum/vprasanje/" in candidate_path:
+                score += 320
+            if "/forum/kategorija/" in candidate_path:
+                score -= 120
+            if "/forum/tag/" in candidate_path or "/forum/search" in candidate_path:
+                score -= 140
+            if "/forum/page/" in candidate_path:
+                score -= 90
+
+            tail = candidate_path.rstrip("/").split("/")[-1]
+            if "-" in tail and tail.rsplit("-", 1)[-1].isdigit():
+                score += 120
+
+        if candidate_path in {"/", "/forum", "/forum/"}:
+            score -= 180
+        if candidate_path.startswith("/rubrika/"):
+            score -= 90
+        if candidate_path.endswith("/feed") or candidate_path.endswith("/feed/"):
+            score -= 140
+        if candidate_path.startswith("/search") or "/search/" in candidate_path:
+            score -= 120
+        if candidate_path.startswith("/register") or candidate_path.startswith("/registracija"):
+            score -= 90
+        if candidate_path.startswith("/wp-"):
+            score -= 180
+        if "_wpnonce=" in candidate_query or "object_id=" in candidate_query or "action=bbp_" in candidate_query:
+            score -= 500
+        if "utm_" in candidate_query:
+            score -= 40
+
+        return score
 
     def _resolve_robots_policy(self, url: str) -> RobotsPolicy | None:
         if not self._global_config.respect_robots_txt:
@@ -2370,6 +2849,7 @@ class DaemonWorkerService(WorkerControlService):
         raw_url: str | None,
         download_result: dict[str, object | None],
         discovered_links: list[str],
+        queue_eligible_discovered_links: list[str],
         discovered_images: list[str],
     ) -> None:
         if self._manager_ingest_url is None or not raw_url:
@@ -2381,6 +2861,7 @@ class DaemonWorkerService(WorkerControlService):
             "siteId": None,
             "sourcePageId": None,
             "discoveredUrls": discovered_links,
+            "queueEligibleDiscoveredUrls": queue_eligible_discovered_links,
             "discoveredImageUrls": discovered_images,
             "downloadResult": download_result,
         }

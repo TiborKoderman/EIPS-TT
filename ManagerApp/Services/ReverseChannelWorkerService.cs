@@ -110,11 +110,7 @@ public sealed class ReverseChannelWorkerService : IWorkerService
             return null;
         }
 
-        var normalizedSeedUrls = (seedUrls ?? Array.Empty<string>())
-            .Select(url => url.Trim())
-            .Where(url => !string.IsNullOrWhiteSpace(url))
-            .Distinct(StringComparer.OrdinalIgnoreCase)
-            .ToList();
+        var normalizedSeedUrls = NormalizeSeedUrls(seedUrls);
 
         var payload = new
         {
@@ -135,7 +131,7 @@ public sealed class ReverseChannelWorkerService : IWorkerService
 
         if (normalizedSeedUrls.Count > 0)
         {
-            await PersistSeedUrlsAsync(response.Id, normalizedSeedUrls);
+            await PersistSeedUrlsAsync(response.Id, normalizedSeedUrls, targetDaemonId);
         }
 
         return response;
@@ -178,6 +174,29 @@ public sealed class ReverseChannelWorkerService : IWorkerService
     {
         LastError = null;
         return ExecuteCommandAsync("pause-worker", id, daemonId);
+    }
+
+    public async Task<bool> RemoveWorkerAsync(int id, string? daemonId = null)
+    {
+        LastError = null;
+        var targetDaemonId = ResolveTargetDaemonId(daemonId);
+        if (!await EnsureDaemonConnectedAsync(targetDaemonId))
+        {
+            return false;
+        }
+
+        var removed = await RequestAsync<JsonElement>("remove-worker", new
+        {
+            workerId = id,
+        }, ensureConnected: false, daemonId: targetDaemonId);
+        if (removed.ValueKind is JsonValueKind.Undefined or JsonValueKind.Null)
+        {
+            return false;
+        }
+
+        await RemovePersistedWorkerRuntimeAsync(id, targetDaemonId);
+        await RemoveWorkerIdFromPersistedGroupsAsync(id, targetDaemonId);
+        return true;
     }
 
     public async Task<Dictionary<string, int>> GetWorkerStatusCountsAsync()
@@ -285,10 +304,10 @@ public sealed class ReverseChannelWorkerService : IWorkerService
                 Enabled = true,
                 MaxPagesPerWorker = 5000,
                 RateLimitPerMinute = 240,
-                QueueMode = "both",
+                QueueMode = "server",
                 StrategyMode = "balanced",
-                TopicKeywords = new List<string> { "medicine", "health", "clinic" },
-                TopicKeywordsText = "medicine\nhealth\nclinic",
+                TopicKeywords = new List<string> { "medicine", "medicina", "medicinski", "health", "zdravje", "zdravst", "doctor", "zdravnik", "specialist", "bolezen", "simptom", "simptomi", "diagnoza", "zdravljenje", "terapija", "pregled", "ambulanta", "klinika", "bolnisnica", "forum", "vprasanje", "odgovor", "nosecnost", "dojenje", "otrok", "prehrana" },
+                TopicKeywordsText = "medicine\nmedicina\nmedicinski\nhealth\nzdravje\nzdravst\ndoctor\nzdravnik\nspecialist\nbolezen\nsimptom\nsimptomi\ndiagnoza\nzdravljenje\nterapija\npregled\nambulanta\nklinika\nbolnisnica\nforum\nvprasanje\nodgovor\nnosecnost\ndojenje\notrok\nprehrana",
                 AvoidDuplicatePathsAcrossDaemons = true,
                 WorkerIds = new List<int>(),
             },
@@ -335,10 +354,10 @@ public sealed class ReverseChannelWorkerService : IWorkerService
     public async Task<bool> AddSeedAsync(string url, int? workerId = null)
     {
         LastError = null;
-        var normalized = (url ?? string.Empty).Trim();
+        var normalized = NormalizeUrl(url);
         if (string.IsNullOrWhiteSpace(normalized))
         {
-            LastError = "Seed URL must not be empty.";
+            LastError = "Seed URL must be a valid http/https URL.";
             return false;
         }
 
@@ -362,10 +381,10 @@ public sealed class ReverseChannelWorkerService : IWorkerService
     public async Task<bool> CompleteFrontierUrlAsync(int workerId, string url, string? leaseToken, string status = "completed")
     {
         LastError = null;
-        var normalizedUrl = (url ?? string.Empty).Trim();
+        var normalizedUrl = NormalizeUrl(url);
         if (string.IsNullOrWhiteSpace(normalizedUrl))
         {
-            LastError = "Frontier completion requires a non-empty URL.";
+            LastError = "Frontier completion requires a valid http/https URL.";
             return false;
         }
 
@@ -382,10 +401,10 @@ public sealed class ReverseChannelWorkerService : IWorkerService
     public async Task<bool> PruneFrontierUrlAsync(int workerId, string url, string reason = "server-conflict")
     {
         LastError = null;
-        var normalizedUrl = (url ?? string.Empty).Trim();
+        var normalizedUrl = NormalizeUrl(url);
         if (string.IsNullOrWhiteSpace(normalizedUrl))
         {
-            LastError = "Frontier prune requires a non-empty URL.";
+            LastError = "Frontier prune requires a valid http/https URL.";
             return false;
         }
 
@@ -729,12 +748,14 @@ public sealed class ReverseChannelWorkerService : IWorkerService
             "start-worker" => "start-worker",
             "stop-worker" => "stop-worker",
             "pause-worker" => "pause-worker",
+            "remove-worker" => "remove-worker",
             _ => null,
         };
 
         if (string.Equals(commandType, "start-worker", StringComparison.OrdinalIgnoreCase)
             || string.Equals(commandType, "stop-worker", StringComparison.OrdinalIgnoreCase)
             || string.Equals(commandType, "pause-worker", StringComparison.OrdinalIgnoreCase)
+            || string.Equals(commandType, "remove-worker", StringComparison.OrdinalIgnoreCase)
             || string.Equals(commandType, "reload-daemon", StringComparison.OrdinalIgnoreCase)
             || string.Equals(commandType, "stop-daemon", StringComparison.OrdinalIgnoreCase))
         {
@@ -803,6 +824,86 @@ public sealed class ReverseChannelWorkerService : IWorkerService
         return await EnqueueCommandAsync(commandType, workerId);
     }
 
+    private async Task RemovePersistedWorkerRuntimeAsync(int workerId, string daemonId)
+    {
+        try
+        {
+            var connectionString = _configuration.GetConnectionString("CrawldbConnection");
+            if (string.IsNullOrWhiteSpace(connectionString))
+            {
+                return;
+            }
+
+            await using var connection = new NpgsqlConnection(connectionString);
+            await connection.OpenAsync();
+
+            var daemonDbId = await ResolveDaemonDbIdAsync(connection, daemonId)
+                ?? _configuration.GetValue("CrawlerApi:DefaultDaemonDbId", 1);
+
+            const string deleteWorkerSql = """
+                DELETE FROM manager.worker
+                WHERE external_worker_id = @worker_id
+                  AND daemon_id = @daemon_id;
+                """;
+
+            await using (var deleteWorkerCmd = new NpgsqlCommand(deleteWorkerSql, connection))
+            {
+                deleteWorkerCmd.Parameters.AddWithValue("worker_id", workerId);
+                deleteWorkerCmd.Parameters.AddWithValue("daemon_id", daemonDbId);
+                await deleteWorkerCmd.ExecuteNonQueryAsync();
+            }
+
+            const string deleteSeedSql = """
+                DELETE FROM manager.seed_url
+                WHERE external_worker_id = @worker_id
+                  AND daemon_id = @daemon_id;
+                """;
+
+            await using var deleteSeedCmd = new NpgsqlCommand(deleteSeedSql, connection);
+            deleteSeedCmd.Parameters.AddWithValue("worker_id", workerId);
+            deleteSeedCmd.Parameters.AddWithValue("daemon_id", daemonDbId);
+            await deleteSeedCmd.ExecuteNonQueryAsync();
+        }
+        catch (Exception ex)
+        {
+            _logger.LogDebug(ex, "Failed to delete persisted runtime state for worker {WorkerId}", workerId);
+        }
+    }
+
+    private async Task RemoveWorkerIdFromPersistedGroupsAsync(int workerId, string daemonId)
+    {
+        try
+        {
+            var groups = await LoadWorkerGroupsAsync();
+            var changed = false;
+            foreach (var group in groups)
+            {
+                if (!string.Equals(group.DaemonId, daemonId, StringComparison.OrdinalIgnoreCase))
+                {
+                    continue;
+                }
+
+                var updatedIds = group.WorkerIds.Where(id => id != workerId).ToList();
+                if (updatedIds.Count == group.WorkerIds.Count)
+                {
+                    continue;
+                }
+
+                group.WorkerIds = updatedIds;
+                changed = true;
+            }
+
+            if (changed)
+            {
+                await SaveJsonGlobalSettingAsync("crawler.worker_groups", groups, updatedBy: "manager-ui");
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogDebug(ex, "Failed to update persisted worker groups after removing worker {WorkerId}", workerId);
+        }
+    }
+
     private static bool IsTransientRequestFailure(string? error)
     {
         if (string.IsNullOrWhiteSpace(error))
@@ -815,20 +916,27 @@ public sealed class ReverseChannelWorkerService : IWorkerService
             || error.Contains("disconnected", StringComparison.OrdinalIgnoreCase);
     }
 
-    private async Task PersistSeedUrlsAsync(int externalWorkerId, IReadOnlyList<string> seedUrls)
+    private async Task PersistSeedUrlsAsync(int externalWorkerId, IReadOnlyList<string> seedUrls, string daemonId)
     {
         try
         {
+            var normalizedSeedUrls = NormalizeSeedUrls(seedUrls);
+            if (normalizedSeedUrls.Count == 0)
+            {
+                return;
+            }
+
             var connectionString = _configuration.GetConnectionString("CrawldbConnection");
             if (string.IsNullOrWhiteSpace(connectionString))
             {
                 return;
             }
 
-            var daemonDbId = _configuration.GetValue("CrawlerApi:DefaultDaemonDbId", 1);
-
             await using var connection = new NpgsqlConnection(connectionString);
             await connection.OpenAsync();
+
+            var daemonDbId = await ResolveDaemonDbIdAsync(connection, daemonId)
+                ?? _configuration.GetValue("CrawlerApi:DefaultDaemonDbId", 1);
 
             const string insertSql = """
                 INSERT INTO manager.seed_url (daemon_id, external_worker_id, url)
@@ -837,7 +945,7 @@ public sealed class ReverseChannelWorkerService : IWorkerService
                 DO NOTHING;
                 """;
 
-            foreach (var url in seedUrls)
+            foreach (var url in normalizedSeedUrls)
             {
                 await using var cmd = new NpgsqlCommand(insertSql, connection);
                 cmd.Parameters.AddWithValue("daemon_id", daemonDbId);
@@ -850,6 +958,29 @@ public sealed class ReverseChannelWorkerService : IWorkerService
         {
             _logger.LogWarning(ex, "Failed to persist seed URLs for worker {WorkerId}", externalWorkerId);
         }
+    }
+
+    private static async Task<int?> ResolveDaemonDbIdAsync(NpgsqlConnection connection, string daemonIdentifier)
+    {
+        const string sql = """
+            SELECT id
+            FROM manager.daemon
+            WHERE COALESCE(metadata->>'daemonId', '') = @daemon_identifier
+               OR lower(name) = lower(@daemon_name)
+            ORDER BY CASE WHEN COALESCE(metadata->>'daemonId', '') = @daemon_identifier THEN 0 ELSE 1 END
+            LIMIT 1;
+            """;
+
+        await using var cmd = new NpgsqlCommand(sql, connection);
+        cmd.Parameters.AddWithValue("daemon_identifier", daemonIdentifier ?? string.Empty);
+        cmd.Parameters.AddWithValue("daemon_name", daemonIdentifier == "local-default" ? "Local Daemon" : daemonIdentifier ?? string.Empty);
+        var scalar = await cmd.ExecuteScalarAsync();
+        if (scalar is null || scalar == DBNull.Value)
+        {
+            return null;
+        }
+
+        return Convert.ToInt32(scalar);
     }
 
     private async Task<bool> EnsureDaemonConnectedAsync(string? daemonId = null)
@@ -1306,9 +1437,19 @@ public sealed class ReverseChannelWorkerService : IWorkerService
             .Where(entry => !string.IsNullOrWhiteSpace(entry.Url))
             .Select(entry => new SeedEntryViewModel
             {
-                Url = entry.Url.Trim(),
+                Url = NormalizeUrl(entry.Url) ?? string.Empty,
                 Enabled = entry.Enabled,
                 Label = entry.Label?.Trim() ?? string.Empty,
+            })
+            .Where(entry => !string.IsNullOrWhiteSpace(entry.Url))
+            .GroupBy(entry => entry.Url, StringComparer.Ordinal)
+            .Select(group => new SeedEntryViewModel
+            {
+                Url = group.Key,
+                Enabled = group.Any(item => item.Enabled),
+                Label = group.Select(item => item.Label)
+                    .FirstOrDefault(label => !string.IsNullOrWhiteSpace(label))
+                    ?? string.Empty,
             })
             .ToList();
 
@@ -1334,6 +1475,26 @@ public sealed class ReverseChannelWorkerService : IWorkerService
         config.RelevanceAllowedSuffixBoost = Math.Max(0, config.RelevanceAllowedSuffixBoost);
         config.RelevanceKeywordBoost = Math.Max(0, config.RelevanceKeywordBoost);
         config.RelevanceDepthPenalty = Math.Max(0, config.RelevanceDepthPenalty);
+    }
+
+    private static string? NormalizeUrl(string? url)
+    {
+        return CanonicalUrlNormalizer.Normalize(url);
+    }
+
+    private static List<string> NormalizeSeedUrls(IEnumerable<string>? seedUrls)
+    {
+        if (seedUrls is null)
+        {
+            return new List<string>();
+        }
+
+        return seedUrls
+            .Select(NormalizeUrl)
+            .Where(url => !string.IsNullOrWhiteSpace(url))
+            .Select(url => url!)
+            .Distinct(StringComparer.Ordinal)
+            .ToList();
     }
 
     private static string NormalizeStatus(string? status)

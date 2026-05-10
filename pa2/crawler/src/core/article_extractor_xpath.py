@@ -22,7 +22,10 @@ from urllib.parse import urlparse
 import html5lib
 from elementpath import select
 
-from .article_extractor import ArticleExtractionResult
+import os
+import sys
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from article_extractor import ArticleExtractionResult  # noqa: E402
 
 
 _BLOCK_TAGS_TO_DROP: tuple[str, ...] = (

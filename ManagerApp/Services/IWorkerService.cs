@@ -72,6 +72,11 @@ public interface IWorkerService
     Task<bool> PauseWorkerAsync(int id, string? daemonId = null);
 
     /// <summary>
+    /// Remove a worker from live daemon/runtime state.
+    /// </summary>
+    Task<bool> RemoveWorkerAsync(int id, string? daemonId = null);
+
+    /// <summary>
     /// Get worker status counts for pie chart display
     /// Returns dictionary with status names as keys and counts as values
     /// </summary>

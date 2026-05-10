@@ -22,15 +22,18 @@ class CrawlerConfig:
     large_binary_threshold_bytes: int = 5_000_000
     frontier_in_memory_limit: int = 50_000
     topic_keywords: tuple[str, ...] = (
-        "medicine",
-        "health",
-        "doctor",
-        "clinic",
-        "hospital",
-        "treatment",
-        "disease",
+        "medicine", "medicina", "medicinski",
+        "health", "zdravje", "zdravst",
+        "doctor", "zdravnik", "specialist",
+        "bolezen", "simptom", "simptomi",
+        "diagnoza", "zdravljenje", "terapija",
+        "pregled", "ambulanta", "klinika",
+        "bolnisnica", "forum", "vprasanje", "odgovor",
+        "nosecnost", "dojenje", "otrok", "prehrana",
     )
-    relevance_allowed_domain_suffixes: tuple[str, ...] = ()
+    relevance_allowed_domain_suffixes: tuple[str, ...] = (
+        "medover.zurnal24.si",
+    )
     relevance_same_host_boost: float = 10.0
     relevance_allowed_suffix_boost: float = 20.0
     relevance_keyword_boost: float = 5.0
@@ -64,12 +67,12 @@ def load_crawler_config() -> CrawlerConfig:
             kw.strip()
             for kw in os.getenv(
                 "CRAWLER_TOPIC_KEYWORDS",
-                "medicine,health,doctor,clinic,hospital,treatment,disease",
+                "medicine,medicina,medicinski,health,zdravje,zdravst,doctor,zdravnik,specialist,bolezen,simptom,simptomi,diagnoza,zdravljenje,terapija,pregled,ambulanta,klinika,bolnisnica,forum,vprasanje,odgovor,nosecnost,dojenje,otrok,prehrana",
             ).split(",")
             if kw.strip()
         ),
         relevance_allowed_domain_suffixes=_parse_csv_hosts(
-            os.getenv("CRAWLER_RELEVANCE_ALLOWED_SUFFIXES", ""),
+            os.getenv("CRAWLER_RELEVANCE_ALLOWED_SUFFIXES", "medover.zurnal24.si"),
         ),
         relevance_same_host_boost=float(
             os.getenv("CRAWLER_RELEVANCE_SAME_HOST_BOOST", "10"),

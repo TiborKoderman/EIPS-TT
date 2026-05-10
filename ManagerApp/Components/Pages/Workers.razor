@@ -3,6 +3,7 @@
 @using ManagerApp.Models
 @using ManagerApp.Services
 @implements IAsyncDisposable
+@inject IJSRuntime JS
 @inject IWorkerService WorkerService
 @inject DaemonChannelService DaemonChannel
 @inject NavigationManager Navigation
@@ -14,14 +15,17 @@
             <p class="page-subtitle">Manage workers inside crawler daemons (one daemon process can run multiple workers)</p>
         </div>
         <div class="flex items-center gap-sm">
-            <a class="btn btn-icon" href="/workers/strategy" title="Worker strategy" aria-label="Worker strategy">
+            <a class="btn" href="/workers/strategy" title="Worker strategy">
                 <span class="mdi mdi-vector-polyline"></span>
+                <span>Strategy</span>
             </a>
-            <a class="btn btn-icon" href="/workers/config" title="Global worker config" aria-label="Global worker config">
+            <a class="btn" href="/workers/config" title="Global worker config">
                 <span class="mdi mdi-cog-outline"></span>
+                <span>Config</span>
             </a>
-            <a class="btn btn-icon" href="/workers/groups" title="Daemon config" aria-label="Daemon config">
+            <a class="btn" href="/workers/groups" title="Daemon config">
                 <span class="mdi mdi-server-cog"></span>
+                <span>Daemons</span>
             </a>
             <div class="header-updated-pill">
                 <span class="mdi mdi-server"></span>
@@ -82,60 +86,63 @@
     </div>
 
     <div class="card mb-lg">
-        <div class="card-header-inline mb-sm">
-            <h2 class="card-title mb-0">Daemon Channel Diagnostics</h2>
-            <div class="flex items-center gap-sm">
-                <button class="btn btn-icon"
-                        type="button"
-                        title="Start daemon"
-                        aria-label="Start daemon"
-                        @onclick="StartDaemonFromDiagnostics"
-                        disabled="@(daemonActionInProgress || daemonStatus?.Running == true)">
-                    <span class="mdi @(daemonActionInProgress && daemonActionType == "start" ? "mdi-loading mdi-spin" : "mdi-play-circle-outline")"></span>
-                </button>
-                <button class="btn btn-icon"
-                        type="button"
-                        title="Stop daemon"
-                        aria-label="Stop daemon"
-                        @onclick="StopDaemonFromDiagnostics"
-                        disabled="@(daemonActionInProgress || daemonStatus?.Running != true)">
-                    <span class="mdi @(daemonActionInProgress && daemonActionType == "stop" ? "mdi-loading mdi-spin" : "mdi-stop-circle-outline")"></span>
-                </button>
+        <details>
+            <summary class="card-title" style="cursor:pointer;">Advanced / Daemon Channel Diagnostics</summary>
+            <div class="card-header-inline mb-sm mt-sm">
+                <span class="text-small text-muted">Channel state, command queue, and direct daemon controls.</span>
+                <div class="flex items-center gap-sm">
+                    <button class="btn btn-icon"
+                            type="button"
+                            title="Start daemon"
+                            aria-label="Start daemon"
+                            @onclick="StartDaemonFromDiagnostics"
+                            disabled="@(daemonActionInProgress || daemonStatus?.Running == true)">
+                        <span class="mdi @(daemonActionInProgress && daemonActionType == "start" ? "mdi-loading mdi-spin" : "mdi-play-circle-outline")"></span>
+                    </button>
+                    <button class="btn btn-icon"
+                            type="button"
+                            title="Stop daemon"
+                            aria-label="Stop daemon"
+                            @onclick="StopDaemonFromDiagnostics"
+                            disabled="@(daemonActionInProgress || daemonStatus?.Running != true)">
+                        <span class="mdi @(daemonActionInProgress && daemonActionType == "stop" ? "mdi-loading mdi-spin" : "mdi-stop-circle-outline")"></span>
+                    </button>
+                </div>
             </div>
-        </div>
-        <div class="grid grid-cols-4 mb-md">
-            <StatCard Label="Connected Daemons" Value="@daemonConnections.Count.ToString()" Footnote="WebSocket channel" />
-            <StatCard Label="Queued" Value="@commandDiagnostics.Queued.ToString()" Footnote="Awaiting dispatch" />
-            <StatCard Label="In Flight" Value="@((commandDiagnostics.Dispatched + commandDiagnostics.Acknowledged).ToString())" Footnote="Dispatched/acknowledged" />
-            <StatCard Label="Failed" Value="@commandDiagnostics.Failed.ToString()" Footnote="@($"Command failures ({commandDiagnostics.RecentWindowMinutes}m)")" />
-        </div>
+            <div class="grid grid-cols-4 mb-md">
+                <StatCard Label="Connected Daemons" Value="@daemonConnections.Count.ToString()" Footnote="WebSocket channel" />
+                <StatCard Label="Queued" Value="@commandDiagnostics.Queued.ToString()" Footnote="Awaiting dispatch" />
+                <StatCard Label="In Flight" Value="@((commandDiagnostics.Dispatched + commandDiagnostics.Acknowledged).ToString())" Footnote="Dispatched/acknowledged" />
+                <StatCard Label="Failed" Value="@commandDiagnostics.Failed.ToString()" Footnote="@($"Command failures ({commandDiagnostics.RecentWindowMinutes}m)")" />
+            </div>
 
-        @if (daemonConnections.Count == 0)
-        {
-            <p class="text-small text-muted">No daemons are connected to the reverse channel.</p>
-        }
-        else
-        {
-            <ul class="list">
-                @foreach (var connection in daemonConnections)
-                {
-                    <li class="list-item">
-                        <div class="flex items-center justify-between gap-sm">
-                            <strong>@connection.DaemonId</strong>
-                            <span class="badge @(connection.IsOpen ? "badge-success" : "badge-warning")">
-                                @(connection.IsOpen ? "Open" : "Closed")
-                            </span>
-                        </div>
-                        <div class="text-small text-muted">Last seen: @connection.LastSeenUtc.ToLocalTime().ToString("yyyy-MM-dd HH:mm:ss")</div>
-                    </li>
-                }
-            </ul>
-        }
+            @if (daemonConnections.Count == 0)
+            {
+                <p class="text-small text-muted">No daemons are connected to the reverse channel.</p>
+            }
+            else
+            {
+                <ul class="list">
+                    @foreach (var connection in daemonConnections)
+                    {
+                        <li class="list-item">
+                            <div class="flex items-center justify-between gap-sm">
+                                <strong>@connection.DaemonId</strong>
+                                <span class="badge @(connection.IsOpen ? "badge-success" : "badge-warning")">
+                                    @(connection.IsOpen ? "Open" : "Closed")
+                                </span>
+                            </div>
+                            <div class="text-small text-muted">Last seen: @connection.LastSeenUtc.ToLocalTime().ToString("yyyy-MM-dd HH:mm:ss")</div>
+                        </li>
+                    }
+                </ul>
+            }
 
-        @if (!string.IsNullOrWhiteSpace(commandDiagnostics.LastFailure))
-        {
-            <p class="text-small text-muted mt-sm">Last queue failure: @commandDiagnostics.LastFailure</p>
-        }
+            @if (!string.IsNullOrWhiteSpace(commandDiagnostics.LastFailure))
+            {
+                <p class="text-small text-muted mt-sm">Last queue failure: @commandDiagnostics.LastFailure</p>
+            }
+        </details>
     </div>
 
     <div class="card mb-lg">
@@ -267,6 +274,9 @@
                                                 <button class="btn btn-icon" title="Stop" aria-label="Stop" @onclick="() => Stop(worker)" type="button" disabled="@workerActionInProgress.Contains(worker.Id)">
                                                     <span class="mdi mdi-stop"></span>
                                                 </button>
+                                                <button class="btn btn-icon" title="Remove" aria-label="Remove" @onclick="() => Remove(worker)" type="button" disabled="@workerActionInProgress.Contains(worker.Id)">
+                                                    <span class="mdi mdi-delete-outline"></span>
+                                                </button>
                                             </div>
                                         </li>
                                     }
@@ -368,17 +378,6 @@
         </div>
     </div>
 
-    <div class="placeholder-note">
-        <div class="placeholder-note-title">
-            <span class="mdi mdi-server-network"></span> Daemon-based control model
-        </div>
-        <ul class="placeholder-note-list">
-            @foreach (var item in WorkerApiPending)
-            {
-                <li>@item</li>
-            }
-        </ul>
-    </div>
 </div>
 
 @code {
@@ -412,14 +411,6 @@
     private readonly Dictionary<string, int> daemonSpawnCounts = new(StringComparer.OrdinalIgnoreCase);
 
     private sealed record SpawnTargetOption(string Key, int GroupId, string DaemonId, string Label);
-
-    private IReadOnlyList<string> WorkerApiPending =>
-    [
-        "One daemon API controls many workers; workers do not host nested APIs.",
-        "Start daemon first, then spawn/start workers under that daemon.",
-        "Use daemon-scoped config as defaults; worker config can override when needed.",
-        "Expose API externally for remote workers; local worker coordination can stay in-process."
-    ];
 
     private IReadOnlyList<string> Statuses => workerItems
         .Select(w => w.Status)
@@ -574,6 +565,17 @@
     private async Task Stop(WorkerViewModel worker)
     {
         await ExecuteWorkerAction(worker, "stop", () => WorkerService.StopWorkerAsync(worker.Id, worker.DaemonId));
+    }
+
+    private async Task Remove(WorkerViewModel worker)
+    {
+        var confirmed = await ConfirmWorkerRemovalAsync(worker);
+        if (!confirmed)
+        {
+            return;
+        }
+
+        await ExecuteWorkerAction(worker, "remove", () => WorkerService.RemoveWorkerAsync(worker.Id, worker.DaemonId));
     }
 
     private async Task StartAllInDaemon(WorkerGroupSettingsViewModel daemon)
@@ -1140,8 +1142,16 @@
             "start" => "Starting...",
             "pause" => "Pausing...",
             "stop" => "Stopping...",
+            "remove" => "Removing...",
             _ => "Working...",
         };
+    }
+
+    private Task<bool> ConfirmWorkerRemovalAsync(WorkerViewModel worker)
+    {
+        var daemonId = NormalizeDaemonId(worker.DaemonId);
+        var message = $"Remove worker {worker.Id} ({worker.Name}) from daemon {daemonId}? Active workers will be stopped first and their current frontier claim will be requeued.";
+        return JS.InvokeAsync<bool>("confirm", message).AsTask();
     }
 
     private static string ToShortSeverity(string level)

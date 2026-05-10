@@ -1,6 +1,7 @@
 using System.Collections.Concurrent;
 using System.Globalization;
 using System.Net;
+using System.Text.Json;
 using ManagerApp.Models;
 using Npgsql;
 
@@ -8,6 +9,20 @@ namespace ManagerApp.Services;
 
 public sealed class FrontierService
 {
+    private static readonly HashSet<string> TrapRedirectQueryKeys = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "returnurl",
+        "return_url",
+        "return",
+        "redirect",
+        "redirect_uri",
+        "next",
+        "continue",
+        "dest",
+        "destination",
+        "url",
+    };
+
     private const string EnqueueSql = """
         INSERT INTO crawldb.frontier_queue (
             url,
@@ -38,35 +53,12 @@ public sealed class FrontierService
            SET priority = GREATEST(crawldb.frontier_queue.priority, EXCLUDED.priority),
                source_url = COALESCE(crawldb.frontier_queue.source_url, EXCLUDED.source_url),
                depth = LEAST(crawldb.frontier_queue.depth, EXCLUDED.depth),
-               discovered_at = LEAST(crawldb.frontier_queue.discovered_at, EXCLUDED.discovered_at),
-               state = CASE
-                   WHEN crawldb.frontier_queue.state IN (
-                       'COMPLETED'::crawldb.frontier_queue_state,
-                       'FAILED'::crawldb.frontier_queue_state
-                   ) THEN 'QUEUED'::crawldb.frontier_queue_state
-                   ELSE crawldb.frontier_queue.state
-               END,
-               finished_at = CASE
-                   WHEN crawldb.frontier_queue.state IN (
-                       'COMPLETED'::crawldb.frontier_queue_state,
-                       'FAILED'::crawldb.frontier_queue_state
-                   ) THEN NULL
-                   ELSE crawldb.frontier_queue.finished_at
-               END,
-               locked_at = CASE
-                   WHEN crawldb.frontier_queue.state IN (
-                       'COMPLETED'::crawldb.frontier_queue_state,
-                       'FAILED'::crawldb.frontier_queue_state
-                   ) THEN NULL
-                   ELSE crawldb.frontier_queue.locked_at
-               END,
-               locked_by_worker_id = CASE
-                   WHEN crawldb.frontier_queue.state IN (
-                       'COMPLETED'::crawldb.frontier_queue_state,
-                       'FAILED'::crawldb.frontier_queue_state
-                   ) THEN NULL
-                   ELSE crawldb.frontier_queue.locked_by_worker_id
-               END;
+               discovered_at = LEAST(crawldb.frontier_queue.discovered_at, EXCLUDED.discovered_at)
+         WHERE crawldb.frontier_queue.state NOT IN (
+             'COMPLETED'::crawldb.frontier_queue_state,
+             'FAILED'::crawldb.frontier_queue_state,
+             'DUPLICATE'::crawldb.frontier_queue_state
+         );
         """;
 
     private readonly IConfiguration _configuration;
@@ -74,6 +66,10 @@ public sealed class FrontierService
     private readonly string? _connectionString;
     private readonly ConcurrentDictionary<string, DateTime> _crawlerSiteNextAllowedUtc = new(StringComparer.Ordinal);
     private readonly ConcurrentDictionary<string, (string SiteIpKey, DateTime ExpiresAtUtc)> _resolvedSiteIdentityCache = new(StringComparer.OrdinalIgnoreCase);
+    private static readonly JsonSerializerOptions JsonOptions = new()
+    {
+        PropertyNameCaseInsensitive = true,
+    };
     private readonly int _leaseTtlSeconds;
     private readonly int _politenessDelayMilliseconds;
     private const int MinPolitenessDelayMilliseconds = 5_000;
@@ -128,14 +124,50 @@ public sealed class FrontierService
             return false;
         }
         var normalizedUrl = normalized.Trim();
+        var rawUrl = (url ?? string.Empty).Trim();
+        if (!string.IsNullOrWhiteSpace(rawUrl)
+            && !string.Equals(rawUrl, normalizedUrl, StringComparison.Ordinal))
+        {
+            _logger.LogDebug(
+                "Canonicalized frontier enqueue URL from {OriginalUrl} to {CanonicalUrl}.",
+                rawUrl,
+                normalizedUrl);
+        }
+
+        if (IsLikelyCrawlerTrapUrl(normalizedUrl))
+        {
+            _logger.LogDebug("Skipping likely trap URL during enqueue: {Url}", normalizedUrl);
+            return false;
+        }
 
         var normalizedSource = NormalizeUrl(sourceUrl);
+        var rawSource = (sourceUrl ?? string.Empty).Trim();
+        if (!string.IsNullOrWhiteSpace(rawSource)
+            && !string.IsNullOrWhiteSpace(normalizedSource)
+            && !string.Equals(rawSource, normalizedSource, StringComparison.Ordinal))
+        {
+            _logger.LogDebug(
+                "Canonicalized frontier source URL from {OriginalUrl} to {CanonicalUrl}.",
+                rawSource,
+                normalizedSource);
+        }
 
         await using var connection = await OpenConnectionAsync(cancellationToken);
         if (connection is null)
         {
             return false;
         }
+
+        var allowedScopeHosts = await LoadConfiguredSeedHostsAsync(connection, cancellationToken);
+        if (!IsUrlWithinScope(normalizedUrl, normalizedSource, allowedScopeHosts))
+        {
+            _logger.LogInformation(
+                "Skipped out-of-scope frontier enqueue URL {Url}. source={SourceUrl}.",
+                normalizedUrl,
+                normalizedSource);
+            return false;
+        }
+
         return await EnqueueCoreAsync(connection, normalizedUrl, priority, depth, normalizedSource, cancellationToken);
     }
 
@@ -149,6 +181,9 @@ public sealed class FrontierService
         }
 
         var mergedByUrl = new Dictionary<string, FrontierEnqueueCandidate>(StringComparer.Ordinal);
+        var skippedTrapCandidates = 0;
+        var canonicalizedUrlCount = 0;
+        var canonicalizedSourceCount = 0;
         foreach (var candidate in candidates)
         {
             var normalized = NormalizeUrl(candidate.Url);
@@ -157,7 +192,27 @@ public sealed class FrontierService
                 continue;
             }
 
+            var rawUrl = (candidate.Url ?? string.Empty).Trim();
+            if (!string.IsNullOrWhiteSpace(rawUrl)
+                && !string.Equals(rawUrl, normalized, StringComparison.Ordinal))
+            {
+                canonicalizedUrlCount += 1;
+            }
+
+            if (IsLikelyCrawlerTrapUrl(normalized))
+            {
+                skippedTrapCandidates += 1;
+                continue;
+            }
+
             var normalizedSource = NormalizeUrl(candidate.SourceUrl);
+            var rawSource = (candidate.SourceUrl ?? string.Empty).Trim();
+            if (!string.IsNullOrWhiteSpace(rawSource)
+                && !string.IsNullOrWhiteSpace(normalizedSource)
+                && !string.Equals(rawSource, normalizedSource, StringComparison.Ordinal))
+            {
+                canonicalizedSourceCount += 1;
+            }
             var normalizedDepth = Math.Max(0, candidate.Depth);
 
             if (mergedByUrl.TryGetValue(normalized, out var existing))
@@ -184,7 +239,32 @@ public sealed class FrontierService
 
         if (mergedByUrl.Count == 0)
         {
+            if (canonicalizedUrlCount > 0 || canonicalizedSourceCount > 0)
+            {
+                _logger.LogDebug(
+                    "Canonicalized enqueue batch URLs: urls={UrlCount}, sourceUrls={SourceCount}.",
+                    canonicalizedUrlCount,
+                    canonicalizedSourceCount);
+            }
+
+            if (skippedTrapCandidates > 0)
+            {
+                _logger.LogDebug("Skipped {Count} likely trap frontier candidates in enqueue batch.", skippedTrapCandidates);
+            }
             return 0;
+        }
+
+        if (canonicalizedUrlCount > 0 || canonicalizedSourceCount > 0)
+        {
+            _logger.LogDebug(
+                "Canonicalized enqueue batch URLs: urls={UrlCount}, sourceUrls={SourceCount}.",
+                canonicalizedUrlCount,
+                canonicalizedSourceCount);
+        }
+
+        if (skippedTrapCandidates > 0)
+        {
+            _logger.LogDebug("Skipped {Count} likely trap frontier candidates in enqueue batch.", skippedTrapCandidates);
         }
 
         await using var connection = await OpenConnectionAsync(cancellationToken);
@@ -193,11 +273,20 @@ public sealed class FrontierService
             return 0;
         }
 
+        var allowedScopeHosts = await LoadConfiguredSeedHostsAsync(connection, cancellationToken);
+        var skippedOutOfScopeCandidates = 0;
+
         var inserted = 0;
         foreach (var candidate in mergedByUrl.Values)
         {
             if (string.IsNullOrWhiteSpace(candidate.Url))
             {
+                continue;
+            }
+
+            if (!IsUrlWithinScope(candidate.Url, candidate.SourceUrl, allowedScopeHosts))
+            {
+                skippedOutOfScopeCandidates += 1;
                 continue;
             }
 
@@ -214,7 +303,137 @@ public sealed class FrontierService
             }
         }
 
+        if (skippedOutOfScopeCandidates > 0)
+        {
+            _logger.LogInformation(
+                "Skipped {Count} out-of-scope frontier enqueue candidates in batch.",
+                skippedOutOfScopeCandidates);
+        }
+
         return inserted;
+    }
+
+    private static bool IsUrlWithinScope(string? targetUrl, string? sourceUrl, IReadOnlySet<string> allowedScopeHosts)
+    {
+        var targetHost = GetNormalizedHost(targetUrl);
+        if (string.IsNullOrWhiteSpace(targetHost))
+        {
+            return false;
+        }
+
+        if (allowedScopeHosts.Count > 0)
+        {
+            return allowedScopeHosts.Contains(targetHost);
+        }
+
+        var sourceHost = GetNormalizedHost(sourceUrl);
+        if (string.IsNullOrWhiteSpace(sourceHost))
+        {
+            return true;
+        }
+
+        return string.Equals(targetHost, sourceHost, StringComparison.OrdinalIgnoreCase);
+    }
+
+    private async Task<HashSet<string>> LoadConfiguredSeedHostsAsync(NpgsqlConnection connection, CancellationToken cancellationToken)
+    {
+        var hosts = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+        const string globalConfigSql = """
+            SELECT value::text
+            FROM manager.global_setting
+            WHERE key = 'crawler.global_config'
+            LIMIT 1;
+            """;
+
+        await using (var globalConfigCmd = new NpgsqlCommand(globalConfigSql, connection))
+        {
+            var rawConfig = await globalConfigCmd.ExecuteScalarAsync(cancellationToken) as string;
+            if (!string.IsNullOrWhiteSpace(rawConfig))
+            {
+                var config = JsonSerializer.Deserialize<WorkerGlobalConfigViewModel>(rawConfig, JsonOptions);
+                if (config is not null)
+                {
+                    foreach (var host in ExtractSeedHosts(config))
+                    {
+                        hosts.Add(host);
+                    }
+                }
+            }
+        }
+
+        if (hosts.Count > 0)
+        {
+            return hosts;
+        }
+
+        const string seedUrlSql = """
+            SELECT DISTINCT url
+            FROM manager.seed_url
+            WHERE url IS NOT NULL
+              AND btrim(url) <> '';
+            """;
+
+        await using var seedCmd = new NpgsqlCommand(seedUrlSql, connection);
+        await using var reader = await seedCmd.ExecuteReaderAsync(cancellationToken);
+        while (await reader.ReadAsync(cancellationToken))
+        {
+            var url = reader.IsDBNull(0) ? null : reader.GetString(0);
+            var host = GetNormalizedHost(url);
+            if (!string.IsNullOrWhiteSpace(host))
+            {
+                hosts.Add(host);
+            }
+        }
+
+        return hosts;
+    }
+
+    private static IEnumerable<string> ExtractSeedHosts(WorkerGlobalConfigViewModel config)
+    {
+        var hosts = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+        foreach (var entry in config.SeedEntries)
+        {
+            if (!entry.Enabled)
+            {
+                continue;
+            }
+
+            var host = GetNormalizedHost(entry.Url);
+            if (!string.IsNullOrWhiteSpace(host))
+            {
+                hosts.Add(host);
+            }
+        }
+
+        foreach (var rawLine in (config.SeedUrlsText ?? string.Empty)
+            .Split(new[] { '\r', '\n' }, StringSplitOptions.RemoveEmptyEntries))
+        {
+            var host = GetNormalizedHost(rawLine);
+            if (!string.IsNullOrWhiteSpace(host))
+            {
+                hosts.Add(host);
+            }
+        }
+
+        return hosts;
+    }
+
+    private static string? GetNormalizedHost(string? url)
+    {
+        if (string.IsNullOrWhiteSpace(url))
+        {
+            return null;
+        }
+
+        var host = ExtractHost(url);
+        if (string.IsNullOrWhiteSpace(host))
+        {
+            return null;
+        }
+
+        return host.Trim().Trim('.').ToLowerInvariant();
     }
 
     private static async Task<bool> EnqueueCoreAsync(
@@ -285,22 +504,57 @@ public sealed class FrontierService
 
             var now = DateTime.UtcNow;
             (long Id, string Url, int Priority, string? SourceUrl, int Depth)? selected = null;
+            var trapIds = new List<long>();
+            var blockedByCooldown = 0;
+            int? retryAfterMilliseconds = null;
             foreach (var item in candidates)
             {
+                if (IsLikelyCrawlerTrapUrl(item.Url))
+                {
+                    trapIds.Add(item.Id);
+                    continue;
+                }
+
                 if (await IsSiteReadyAsync(crawlerKey, item.Url, now, cancellationToken))
                 {
                     selected = item;
                     break;
                 }
+
+                blockedByCooldown += 1;
+                var remainingMs = await GetSiteCooldownRemainingMillisecondsAsync(crawlerKey, item.Url, now, cancellationToken);
+                if (remainingMs.HasValue)
+                {
+                    retryAfterMilliseconds = !retryAfterMilliseconds.HasValue
+                        ? remainingMs
+                        : Math.Min(retryAfterMilliseconds.Value, remainingMs.Value);
+                }
+            }
+
+            if (trapIds.Count > 0)
+            {
+                await MarkQueuedCandidatesFailedAsync(connection, tx, trapIds, cancellationToken);
+                _logger.LogDebug("Pruned {Count} likely trap URLs while claiming frontier rows.", trapIds.Count);
             }
 
             if (selected is null)
             {
+                if (blockedByCooldown > 0)
+                {
+                    _logger.LogDebug(
+                        "Frontier claim blocked by cooldown for worker {WorkerId}. blocked={BlockedCount} retryAfterMs={RetryAfterMs}",
+                        workerId,
+                        blockedByCooldown,
+                        retryAfterMilliseconds);
+                }
+
                 await tx.CommitAsync(cancellationToken);
                 return new FrontierClaimViewModel
                 {
                     Claimed = false,
                     WorkerId = workerId,
+                    BlockedByCooldown = blockedByCooldown > 0,
+                    RetryAfterMilliseconds = retryAfterMilliseconds,
                 };
             }
 
@@ -650,6 +904,32 @@ public sealed class FrontierService
         UpsertCrawlerSiteCooldown(crawlerKey, siteIpKey, nowUtc, _politenessDelayMilliseconds);
     }
 
+    private async Task<int?> GetSiteCooldownRemainingMillisecondsAsync(
+        string crawlerKey,
+        string url,
+        DateTime nowUtc,
+        CancellationToken cancellationToken)
+    {
+        var siteIpKey = await ResolveSiteIpKeyAsync(url, nowUtc, cancellationToken);
+        if (string.IsNullOrWhiteSpace(siteIpKey))
+        {
+            return null;
+        }
+
+        var scopedKey = ComposeCrawlerSiteKey(crawlerKey, siteIpKey);
+        if (!_crawlerSiteNextAllowedUtc.TryGetValue(scopedKey, out var readyAtUtc))
+        {
+            return null;
+        }
+
+        if (readyAtUtc <= nowUtc)
+        {
+            return 0;
+        }
+
+        return (int)Math.Ceiling((readyAtUtc - nowUtc).TotalMilliseconds);
+    }
+
     private void UpsertCrawlerSiteCooldown(string crawlerKey, string siteIpKey, DateTime nowUtc, int delayMilliseconds)
     {
         var boundedDelayMilliseconds = Math.Max(MinPolitenessDelayMilliseconds, delayMilliseconds);
@@ -840,22 +1120,183 @@ public sealed class FrontierService
 
     private static string? NormalizeUrl(string? url)
     {
-        if (string.IsNullOrWhiteSpace(url))
+        return CanonicalUrlNormalizer.Normalize(url);
+    }
+
+    private static bool IsLikelyCrawlerTrapUrl(string normalizedUrl)
+    {
+        if (!Uri.TryCreate(normalizedUrl, UriKind.Absolute, out var parsed))
         {
-            return null;
+            return false;
         }
 
-        var trimmed = url.Trim();
-        if (!Uri.TryCreate(trimmed, UriKind.Absolute, out var parsed))
+        var query = parsed.Query;
+        if (string.IsNullOrWhiteSpace(query))
         {
-            return trimmed;
+            return false;
         }
 
-        var builder = new UriBuilder(parsed)
+        var queryText = query.TrimStart('?');
+        if (queryText.Length >= 1500)
         {
-            Fragment = string.Empty,
-        };
-        return builder.Uri.AbsoluteUri;
+            return true;
+        }
+
+        var lowerQuery = queryText.ToLowerInvariant();
+        if (lowerQuery.Contains("%252525", StringComparison.Ordinal))
+        {
+            return true;
+        }
+
+        var path = parsed.AbsolutePath.ToLowerInvariant();
+        var loginLikePath = IsAuthLikePath(path);
+
+        var parts = queryText.Split('&', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+        foreach (var part in parts)
+        {
+            var separatorIndex = part.IndexOf('=');
+            if (separatorIndex <= 0 || separatorIndex >= part.Length - 1)
+            {
+                continue;
+            }
+
+            var keyRaw = part[..separatorIndex];
+            var valueRaw = part[(separatorIndex + 1)..];
+            if (string.IsNullOrWhiteSpace(valueRaw))
+            {
+                continue;
+            }
+
+            if (valueRaw.Length >= 1200)
+            {
+                return true;
+            }
+
+            if (CountTokenOccurrences(valueRaw, "%25") >= 6)
+            {
+                return true;
+            }
+
+            var key = WebUtility.UrlDecode(keyRaw)?.Trim() ?? string.Empty;
+            if (!TrapRedirectQueryKeys.Contains(key))
+            {
+                continue;
+            }
+
+            var (decodeDepth, decodedValue) = DecodePercentEncodedDepth(valueRaw, maxRounds: 6);
+            if (string.Equals(key, "returnurl", StringComparison.OrdinalIgnoreCase)
+                || string.Equals(key, "return_url", StringComparison.OrdinalIgnoreCase))
+            {
+                return true;
+            }
+
+            if (loginLikePath)
+            {
+                return true;
+            }
+
+            if (decodeDepth >= 3)
+            {
+                return true;
+            }
+
+            if (decodeDepth >= 2
+                && (decodedValue.Contains("://", StringComparison.OrdinalIgnoreCase)
+                    || decodedValue.StartsWith("/", StringComparison.Ordinal)))
+            {
+                return true;
+            }
+
+            if (decodedValue.Contains("returnurl=", StringComparison.OrdinalIgnoreCase))
+            {
+                return true;
+            }
+
+            if (decodedValue.Contains("redirect=", StringComparison.OrdinalIgnoreCase)
+                || decodedValue.Contains("redirect_uri=", StringComparison.OrdinalIgnoreCase)
+                || decodedValue.Contains("next=", StringComparison.OrdinalIgnoreCase))
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    private static bool IsAuthLikePath(string path)
+    {
+        if (string.IsNullOrWhiteSpace(path))
+        {
+            return false;
+        }
+
+        return path.Contains("/login", StringComparison.Ordinal)
+            || path.Contains("/signin", StringComparison.Ordinal)
+            || path.Contains("/sign-in", StringComparison.Ordinal)
+            || path.Contains("/auth", StringComparison.Ordinal);
+    }
+
+    private static (int Depth, string Value) DecodePercentEncodedDepth(string value, int maxRounds)
+    {
+        var depth = 0;
+        var current = value;
+        for (var index = 0; index < maxRounds; index += 1)
+        {
+            var decoded = WebUtility.UrlDecode(current) ?? current;
+            if (string.Equals(decoded, current, StringComparison.Ordinal))
+            {
+                break;
+            }
+
+            depth += 1;
+            current = decoded;
+        }
+
+        return (depth, current);
+    }
+
+    private static int CountTokenOccurrences(string value, string token)
+    {
+        if (string.IsNullOrEmpty(value) || string.IsNullOrEmpty(token))
+        {
+            return 0;
+        }
+
+        var count = 0;
+        var index = 0;
+        while ((index = value.IndexOf(token, index, StringComparison.OrdinalIgnoreCase)) >= 0)
+        {
+            count += 1;
+            index += token.Length;
+        }
+
+        return count;
+    }
+
+    private static async Task MarkQueuedCandidatesFailedAsync(
+        NpgsqlConnection connection,
+        NpgsqlTransaction transaction,
+        IReadOnlyCollection<long> ids,
+        CancellationToken cancellationToken)
+    {
+        if (ids.Count == 0)
+        {
+            return;
+        }
+
+        const string sql = """
+            UPDATE crawldb.frontier_queue
+            SET state = 'FAILED'::crawldb.frontier_queue_state,
+                finished_at = NOW(),
+                locked_at = NULL,
+                locked_by_worker_id = NULL
+            WHERE state = 'QUEUED'::crawldb.frontier_queue_state
+              AND id = ANY(@ids);
+            """;
+
+        await using var cmd = new NpgsqlCommand(sql, connection, transaction);
+        cmd.Parameters.AddWithValue("ids", ids.ToArray());
+        await cmd.ExecuteNonQueryAsync(cancellationToken);
     }
 
 }

@@ -5,6 +5,66 @@ from __future__ import annotations
 from dataclasses import dataclass
 from urllib.parse import urlsplit
 
+AUTH_PATH_SIGNALS = ("/login", "/signin", "/sign-in", "/auth")
+REDIRECT_QUERY_KEYS = ("returnurl=", "return_url=", "redirect=", "redirect_uri=", "next=", "continue=")
+
+# MedOverNet article path signals — highest article-yield paths
+_ARTICLE_PATH_SIGNALS = (
+    "/novica/",
+    "/clanek/",
+    "/artikel/",
+    "/prispevek/",
+    "/blog/",
+    "/zdravje/",
+    "/bolezni/",
+    "/simptomi/",
+    "/diagnoza/",
+    "/zdravljenje/",
+    "/terapija/",
+    "/zdravila/",
+    "/ambulanta/",
+    "/klinika/",
+    "/nosecnost/",
+    "/dojenje/",
+    "/otrok/",
+    "/prehrana/",
+    "/telovadba/",
+    "/vadba/",
+    "/fitnes/",
+)
+
+# Forum thread signals — valuable second-priority content
+_FORUM_THREAD_PATH_SIGNALS = (
+    "/forum/tema/",
+    "/forum/vprasanje/",
+    "/tema/",
+    "/vprasanje/",
+)
+
+# Deprioritise structural/noise paths (not blocked — they may link to content)
+_LOW_PRIORITY_PATH_SIGNALS = (
+    "/iskanje",
+    "/search",
+    "/kategorija/",
+    "/forum/kategorija/",
+    "/forum/tag/",
+    "/forum/search",
+    "/forum/page/",
+    "/category/",
+    "/tag/",
+    "/stran/",
+    "/page/",
+    "/author/",
+    "/avtor/",
+    "/kontakt",
+    "/prijava",
+    "/registracija",
+    "/wp-",
+    "/feed",
+    "/rss",
+    "/sitemap",
+)
+
 
 @dataclass(frozen=True)
 class RelevancePolicy:
@@ -38,8 +98,11 @@ def score_url(
         return 0.0
 
     host = parsed.hostname.lower()
+    path = (parsed.path or "").lower()
+    query = (parsed.query or "").lower()
     score = 0.0
 
+    # Same-host affinity
     if parent_url:
         try:
             parent_host = urlsplit(parent_url).hostname
@@ -48,17 +111,44 @@ def score_url(
         except Exception:
             pass
 
+    # Allowed domain suffix boost
     for suffix in policy.allowed_domain_suffixes:
         normalized = suffix.lower().lstrip(".")
         if host == normalized or host.endswith("." + normalized):
             score += policy.allowed_suffix_boost
             break
 
-    haystack = (parsed.path + "?" + (parsed.query or "")).lower()
+    # Article path signals — best content source
+    if any(sig in path for sig in _ARTICLE_PATH_SIGNALS):
+        score += 30.0
+
+    # Forum thread signals — valuable secondary content
+    elif any(sig in path for sig in _FORUM_THREAD_PATH_SIGNALS):
+        score += 22.0
+    elif path.startswith("/forum"):
+        score += 4.0
+
+    # Topic keyword match in path
     for keyword in policy.keywords:
         key = keyword.strip().lower()
-        if key and key in haystack:
+        if key and key in path:
             score += policy.keyword_boost
+
+    # Noise path penalty
+    if any(sig in path for sig in _LOW_PRIORITY_PATH_SIGNALS):
+        score -= 18.0
+    if path in {"/", "/forum", "/forum/"}:
+        score -= 25.0
+
+    # Auth/redirect penalties
+    has_auth_path = any(token in path for token in AUTH_PATH_SIGNALS)
+    has_redirect_query = any(token in query for token in REDIRECT_QUERY_KEYS)
+    if has_auth_path:
+        score -= 15.0
+    if has_redirect_query:
+        score -= 20.0
+    if has_auth_path and has_redirect_query:
+        score -= 15.0
 
     score -= policy.depth_penalty * max(depth, 0)
     return score

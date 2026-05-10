@@ -1,0 +1,246 @@
+﻿{
+  "timestamp": "2026-05-08T11:41:18.841737Z",
+  "embedding_model": "sentence-transformers/LaBSE",
+  "metric": "cosine",
+  "table": "page_segment_long",
+  "top_k": 5,
+  "rerank": false,
+  "rerank_model": null,
+  "rerank_candidates": null,
+  "intent_filter": "all",
+  "corpus_fingerprint": "740231B10C88D629D02A90E01811A08D6F9FF317338A859B7CE865CBBEB3DBF3",
+  "queries": [
+    {
+      "label": "good_1_blood_pressure",
+      "query": "Kateri so simptomi visokega krvnega tlaka?",
+      "expected": "Articles about hypertension symptoms (glavobol, vrtoglavica, krvavitve iz nosu).",
+      "initial": [
+        {
+          "page_id": 1738,
+          "url": "https://medover.zurnal24.si/kako-prepoznati-krvne-strdke-trombozo/",
+          "score": 0.45087198766684466,
+          "preview": "plju\u010Dne embolije lahko trajno okvarijo plju\u010Dne \u017Eile, kar vodi v popu\u0161\u010Danje srca. Velik del arterijskih tromboz se lahko prepre\u010Di z zdravim \u017Eivljenjskim slogom brez kajenja, z zdravo, uravnote\u017Eeno preh\u2026"
+        },
+        {
+          "page_id": 140,
+          "url": "https://medover.zurnal24.si/6-kljucnih-nasvetov-za-lazje-obvladovanje-krvnega-tlaka/",
+          "score": 0.4583645897616322,
+          "preview": ", ki prikazuje pritisk v arterijah, ko srce po\u010Diva med utripoma in se polni s krvjo. Na spletni strani klinike Mayo Clinic pojasnjujejo, da strokovnjaki krvni tlak razvr\u0161\u010Dajo v \u0161tiri razli\u010Dne skupine:\u2026"
+        },
+        {
+          "page_id": 140,
+          "url": "https://medover.zurnal24.si/6-kljucnih-nasvetov-za-lazje-obvladovanje-krvnega-tlaka/",
+          "score": 0.46882806625449835,
+          "preview": "6 klju\u010Dnih nasvetov za la\u017Eje obvladovanje krvnega tlaka Visok krvni tlak je vse pogostej\u0161i problem z resnimi posledicami. Preproste spremembe v vsakdanjem \u017Eivljenju pa lahko naredijo veliko razliko. V\u2026"
+        },
+        {
+          "page_id": 1533,
+          "url": "https://medover.zurnal24.si/kako-in-kdaj-si-meriti-krvni-tlak/",
+          "score": 0.4760790027356424,
+          "preview": "Pogoste napake pri merjenju krvnega tlaka Zvi\u0161an krvni tlak (hipertenzija) ne povzro\u010Da bole\u010Din, vendar dolgoro\u010Dno povzro\u010Da resne zdravstvene zaplete, zato ga pogosto imenujemo tihi ubijalec. V Sloveni\u2026"
+        },
+        {
+          "page_id": 1648,
+          "url": "https://medover.zurnal24.si/kako-depresija-in-kronicni-stres-vplivata-na-srce-kaj-lahko-naredite-zase/",
+          "score": 0.5125930018778444,
+          "preview": "To NI znak slabosti, ampak odgovorne skrbi zase. Ni dvoma \u2013 kroni\u010Dni stres in depresija nista le \u201Cstanja duha\u201D, temve\u010D dejavna zdravstvena tveganja, ki vplivajo na srce. Prepoznati, nasloviti in obvla\u2026"
+        }
+      ],
+      "rerank": []
+    },
+    {
+      "label": "good_2_diabetes_diet",
+      "query": "Kak\u0161na prehrana je primerna pri sladkorni bolezni tipa 2?",
+      "expected": "Articles on diabetes diet, low glycemic index foods, sugar substitutes.",
+      "initial": [
+        {
+          "page_id": 2021,
+          "url": "https://medover.zurnal24.si/kardiometabolni-dejavniki-kaj-so-in-kako-vplivajo-na-zdravje/",
+          "score": 0.4069148302078247,
+          "preview": "pa vplivamo na svojo telesno maso, obseg pasu, prehranjevalne navade, telesno aktivnost, kajenje in druge \u0161kodljive razvade. Zdrav \u017Eivljenjski slog pri osebah z mejno bazalno glikemijo (mejno zvi\u0161anje\u2026"
+        },
+        {
+          "page_id": 2023,
+          "url": "https://medover.zurnal24.si/razblinjamo-mite-ali-sladkor-in-stres-povzrocata-sladkorno-bolezen/",
+          "score": 0.4442639946937561,
+          "preview": "pa svetuje v zmernih koli\u010Dinah ,\u201D pove. Razlo\u017Ei, da je sladkorna bolezen povezana s previsokimi ravnimi krvnega sladkorja (glukoze) v krvi. Glukozo vnesemo s hrano, nahaja pa se v hrani, ki vsebuje og\u2026"
+        },
+        {
+          "page_id": 2023,
+          "url": "https://medover.zurnal24.si/razblinjamo-mite-ali-sladkor-in-stres-povzrocata-sladkorno-bolezen/",
+          "score": 0.44535585912202846,
+          "preview": "razlikujejo od tistih pri sladkorni bolezni tipa 2. To je mit, pomembno je le, da oseba s sladkorno boleznijo pozna svojo bolezen, prepozna simptome in znake hipoglikemije, zna izmeriti sladkor in je\u2026"
+        },
+        {
+          "page_id": 2021,
+          "url": "https://medover.zurnal24.si/kardiometabolni-dejavniki-kaj-so-in-kako-vplivajo-na-zdravje/",
+          "score": 0.477799863946445,
+          "preview": "Zakaj je pri sladkorni bolezni zdrav \u017Eivljenjski slog tako pomemben? Bolezni srca in o\u017Eilja so \u0161e vedno najpogostej\u0161i vzrok umrljivosti v Sloveniji. Raziskave ka\u017Eejo, da bi jih bilo lahko precej manj,\u2026"
+        },
+        {
+          "page_id": 2019,
+          "url": "https://medover.zurnal24.si/cudezna-tabletka-je-tu/",
+          "score": 0.48576181957266196,
+          "preview": "obolevnosti za sladkorno boleznijo tipa 2 menimo, da strukturirani edukacijski programi lahko pomembno pripomorejo k opolnomo\u010Denju oseb s sladkorno boleznijo, saj le to predstavlja temeljni dele\u017E v pr\u2026"
+        }
+      ],
+      "rerank": []
+    },
+    {
+      "label": "good_3_insomnia_help",
+      "query": "Kako naravno premagati nespe\u010Dnost in izbolj\u0161ati spanec?",
+      "expected": "Sleep hygiene, melatonin, herbal remedies, relaxation tips.",
+      "initial": [
+        {
+          "page_id": 2028,
+          "url": "https://medover.zurnal24.si/lahko-zaradi-pomanjkanja-spanja-zbolimo-odgovor-vas-bo-sokiral/",
+          "score": 0.5256449156086069,
+          "preview": "krepitev pridobljene imunosti. Kakor spanje pomaga mo\u017Eganom pri utrjevanju u\u010Denja in spomina, se med spanjem krepi sposobnost imunskega sistema, da si zapomni, kako prepoznati in se odzvati na nevarne\u2026"
+        },
+        {
+          "page_id": 2031,
+          "url": "https://medover.zurnal24.si/nasveti-za-boljsi-spanec/",
+          "score": 0.528906496102005,
+          "preview": "spodbuja proizvodnjo melatonina pono\u010Di. 3. V svoj vsakdan vklju\u010Dite \u017Eivila bogata z melatoninom , kot so med drugim banane, \u010De\u0161nje, orehi in ovseni kosmi\u010Di. 5. Poskrbite za redno spalno rutino. Pojdit\u2026"
+        },
+        {
+          "page_id": 1645,
+          "url": "https://medover.zurnal24.si/nocne-ptice-tveganje-za-zdravje-srca-in-ozilja/",
+          "score": 0.5335174977944042,
+          "preview": "bolj nagnjeni k motnjam razpolo\u017Eenja, kot sta anksioznost in depresija, ki prav tako pove\u010Dujejo tveganja za bolezni srca in o\u017Eilja. Internist dr. John La Puma za Medical News Today pojasnjuje, da ve\u010De\u2026"
+        },
+        {
+          "page_id": 2028,
+          "url": "https://medover.zurnal24.si/lahko-zaradi-pomanjkanja-spanja-zbolimo-odgovor-vas-bo-sokiral/",
+          "score": 0.535220128129108,
+          "preview": "Tako spanje vpliva na imunski sistem Spanje in imunski sistem sta dvosmerno povezana. V zadnjih desetletjih se je znanje o spanju izjemno poglobilo in pokazalo daljnose\u017Een pomen spanja na skoraj vse s\u2026"
+        },
+        {
+          "page_id": 1950,
+          "url": "https://medover.zurnal24.si/zakaj-je-zdravje-in-pocutje-tako-pomemben-dosleden-urnik-spanja/",
+          "score": 0.5361617984916385,
+          "preview": "ritmu : notranji uri, ki deluje v 24-urnem ciklu. \u201CKo se zjutraj zbudimo in odpremo o\u010Di, zaznamo svetlobo. Ta jutranja svetloba je zelo pomemben signal za na\u0161o notranjo (cirkadiano) uro, \u201D pojasnjuje\u2026"
+        }
+      ],
+      "rerank": []
+    },
+    {
+      "label": "bad_1_ambiguous_pain",
+      "query": "Boli me",
+      "expected": "Too short and ambiguous; expected to return generic medical chatter.",
+      "initial": [
+        {
+          "page_id": 343,
+          "url": "https://medover.zurnal24.si/forum/tema/bownova-terapija-2-1506994/",
+          "score": 0.6670928100998879,
+          "preview": "Reply 13 | LucijaB | 09.08.2010 ob 17:20 Iz navodil Bowenove terapije: bole\u010Dine (po po\u0161kodbah, motnje v mi\u0161i\u010Dno-vezivnem sistemu vklu\u010Dno z miofascialnimi pro\u017Eilnimi to\u010Dkami, f i b r o m i a l g i ja)"
+        },
+        {
+          "page_id": 1760,
+          "url": "https://medover.zurnal24.si/napake-ki-jih-delamo-ko-nas-bolijo-sklepi-ali-hrbet/",
+          "score": 0.6782334255119213,
+          "preview": "je, da so pogosto kroni\u010Dne. Za vsako kroni\u010Dno bole\u010Dino pa velja, da jo je te\u017Eko odpraviti. Razlog je, da kroni\u010Dna bole\u010Dina postane avtonomna \u2013 \u017Eiv\u010Dne poti, ki prena\u0161ajo signal iz bole\u010Dih struktur v gl\u2026"
+        },
+        {
+          "page_id": 1521,
+          "url": "https://medover.zurnal24.si/kronicne-bolecine-so-mnogokrat-povezane-s-pomanjkanjem-teh-hranil/",
+          "score": 0.6865726037708026,
+          "preview": "Kroni\u010Dne bole\u010Dine so mnogokrat povezane s pomanjkanjem teh hranil To te\u017Eavo je pogosto la\u017Eje odpraviti, kot si mislite. \u201CKroni\u010Dna bole\u010Dina je pogost, kompleksen in mu\u010Den problem, ki ima globok vpliv n\u2026"
+        },
+        {
+          "page_id": 343,
+          "url": "https://medover.zurnal24.si/forum/tema/bownova-terapija-2-1506994/",
+          "score": 0.6947780847549438,
+          "preview": "tudi zanimala vse ljudi, ki imajo dolgotrajne bole\u010Dine in \u0161e niso na\u0161li terapije, ki jim bi lahko pomagala. Bownova terapija se je izkazala uspe\u0161na pri zdravljenju ali kontroli naslednjih motenj: \u0160por\u2026"
+        },
+        {
+          "page_id": 1623,
+          "url": "https://medover.zurnal24.si/trpi-vsak-peti-med-nami-to-so-nefarmakoloske-oblike-pomoci/",
+          "score": 0.7047426104545593,
+          "preview": "Trpi vsak peti med nami. To so nefarmakolo\u0161ke oblike pomo\u010Di Nefarmakolo\u0161ke mo\u017Enosti zdravljenja kroni\u010Dne bole\u010Dine: ne gre le za zmanj\u0161evanje bole\u010Dine, temve\u010D tudi tehnike, kako s kroni\u010Dno bole\u010Dino la\u017E\u2026"
+        }
+      ],
+      "rerank": []
+    },
+    {
+      "label": "bad_2_out_of_domain_legal",
+      "query": "Kak\u0161ne so pravne posledice nepla\u010Dila prometne kazni v Sloveniji?",
+      "expected": "Out-of-domain (legal). Expected to return loosely related civic/administrative content if any.",
+      "initial": [
+        {
+          "page_id": 2069,
+          "url": "https://medover.zurnal24.si/zasvojenost-preventiva-je-bolj-ucinkovita-od-kurative/",
+          "score": 0.6763290377055451,
+          "preview": "Ljudska univerza Nova Gorica \u2026) kot tudi programe, projekte in ostale aktivnosti \u0161tevilnih vladnih in nevladnih organizacij (center za socialno delo, NVO na podro\u010Dju \u0161porta, mladine, socialnega varstv\u2026"
+        },
+        {
+          "page_id": 1868,
+          "url": "https://medover.zurnal24.si/ko-obdarujete-otroke-obdarujte-odgovorno/",
+          "score": 0.6904771739528873,
+          "preview": "video vsebine, brez strukture in nadzora, se njegovi mo\u017Egani za\u010Dnejo prilagajati na ni\u017Ejo stopnjo stimulacije iz resni\u010Dnega sveta .\u00AB Da bi to prepre\u010Dili, Kramli svetuje, naj star\u0161i, vzgojitelji in dru\u2026"
+        },
+        {
+          "page_id": 2069,
+          "url": "https://medover.zurnal24.si/zasvojenost-preventiva-je-bolj-ucinkovita-od-kurative/",
+          "score": 0.6985930024738904,
+          "preview": "aktivnosti za \u0161ir\u0161o javnost. Ko sem v lu\u010Di novembrske akcije \u2013 ob mesecu prepre\u010Devanja odvisnosti v MONG \u2013 govorila z direktorico Mladinskega centra in z vodjo Centra za zdravljenje odvisnosti, sta ob\u2026"
+        },
+        {
+          "page_id": 333,
+          "url": "https://medover.zurnal24.si/forum/tema/iscem-partnerko-za-resno-zvezo-6-22317631/",
+          "score": 0.7018882156543855,
+          "preview": "Reply 1 | Skepsa | 04.12.2022 ob 23:21 toksi\u010Dno?"
+        },
+        {
+          "page_id": 2003,
+          "url": "https://medover.zurnal24.si/poletje-in-solske-obveznosti-da-koliko-ali-sploh-ne/",
+          "score": 0.7077570259571055,
+          "preview": "ta nagrada ne pomeni toliko, kot si mislijo star\u0161i. V kolikor se star\u0161i odlo\u010Dijo za nagrado pa naj bo ta zaslu\u017Eena in dobro osmi\u0161ljena. Kaj, zakaj in s kak\u0161nim namenom. \u010Ce ste se vnaprej dogovorili za\u2026"
+        }
+      ],
+      "rerank": []
+    },
+    {
+      "label": "bad_3_acronym_no_context",
+      "query": "ATM",
+      "expected": "Acronym with multiple meanings (medicine \u002B finance). Expected to surface unrelated content; reranker should at least prefer medical interpretations if any segment matches.",
+      "initial": [
+        {
+          "page_id": 448,
+          "url": "https://medover.zurnal24.si/forum/tema/kako-ste-se-postavile-na-noge-3147606/",
+          "score": 0.6789581967021059,
+          "preview": "vedno ko pa potrebuje denar, molze njo. Zanimivo, do oceta je spostljiv. Skoraj prepricana sem, da ima MOM, narcisticno usmerjen. Hkrati je alkoholik, sam seveda ne vidi tezav, pri nicemer. Pije ker m\u2026"
+        },
+        {
+          "page_id": 1870,
+          "url": "https://medover.zurnal24.si/ko-se-hec-spremeni-v-odvisnost-pot-iz-zasvojenosti-z-igrami-na-sreco/",
+          "score": 0.7200224900205446,
+          "preview": "da imam vse pod nadzorom, da lahko kadar koli neham. [\u2026] V svojih dvajsetih in tridesetih sem na\u0161la novo tola\u017Ebo v nakupovanju. Ni\u010D ni bilo lep\u0161ega kot ob\u010Dutek, ko sem stala pred blagajno z novimi obl\u2026"
+        },
+        {
+          "page_id": 339,
+          "url": "https://medover.zurnal24.si/forum/tema/klepetalnica-za-starejse-2274881/",
+          "score": 0.7427429267474481,
+          "preview": "Reply 8 | gramoznica | 30.05.2009 ob 20:30 Hm, meni ni (vsaj zaenkrat nikoli dolg\u010Das), imam nekaj let ve\u010D kot ti, mo\u017Ea velikega ljubitlja planin, le redko grem z njim v hribe, imam poro\u010Denega sina, ni\u2026"
+        },
+        {
+          "page_id": 381,
+          "url": "https://medover.zurnal24.si/forum/tema/verjamete-v-zivljenje-po-smrti-2248534/",
+          "score": 0.7450423316644872,
+          "preview": "Reply 8 | bati | 24.09.2008 ob 14:46 ja nekaj je na tem\u2026.po smrti mojega brata,\u010Deprav te besede te\u0161ko izgovorim ker preve\u010D v prsih me boli\u2026jaz sem enkrat iskala njegovo knjigo ki sem jo samo jaz sprav\u2026"
+        },
+        {
+          "page_id": 339,
+          "url": "https://medover.zurnal24.si/forum/tema/klepetalnica-za-starejse-2274881/",
+          "score": 0.747962050322108,
+          "preview": "Reply 5 | klepetulja | 08.08.2008 ob 06:59 Na chatih je problem, ker te\u017Eko dobi\u0161 \u017Eensko sogovornico, dobi\u0161 pa \u2013 z veliko sre\u010De \u2013 \u010Disto prijetne mo\u0161ke sogovornike tudi tvojih let. Ok, ve\u010Dina jih i\u0161\u010De a\u2026"
+        }
+      ],
+      "rerank": []
+    }
+  ],
+  "manager_request_mode": "official",
+  "manager_query": null,
+  "manager_corpus_fingerprint": "740231B10C88D629D02A90E01811A08D6F9FF317338A859B7CE865CBBEB3DBF3",
+  "manager_cached_at_utc": "2026-05-08T11:41:20.1712795Z"
+}

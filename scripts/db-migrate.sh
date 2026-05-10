@@ -18,7 +18,7 @@ print_startup_diagnostics() {
   if grep -Fq "Counter to that, there appears to be PostgreSQL data in:" <<<"${recent_logs}"; then
     cat >&2 <<'EOF'
 PostgreSQL failed to start because this repo's Docker volume was initialized with an older
-image layout and `postgres:latest` now expects the newer Postgres 18+ directory structure.
+image layout and the current database image now expects a newer Postgres data directory structure.
 
 Run this repo-local reset once to recreate the database volume cleanly:
   bash scripts/reset-db.sh --clean

@@ -7,6 +7,20 @@ __pycache__/
 *.pyc
 pa1/report/.out/*
 !pa1/report/.out/.gitkeep
+*.dump
+*.dump.gz
+*.sql.gz
+*.sql.xz
+*.sql.zst
+pa2/extraction-db/*.dump
+!pa2/extraction-db/crawldb_pa2.dump
+*.aux
+*.fdb_latexmk
+*.fls
+*.log
+*.fls
+pa2/report/*.out
+!pa2/report/report.pdf
 Preferential crawling.ipynb
 Remote crawler database (client).ipynb
 Remote crawler database (server).ipynb
@@ -14,3 +28,6 @@ Web crawling - basic tools.ipynb
 ManagerApp/bin
 ManagerApp/obj
 .github
+pa1/db
+!pa1/db
+.playwright-cli
