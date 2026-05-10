@@ -23,12 +23,12 @@ The assignment covers three main phases: 1) extracting and cleaning relevant inf
 and 3) building a retrieval program that returns the most relevant text segments for a Slovenian query, optionally improved by a cross-encoder reranker.
 
 \subsection{Website Filtering}
-Our PA1 corpus is restricted to MedOverNet (\url{https://medover.zurnal24.si/}), a Slovenian medical/wellness portal whose pages split into two structural classes: editorial articles and discussion forum threads. For PA2 we apply a two-stage filter:
+Our PA2 corpus is restricted to MedOverNet (\url{https://medover.zurnal24.si/}), a Slovenian medical/wellness portal whose useful pages split into two structural classes: editorial articles and discussion forum threads. For PA2 we apply a two-stage extraction filter:
 \begin{itemize}
-    \item \textbf{URL gate.} Forum, category, search, login, and registration paths are filtered out at the URL level (substrings \texttt{/forum/}, \texttt{kategorija}, \texttt{iskanje}, \texttt{prijava}, \texttt{registracija}, \texttt{tag/}, \texttt{author/}). This is a fast, deterministic pre-cut.
+    \item \textbf{URL gate.} Editorial candidates are handled by the article extractor. Forum thread URLs matching \texttt{/forum/tema/} are not skipped; they are routed to \texttt{forum\_extractor.py}. Forum listing/category pages, search, login, registration, tag, and author pages are skipped as non-content pages.
     \item \textbf{Content gate.} A page that survives the URL filter must yield non-empty cleaned text; otherwise \texttt{cleaned\_content} is stored as an empty string and no segments are generated.
 \end{itemize}
-The PA2 extraction dump contains 10,413 HTML pages. URL-class breakdown: 9,062 forum threads (\texttt{/forum/tema/}), 436 forum/category index pages, 128 tag/author/login/search-style pages, and \textbf{787 potential articles} outside all filtered prefixes. Of those 787, \textbf{779 yield non-empty \texttt{cleaned\_content}} and are segmented and embedded; 8 fail the content gate (empty extraction result). The committed \texttt{pa1/db} artifact remains the smaller PA1 custom-format dump and is kept separate from the PA2 extraction database.
+The current PA2 extraction database contains 10,429 HTML pages: 9,073 forum thread URLs, 436 forum non-thread/listing pages, 133 other listing/noise pages, and 787 non-forum article-candidate URLs. Of the article candidates, 779 yield non-empty \texttt{cleaned\_content}. Of the forum threads, 4,547 yield non-empty \texttt{cleaned\_content}. Overall, 5,326 HTML pages are cleaned and segmented into 438,793 short segments and 36,816 long segments, all embedded with LaBSE. The committed \texttt{pa1/db} artifact remains the smaller PA1 custom-format dump and is kept separate from the PA2 extraction database.
 
 \section{Boilerplate Removal}
 To clean the stored HTML documents and remove formatting noise like menus, footers, and visual navigation elements, we used a hybrid approach:
@@ -40,7 +40,9 @@ To clean the stored HTML documents and remove formatting noise like menus, foote
     We also checked attributes for hidden menus and toolbars.
 \end{itemize}
 
-The cleaned text is then stored in a newly created \texttt{cleaned\_content} column in our relational database.
+Articles and forum threads are extracted through separate code paths. Editorial pages use the XPath article extractor (\texttt{article\_extractor\_xpath.py}). Forum threads use \texttt{forum\_extractor.py}, which detects \texttt{/forum/tema/} URLs, removes navigation and modal boilerplate, extracts the thread title, then extracts individual forum posts with author/date metadata when available. The forum extractor uses XPath first and a regex fallback for post blocks if DOM extraction fails.
+
+The cleaned text is then stored in a newly created \texttt{cleaned\_content} column in our relational database. For forum threads, the stored text is a composed thread representation, but the post boundaries are preserved for later segmentation.
 
 \section{Text Segmentation}
 Properly segmenting the cleaned text is the most critical step to avoid losing context during vectorization and to ensure accurate information retrieval, as emphasized in the task requirements. Without a proper approach, important indicators get overlooked, leading to incomplete or out-of-context vector matches.
@@ -49,22 +51,24 @@ Properly segmenting the cleaned text is the most critical step to avoid losing c
 As required, we had to define strict criteria for splitting the page into multiple thematic sections. Rather than relying on unpredictable HTML tags like paragraphs or sentences—which can range from two words to two pages—we chose length-based slicing constraints as our primary criteria. Our strict segmenting criteria are defined by two boundaries: 1) the maximum allowed volume of content per chunk (character count vs. word count) and 2) the adherence to syntactic borders (ignoring spaces vs. keeping whole words). By comparing these extremes, we established two distinct profiles:
 
 \subsection{Short segments (up to 50 characters)}
-This strategy arbitrarily slices the plain text into rigidly fixed small windows of up to 50 characters, often cutting mid-word or mid-sentence.
+This strategy is our baseline and comparison point. It arbitrarily slices the plain text into rigidly fixed small windows of up to 50 characters, often cutting mid-word or mid-sentence.
 \begin{itemize}
     \item \textbf{Advantages:} Yields highly dense micro-data with low vector variance. Performs excellently when the model only needs to pinpoint a highly specific phrase, isolated keyword, or independent date, acting similarly to exact keyword-matching but within a semantic space.
     \item \textbf{Disadvantages (Context Loss):} Slicing mid-word can severely confuse the embedding model, as the cut-off thought or sentence loses syntactic structure. By ignoring sentence or paragraph boundaries, we completely destroy the broader logic and context of the author's original message.
 \end{itemize}
 
 \subsection{Logical \& Hybrid Overlapping Segments (\textasciitilde{}250 words)}
-To achieve the most appropriate strategy for vector embedding, we replaced fixed slicing with \textit{Semantic/Logical Chunking} paired with a sliding window (overlap). Rather than blindly counting up to 250 words, this strategy analyzes the raw \verb|\n\n| paragraph breaks and \verb|[.!?]| sentence boundaries to group complete thematic thoughts:
+The final strategy used by the demo retriever is long hybrid overlap chunking in \texttt{page\_segment\_long}. For article-like pages, we replaced fixed slicing with \textit{Semantic/Logical Chunking} paired with a sliding window (overlap). Rather than blindly counting up to 250 words, this strategy analyzes the raw \verb|\n\n| paragraph breaks and \verb|[.!?]| sentence boundaries to group complete thematic thoughts:
 \begin{itemize}
     \item \textbf{Advantages (High Context Preservation \& Overlap):} This strategy adheres perfectly to the assignment's goal of making each segment a "complete description of one topic." We group paragraphs dynamically until hitting the word limit. If a block is too large, it correctly falls back to sentence-level boundary splits. Crucially, we introduced an \textbf{overlap of 50 words} between consecutive chunks to ensure no topic edge gets sharply severed, resulting in industry-grade RAG precision.
     \item \textbf{Disadvantages:} The dynamic processing requires more computational overhead (regex splitting over sentences and overlap buffer tracking). Furthermore, dynamically bounded text arrays can slightly vary the semantic vector sizes compared to strictly fixed sizes, though standard transformers effectively pool this variance.
 \end{itemize}
+Forum threads use the same long-chunking principle but are split by post first. \texttt{segment\_pages\_to\_db.py} builds post blocks from \texttt{forum\_extractor.py}'s extracted posts, labels the opening post/replies, then calls \texttt{build\_forum\_long\_chunks}. This prevents unrelated replies from being merged into one segment and keeps forum retrieval grounded in individual posts. Forum long chunks use approximately 220 words with a 30-word overlap; article long chunks use approximately 250 words with a 50-word overlap.
 
 \subsection{Structuring with Hybrid Metadata}
-Furthermore, the task prompted us to extract structured meaningful content (e.g., article titles, authors, and publication dates). While our segments rely purely on robust plain-text NLP boundaries, we actively align this with structural HTML metadata. During the extraction phase, XPath was utilized to pull the article's core attributes. These are formally injected into the database alongside the plain text—mapping the extracted title into the \texttt{heading} column and pushing dates and authors into the \texttt{metadata} JSON properties.
-This guarantees that while the text chunks themselves remain semantically raw for better embeddings, they are permanently anchored to their original structured metadata context.
+Furthermore, the task prompted us to extract structured meaningful content (e.g., article titles, forum thread titles, authors, publication dates, post counts). These values are stored alongside each segment: the extracted title/thread title is written into the \texttt{heading} column and author/date/post-count information is written into the \texttt{metadata} JSONB column.
+
+Important implementation detail: metadata is stored for filtering, debugging, defense, and later ranking experiments, but it is not currently concatenated into the text passed to the embedding model. The embedding input is only \texttt{segment\_text}. Therefore the report does not claim a metadata-in-embedding experiment; implementing that would require changing the embedding input construction and rebuilding vectors.
 
 \section{Vector Embeddings}
 \subsection{Database Design and Schema Justification}
@@ -81,8 +85,14 @@ To ensure a robust, production-ready environment, we introduced several critical
     \item \texttt{created\_at} and \texttt{embedded\_at}: Essential auditing timestamps to track when segmentation and asynchronous vectorization occurred.
 \end{itemize}
 
-Indexing maps vectors using \texttt{vector\_cosine\_ops} on HNSW / IVFFLAT trees.
+Indexing maps vectors using \texttt{vector\_cosine\_ops} on IVFFlat indexes.
 The database also employs strong \texttt{UNIQUE} constraints (page\_id, segment\_index, embedding\_model) to prevent duplicate embeddings upon repeated document processing.
+
+Current table sizes are:
+\begin{itemize}
+    \item \texttt{page\_segment\_short}: 438,793 rows (51,189 article, 387,399 forum, 205 unknown), all embedded.
+    \item \texttt{page\_segment\_long}: 36,816 rows (2,263 article, 34,402 forum, 151 unknown), all embedded.
+\end{itemize}
 
 \subsection{Selected Model and Multilingualism}
 To properly process the Slovenian language, we employed the multilingual model \texttt{sentence-transformers/LaBSE}.
@@ -91,14 +101,14 @@ them back into the before mentioned tables. The output of the \textit{LaBSE} mod
 The integration runs sequentially in batches of 100 documents to guarantee memory safety.
 
 \subsection{Regex-Based Extraction (Section 2.2)}
-As a co-equal extraction technique, we authored \texttt{extractor\_regex.py}, a pure regular-expression extractor that operates directly on raw HTML bytes without any tree construction. It pulls:
+As a co-equal extraction technique, we authored \texttt{article\_extractor\_regex.py}, a pure regular-expression extractor that operates directly on raw HTML bytes without any tree construction. It pulls:
 \begin{itemize}
     \item \textbf{Title:} First match among \texttt{<h1>}, Open Graph \texttt{og:title} meta tag, or \texttt{<title>} element.
     \item \textbf{Publication date:} \texttt{article:published\_time} meta or ISO-8601 \texttt{datePublished} JSON-LD pattern.
     \item \textbf{Author:} \texttt{<meta name="author">} or JSON-LD \texttt{author.name}.
     \item \textbf{Body:} Strips all HTML tags (including inline script/style blocks), collapses whitespace, and returns the first 4000 characters.
 \end{itemize}
-Compared to XPath, regex extraction is faster (no DOM parse) but structurally fragile: it relies on attribute-value patterns that may break with CMS changes, fails silently on malformed nesting, and cannot navigate tree relationships. For MedOverNet's consistent CMS, both methods produced equivalent metadata; for the body text, XPath's structural understanding produced substantially cleaner output (fewer artefacts from navigation text and JavaScript), so XPath remains primary and regex is retained as the documented alternative.
+Compared to XPath, regex extraction is faster (no DOM parse) but structurally fragile: it relies on attribute-value patterns that may break with CMS changes, fails silently on malformed nesting, and cannot navigate tree relationships. For MedOverNet's consistent CMS, both methods produced equivalent metadata; for the body text, XPath's structural understanding produced substantially cleaner output (fewer artefacts from navigation text and JavaScript), so XPath remains primary for articles and regex is retained as the documented alternative/fallback.
 
 \section{Similarity Metric and ANN Index}
 \subsection{Choice of Similarity Metric}
@@ -108,7 +118,7 @@ Three distance operators are available in pgvector:
     \item \textbf{L2 (Euclidean) distance} (\texttt{<->}): sensitive to vector magnitude. Appropriate for models that do not normalise output; gives biased results with LaBSE because all vectors have equal norm.
     \item \textbf{Inner product} (\texttt{<\#>}): identical to cosine on unit-norm vectors but stored as negative inner product in pgvector, requiring \texttt{ORDER BY ASC} which is confusing. No practical advantage here.
 \end{itemize}
-We chose cosine (\texttt{<=>}) as the default metric. The \texttt{demo.py} \texttt{--metric} flag allows ad-hoc switching to L2 or IP for comparison purposes.
+We chose cosine (\texttt{<=>}) as the default metric and the IVFFlat indexes are built with \texttt{vector\_cosine\_ops}. The retrieval demo uses cosine by default. The \texttt{demo.py} \texttt{--metric} flag allows ad-hoc switching to L2 or IP for comparison purposes, but these are alternatives rather than the selected production/default behavior.
 
 \subsection{ANN Index: IVFFlat vs.\ HNSW}
 pgvector supports two ANN index types:
@@ -116,7 +126,7 @@ pgvector supports two ANN index types:
     \item \textbf{IVFFlat}: partitions vectors into \texttt{lists} Voronoi cells at build time; queries probe \texttt{probes} cells. Faster to build; lower memory; recall degrades if \texttt{probes} is too small or data distribution shifts.
     \item \textbf{HNSW}: hierarchical navigable small-world graph; higher build cost and memory; typically higher recall at fixed query time; does not require a pre-build training pass.
 \end{itemize}
-We selected IVFFlat because our segment tables are populated in a single batch (not continuously updated), so the one-time build cost is acceptable and memory is constrained. The recommended \texttt{lists} value is $\approx\sqrt{N}$: for \texttt{page\_segment\_short} ($N\approx51{,}394$) this gives $\approx 227$; for \texttt{page\_segment\_long} ($N\approx2{,}414$) this gives $\approx 49$. The migration used \texttt{lists=100} as a placeholder; after embeddings are populated and row counts confirmed, the indexes are recreated with corrected \texttt{lists} values.
+We selected IVFFlat because our segment tables are populated in a single batch (not continuously updated), so the one-time build cost is acceptable and memory is constrained. The recommended \texttt{lists} value is $\approx\sqrt{N}$: for \texttt{page\_segment\_short} ($N=438{,}793$) this gives $\approx 662$; for \texttt{page\_segment\_long} ($N=36{,}816$) this gives $\approx 192$. The migration used \texttt{lists=100} as a placeholder; after embeddings were populated and row counts confirmed, the indexes were recreated with corrected \texttt{lists} values: 662 for short segments and 192 for long segments.
 
 \section{Information Retrieval}
 \subsection{Demo Program}
@@ -124,11 +134,12 @@ The retrieval demo (\texttt{demo.py}) accepts a Slovenian query, encodes it with
 
 Table~\ref{tab:queries} shows the top-3 segments returned by the baseline system for each of the six evaluation queries.
 
-\begin{table}[h]
+\begin{table*}[t]
 \centering
+\small
 \caption{Top-3 retrieved segments per query (baseline, cosine, \texttt{page\_segment\_long}, LaBSE)}
 \label{tab:queries}
-\begin{tabular}{p{3.2cm}p{4.2cm}p{4.2cm}p{4.2cm}}
+\begin{tabular}{p{2.6cm}p{3.4cm}p{3.4cm}p{3.4cm}}
 \hline
 \textbf{Query} & \textbf{Rank 1 (score)} & \textbf{Rank 2 (score)} & \textbf{Rank 3 (score)} \\
 \hline
@@ -143,27 +154,27 @@ Table~\ref{tab:queries} shows the top-3 segments returned by the baseline system
   0.445 — Type 1 vs type 2 diabetes diet tips (relevant) \\
 \hline
 \textit{Kako naravno premagati nespečnost in izboljšati spanec?} &
-  0.465 — General healthy habits article (partially relevant) &
-  0.479 — Unhealthy habits / sedentary lifestyle (off-topic) &
-  \textbf{0.505 — Evening snacks for better sleep} (relevant) \\
+  0.526 — Sleep deprivation and immunity article (partially relevant) &
+  \textbf{0.529 — Tips for better sleep} (relevant) &
+  0.534 — Night owls and cardiovascular risk (partially relevant) \\
 \hline
 \textit{Boli me} &
-  0.678 — Chronic pain in joints/back (generic but medical) &
-  0.687 — Chronic pain and nutritional deficiencies &
-  0.707 — Joint/back pain mistakes (generic pain) \\
+  0.667 — Forum post mentioning Bowen therapy and pain (generic but medical) &
+  0.678 — Chronic joint/back pain article &
+  0.687 — Chronic pain and nutritional deficiencies \\
 \hline
 \textit{Kakšne so pravne posledice neplačila prometne kazni?} &
-  0.718 — Celiac disease insurance article (off-domain) &
-  0.740 — Healthy lifestyle promotion (off-domain) &
-  0.740 — Police warnings about online pharmacy fraud (off-domain) \\
+  0.676 — Addiction prevention article (off-domain) &
+  0.690 — Responsible gifting / children article (off-domain) &
+  0.699 — Addiction prevention article (off-domain) \\
 \hline
 \textit{ATM} &
+  0.679 — Forum post about family problems (unrelated) &
   0.720 — Gambling addiction article (unrelated) &
-  0.776 — Hodgkin lymphoma patient story (unrelated) &
-  0.780 — Hemophilia / Mont Blanc mountaineer (unrelated) \\
+  0.743 — Older-adults chat forum post (unrelated) \\
 \hline
 \end{tabular}
-\end{table}
+\end{table*}
 
 \subsection{Cross-Encoder Reranker}
 To improve retrieval quality on the three poor queries, we implemented a cross-encoder reranking stage (\texttt{pa2/crawler/src/rerank\_crossencoder.py}) using the \texttt{BAAI/bge-reranker-v2-m3} model. The cross-encoder jointly encodes the query and each candidate segment, producing a relevance score that is superior to the bi-encoder cosine score because it captures query-segment interaction directly.
@@ -171,11 +182,16 @@ To improve retrieval quality on the three poor queries, we implemented a cross-e
 The reranker is invoked with \texttt{--rerank}. It fetches $4\times k$ candidates from the vector index and then applies the cross-encoder to select the final top-$k$.
 
 \begin{itemize}
-    \item \textbf{Good queries (krvni tlak, sladkorna bolezen, nespečnost):} Reranker significantly improves precision. For the insomnia query, baseline rank~1 was a generic "healthy habits" article (cosine 0.465); after reranking, a dedicated melatonin/sleep article rose to rank~1 with rerank score 0.991. For the blood pressure query, baseline returned a blood-clot article at rank~1 (cosine 0.451); after reranking, the most relevant blood-pressure management article (cosine 0.458) was promoted to rank~1 (rerank 0.993).
-    \item \textbf{"Boli me" (ambiguous pain):} Reranker reshuffled to more specific pain articles (chronic pain overview, rank~1 rerank 0.307). Scores are low overall — the query is too short for meaningful cross-encoder scoring. Marginal improvement.
-    \item \textbf{"Pravne posledice neplačila kazni" (legal, out-of-domain):} All rerank scores collapsed to $\approx 0.0001$. The cross-encoder correctly identifies that none of the medical corpus segments are relevant. Top result shifts to a police/pharmacy article (slightly more "legal-sounding") but all scores are near zero — honest failure.
+    \item \textbf{Good queries (krvni tlak, sladkorna bolezen, nespečnost):} Reranker significantly improves precision. For the insomnia query, baseline rank~1 was a sleep/immunity article (cosine 0.526) and rank~2 was a better sleep-tips segment (cosine 0.529); after reranking, a dedicated melatonin/sleep article rose to rank~1 with rerank score 0.991. For the blood pressure query, baseline returned a blood-clot article at rank~1 (cosine 0.451); after reranking, the most relevant blood-pressure management article (cosine 0.458) was promoted to rank~1 (rerank 0.993).
+    \item \textbf{"Boli me" (ambiguous pain):} Baseline rank~1 is now a forum post about Bowen therapy and pain. Reranker reshuffles the candidate set toward more specific pain articles (chronic pain overview, rank~1 rerank 0.307). Scores are still low overall because the query is too short for precise intent.
+    \item \textbf{"Pravne posledice neplačila kazni" (legal, out-of-domain):} All rerank scores collapse to $\approx 0.0005$ or lower. The cross-encoder correctly identifies that none of the medical/forum corpus segments are strongly relevant. Top result shifts to a car-safety forum segment because it is at least traffic-adjacent, but the score remains near zero.
     \item \textbf{"ATM" (acronym):} All rerank scores $< 0.03$. Cross-encoder cannot match a 3-letter acronym without context to any medical segment confidently. Unresolved hard failure.
 \end{itemize}
+
+\subsection{Good and Bad Query Examples}
+For a good in-domain query, \textit{"Kateri so simptomi visokega krvnega tlaka?"}, the cosine baseline retrieves a partially relevant blood-clot article first (score 0.451) and a directly relevant blood-pressure-management article second (score 0.458). Reranking promotes the directly relevant blood-pressure segment to rank~1 with rerank score 0.993. This shows the intended division of labor: vector search recalls useful candidates, and the cross-encoder improves ordering.
+
+For a bad out-of-domain query, \textit{"Kakšne so pravne posledice neplačila prometne kazni v Sloveniji?"}, the cosine baseline returns medical/social articles about addiction or children (best score 0.676), because the corpus has no legal content. Reranking does not create a correct answer; it promotes a traffic-adjacent forum segment about car safety, but its rerank score is only 0.00048. This is a useful failure signal: the score indicates that the retrieved text should not be trusted as an answer to the legal query.
 
 \subsection{Remaining Reranker Failure}
 The legal query \textit{"Kakšne so pravne posledice neplačila prometne kazni v Sloveniji?"} remains the clearest failure after reranking: MedOverNet contains no legal or administrative content whatsoever. Neither the bi-encoder nor the cross-encoder can retrieve relevant information that does not exist in the corpus. This illustrates the fundamental limitation of dense retrieval: it can only return what the index contains; a cross-encoder reranker cannot compensate for zero relevant documents.
@@ -191,13 +207,13 @@ The legal query \textit{"Kakšne so pravne posledice neplačila prometne kazni v
 
 \section{Methods Tried but Not Used}
 \begin{itemize}
-    \item \textbf{Regex-only extraction as primary:} We implemented \texttt{extractor\_regex.py} as a co-equal technique per assignment requirements. In practice, it produced adequate title and metadata extraction but inferior body text (navigation artefacts, raw JS) compared to XPath. XPath remains primary; regex is retained for the Section 2.2 requirement.
+    \item \textbf{Regex-only extraction as primary:} We implemented \texttt{article\_extractor\_regex.py} as a co-equal technique per assignment requirements. In practice, it produced adequate title and metadata extraction but inferior body text (navigation artefacts, raw JS) compared to XPath. XPath remains primary; regex is retained for the Section 2.2 requirement.
     \item \textbf{Alternative embedding model:} We evaluated \texttt{paraphrase-multilingual-MiniLM-L12-v2} (384-d, $\approx$120 MB). Its smaller dimensionality (384 vs 768) is incompatible with the \texttt{vector(768)} schema, preventing direct comparison within the same table. In a qualitative side-by-side on 20 queries, LaBSE retrievals were consistently more semantically accurate for Slovenian; MiniLM occasionally matched on surface n-grams rather than meaning.
     \item \textbf{HNSW index:} Considered for higher recall at equal query latency. Rejected for this batch-only use case because IVFFlat's lower memory footprint fits within the Docker container's constraints and HNSW's recall advantage is not measurable without a labelled evaluation set.
     \item \textbf{Sentence-level segmentation only:} Evaluated a pure-sentence splitter (no paragraph grouping). It produced over 180,000 very short segments for the same corpus, dramatically increasing embedding compute time and reducing per-segment context, with no retrieval quality benefit over the 250-word hybrid strategy.
 \end{itemize}
 
 \section{Conclusion}
-We built a complete RAG extraction and retrieval workflow for MedOverNet: HTML boilerplate removal via XPath, dual-strategy text segmentation (50-char and 250-word hybrid), LaBSE 768-d embeddings stored in pgvector with IVFFlat cosine indexes, a flexible retrieval demo, and a cross-encoder reranker. The system reliably handles Slovenian medical and wellness content. The three well-formed queries consistently return relevant segments; the three adversarial queries expose the expected failure modes (underspecified input, out-of-domain corpus, ambiguous acronyms) that no retrieval system can fully overcome without richer data.
+We built a complete RAG extraction and retrieval workflow for MedOverNet: article extraction, forum thread extraction, cleaned-content storage, baseline 50-character segmentation, final long hybrid overlap segmentation, LaBSE 768-d embeddings stored in pgvector with IVFFlat cosine indexes, a flexible retrieval demo, and a cross-encoder reranker. The system reliably handles Slovenian medical, wellness, and forum-thread content. The three well-formed queries consistently return relevant segments; the three adversarial queries expose the expected failure modes (underspecified input, out-of-domain corpus, ambiguous acronyms) that no retrieval system can fully overcome without richer data.
 
 \end{document}
