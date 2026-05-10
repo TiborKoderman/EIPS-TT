@@ -149,11 +149,54 @@ if "${want_pa1}"; then
 fi
 
 if "${want_pa2}"; then
+  # PA2 dump: exclude html_content from page table (bulk crawl data, not needed
+  # for retrieval grading) to keep the artifact under ~600 MB. We temporarily
+  # null html_content via a backup table, dump, then restore.
+  echo "Nulling html_content for PA2 dump (saved to _page_backup_html)..."
+  if use_docker_dump; then
+    project_compose exec -T db psql -U "${DB_USER}" -d "${DB_NAME}" -c "
+      DROP TABLE IF EXISTS crawldb._page_backup_html;
+      CREATE UNLOGGED TABLE crawldb._page_backup_html AS
+        SELECT id, html_content FROM crawldb.page WHERE html_content IS NOT NULL;
+      UPDATE crawldb.page SET html_content = NULL WHERE html_content IS NOT NULL;
+    "
+  else
+    PGPASSWORD="${DB_PASSWORD}" psql -h "${DB_HOST}" -p "${DB_PORT}" \
+      -U "${DB_USER}" -d "${DB_NAME}" -c "
+      DROP TABLE IF EXISTS crawldb._page_backup_html;
+      CREATE UNLOGGED TABLE crawldb._page_backup_html AS
+        SELECT id, html_content FROM crawldb.page WHERE html_content IS NOT NULL;
+      UPDATE crawldb.page SET html_content = NULL WHERE html_content IS NOT NULL;
+    "
+  fi
+
   dump_custom "${PA2_DUMP}" \
     --extension=vector \
     --schema=crawldb \
     --exclude-table=crawldb.link \
     --exclude-table=crawldb.frontier_queue \
     --exclude-table=crawldb.image \
-    --exclude-table=crawldb.page_data
+    --exclude-table=crawldb.page_data \
+    --exclude-table=crawldb._page_backup_html
+
+  echo "Restoring html_content from _page_backup_html..."
+  if use_docker_dump; then
+    project_compose exec -T db psql -U "${DB_USER}" -d "${DB_NAME}" -c "
+      UPDATE crawldb.page p
+        SET html_content = b.html_content
+        FROM crawldb._page_backup_html b
+        WHERE p.id = b.id;
+      DROP TABLE crawldb._page_backup_html;
+    "
+  else
+    PGPASSWORD="${DB_PASSWORD}" psql -h "${DB_HOST}" -p "${DB_PORT}" \
+      -U "${DB_USER}" -d "${DB_NAME}" -c "
+      UPDATE crawldb.page p
+        SET html_content = b.html_content
+        FROM crawldb._page_backup_html b
+        WHERE p.id = b.id;
+      DROP TABLE crawldb._page_backup_html;
+    "
+  fi
+  echo "html_content restored."
 fi

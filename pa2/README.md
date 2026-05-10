@@ -71,7 +71,7 @@ docker compose exec db psql -U postgres -d crawldb \
   -c "SELECT COUNT(*) FROM crawldb.page_segment_long WHERE embedding IS NOT NULL;"
 ```
 
-> **Note:** The dump is tracked through Git LFS. It contains the `vector` extension, `crawldb` schema, lookup tables, `crawldb.page` (HTML content), `crawldb.page_segment_short`, `crawldb.page_segment_long`, and `crawldb.article_link_graph` with pre-computed LaBSE embeddings. It intentionally excludes raw `link`, `frontier_queue`, `image`, and `page_data` tables.
+> **Note:** The dump is tracked through Git LFS. It contains the `vector` extension, `crawldb` schema, lookup tables, `crawldb.page` (without `html_content` to keep size manageable), `crawldb.page_segment_short` (438,793 segments), `crawldb.page_segment_long` (36,816 segments), and `crawldb.article_link_graph` — all with pre-computed LaBSE embeddings and tuned IVFFlat indexes. It intentionally excludes raw `link`, `frontier_queue`, `image`, and `page_data` tables. The dump is ~1.8 GB; if Git LFS is unavailable, download from the cloud link in `pa2/extraction-db/`.
 
 ### Apply migration to a fresh PA1 dump
 
@@ -115,8 +115,18 @@ python pa2/crawler/src/compute_embeddings.py \
   --model-name sentence-transformers/LaBSE --batch-size 100
 ```
 
-Populates the `embedding` column on both segment tables. Runtime: ~3 hours on CPU (53 k segments).  
-Set `CUDA_VISIBLE_DEVICES` to a valid GPU ID to use GPU acceleration.
+Populates the `embedding` column on both segment tables. Runtime: ~22 min on GPU (475 k segments via docker with `ul-fri-nlp-peft` image on P106-100), ~2 hours on CPU.
+
+For GPU (recommended):
+
+```bash
+docker run --rm --runtime=nvidia -e NVIDIA_VISIBLE_DEVICES=1 -e PGPASSWORD=postgres \
+  -e HF_HOME=/hf-cache --network=host \
+  -v /path/to/pa2/crawler/src:/app:ro \
+  -v ~/.cache/huggingface:/hf-cache \
+  --entrypoint bash ul-fri-nlp-peft:latest \
+  -c "pip install sentence-transformers psycopg2-binary pgvector --quiet && python /app/compute_embeddings.py --batch-size 512 --device cuda --db-host localhost"
+```
 
 ### Optional — build article link graph
 
@@ -182,6 +192,6 @@ cp pa2/report/report.pdf pa2/report-extraction.pdf
 ## PA1 notes
 
 - **PA1 dump:** `pa1/db` remains the Assignment 1 custom-format artifact, is 64 MiB, and excludes `image`/`page_data` table data as required. It contains 1,001 HTML rows, below the PA1 5,000-page guideline.
-- **PA2 dump:** `pa2/extraction-db/crawldb_pa2.dump` is a separate custom-format extraction artifact tracked through Git LFS. It contains 10,413 HTML pages, 779 cleaned articles, 51,394 short segments, and 2,414 long segments with LaBSE embeddings.
+- **PA2 dump:** `pa2/extraction-db/crawldb_pa2.dump` is a separate custom-format extraction artifact tracked through Git LFS (~1.8 GB). It contains 10,429 HTML pages, 5,893 pages with `cleaned_content`, 438,793 short segments, and 36,816 long segments with LaBSE embeddings (IVFFlat indexes: lists=662 short, lists=192 long). `html_content` is excluded from the dump to keep size manageable.
 - **LSH deduplication bonus (PA1 §2.1):** Not implemented. Current deduplication is exact SHA-256 only. Not claimed.
 - **PA1 tables untouched:** Migration 07 only adds columns to `crawldb.page` and creates new `page_segment_*` tables. Frontier, link, image, and page_data tables are unmodified.
