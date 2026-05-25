@@ -1,0 +1,68 @@
+{
+  "_comment": "PA3 evaluation set: six corpus-covered medical questions and three diagnostic failure cases. The first six topics are supported by PA2 retrieval runs or extracted corpus samples.",
+  "queries": [
+    {
+      "label": "good_1_blood_pressure",
+      "query": "Kateri so simptomi visokega krvnega tlaka in zakaj je merjenje pomembno?",
+      "intent": "good",
+      "expected_evidence": "Articles about hypertension symptoms, risks and blood-pressure monitoring.",
+      "coverage_basis": "PA2 reranked run retrieved a directly relevant blood-pressure management article."
+    },
+    {
+      "label": "good_2_diabetes_lifestyle",
+      "query": "Kako zdrav življenjski slog pomaga pri sladkorni bolezni tipa 2?",
+      "intent": "good",
+      "expected_evidence": "Articles about type 2 diabetes, diet, activity and glucose management.",
+      "coverage_basis": "PA2 reranked run retrieved the cardiometabolic factors article."
+    },
+    {
+      "label": "good_3_sleep",
+      "query": "Kako izboljšati spanec in zakaj je reden spanec pomemben?",
+      "intent": "good",
+      "expected_evidence": "Sleep hygiene or sleep-risk articles.",
+      "coverage_basis": "PA2 query evaluation and extracted validation articles contain sleep-focused content."
+    },
+    {
+      "label": "good_4_parkinson",
+      "query": "Kateri so značilni simptomi Parkinsonove bolezni in kako pomaga gibanje?",
+      "intent": "good",
+      "expected_evidence": "Article about Parkinson disease symptoms and physical activity.",
+      "coverage_basis": "Extracted PA2 corpus sample contains a Parkinson disease article with both topics."
+    },
+    {
+      "label": "good_5_vitamin_b12",
+      "query": "Kateri znaki lahko kažejo na pomanjkanje vitamina B12?",
+      "intent": "good",
+      "expected_evidence": "Article about vitamin B12 symptoms, risk groups and food sources.",
+      "coverage_basis": "Extracted PA2 corpus sample contains a vitamin B12 article."
+    },
+    {
+      "label": "good_6_protein",
+      "query": "Zakaj so beljakovine pomembne pri ohranjanju mišične mase?",
+      "intent": "good",
+      "expected_evidence": "Nutrition articles discussing protein and muscle preservation.",
+      "coverage_basis": "A PA2 reranking run for 'proteini' retrieved relevant muscle-loss and protein segments."
+    },
+    {
+      "label": "bad_1_ambiguous_pain",
+      "query": "Boli me",
+      "intent": "bad",
+      "expected_evidence": "Ambiguous matches about unrelated types of pain.",
+      "coverage_basis": "Retained PA2 ambiguity failure case."
+    },
+    {
+      "label": "bad_2_out_of_domain_legal",
+      "query": "Kakšne so pravne posledice neplačila prometne kazni v Sloveniji?",
+      "intent": "bad",
+      "expected_evidence": "No relevant medical-corpus evidence; the RAG answer should decline to infer a legal answer.",
+      "coverage_basis": "Retained PA2 out-of-domain failure case."
+    },
+    {
+      "label": "bad_3_acronym_no_context",
+      "query": "ATM",
+      "intent": "bad",
+      "expected_evidence": "No reliable evidence because the acronym is underspecified.",
+      "coverage_basis": "Retained PA2 acronym ambiguity failure case."
+    }
+  ]
+}

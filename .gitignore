@@ -21,6 +21,7 @@ pa2/extraction-db/*.dump
 *.fls
 pa2/report/*.out
 !pa2/report/report.pdf
+pa3/report/*.out
 Preferential crawling.ipynb
 Remote crawler database (client).ipynb
 Remote crawler database (server).ipynb
