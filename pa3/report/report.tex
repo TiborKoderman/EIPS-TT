@@ -1,0 +1,230 @@
+\documentclass[9pt]{IEEEtran}
+
+\usepackage[english]{babel}
+\usepackage{graphicx}
+\usepackage{url}
+\usepackage{booktabs}
+\usepackage{array}
+\usepackage{hyperref}
+\usepackage[T1]{fontenc}
+\usepackage[utf8]{inputenc}
+\usepackage{lmodern}
+\input{glyphtounicode}
+\pdfgentounicode=1
+
+\title{\vspace{0ex}
+IEPS: Programming Assignment 3\\
+Explainable Retrieval-Augmented Generation}
+\author{Dino Džaferagić, Tibor Koderman, Jerneja Krajcar}\vspace{-4.0ex}
+\date{\today}
+
+\begin{document}
+\maketitle
+
+\section{Introduction}
+This assignment extends our PA2 Slovenian information-retrieval system into
+an explainable Retrieval-Augmented Generation (RAG) pipeline.  We retain the
+successfully evaluated MedOverNet corpus and retrieval configuration, and add
+answer generation in two directly comparable modes: \textit{With Context},
+where retrieved chunks form explicit evidence, and \textit{Without Context},
+where the same local language model receives only the question.
+
+The implementation is intentionally experimental rather than deployed as a
+user interface.  For every RAG answer it stores the evidence passages,
+original vector ranks, reranked ranks and scores, allowing answer errors to be
+related to retrieval failures rather than treated as opaque model behavior.
+
+\section{Implementation Summary}
+
+\subsection{Existing PA2 Evidence Store}
+PA3 reuses the PA2 PostgreSQL/pgvector database without schema changes or
+re-indexing.  The corpus contains Slovenian health and wellness material from
+MedOverNet, including editorial articles and forum threads.  PA2 created
+\texttt{page\_segment\_long} chunks: articles are grouped into approximately
+250 words with 50-word overlap; forum content is kept close to individual
+posts using approximately 220 words with 30-word overlap.
+
+This was the appropriate continuation of PA2: long segments preserve enough
+semantic context for a generated response, while PA2 manual evaluation showed
+that the 50-character comparison chunks frequently lose meaning at chunk
+boundaries.
+
+\subsection{Models and Libraries}
+Queries are embedded using \texttt{sentence-transformers/LaBSE}, a
+multilingual sentence embedding model whose 768-dimensional output exactly
+matches the already populated \texttt{vector(768)} columns.  Candidate
+segments are obtained using cosine distance through pgvector and then
+reranked with \texttt{BAAI/bge-reranker-v2-m3}, the multilingual
+cross-encoder already evaluated in PA2.
+
+Answers are generated through a local Ollama service using
+\texttt{gemma3:4b}.  The model has approximately four billion parameters; its
+Ollama package is approximately 3.3 GB and its documented multilingual
+support makes it a practical local model for Slovenian questions
+\cite{ollamagemma}.  A deterministic experimental setting is used with
+temperature set to zero.
+
+The implementation is divided into:
+\begin{itemize}
+    \item \texttt{retriever.py}: LaBSE query embedding, cosine retrieval of 20
+    candidate chunks, and reranking to the final top five evidence chunks;
+    \item \texttt{prompts.py} and \texttt{generator.py}: separate prompts for
+    evidence-grounded and LLM-only answering, and the Ollama API integration;
+    \item \texttt{rag\_pipeline.py}: single-question command-line interface;
+    \item \texttt{evaluate.py}: batch comparison runner storing full JSON
+    traces and manual scoring fields.
+\end{itemize}
+
+\subsection{Prompt Design}
+In RAG mode, the prompt includes numbered chunks and source URLs.  The model
+is instructed to use only that evidence, cite used chunks as \texttt{[1]},
+\texttt{[2]}, and explicitly state when the context is insufficient.  This is
+particularly important for medical content and out-of-domain questions.
+
+In LLM-only mode, no chunks or URLs are provided.  The model is asked for a
+short Slovenian response and told not to invent references.  Keeping the
+question and generation model fixed while changing only the evidence enables
+a transparent comparison.
+
+\section{System Evaluation Criteria}
+
+\subsection{Data Processing}
+No new data preparation is performed in PA3.  The evaluation relies on the
+PA2 decision to use logical long chunks with overlap.  Data-processing quality
+is therefore assessed through inspectability of the retrieved chunk: a good
+chunk should contain an interpretable passage that directly supports an
+answer rather than only a matching keyword.
+
+\subsection{Retrieval}
+For each query, LaBSE cosine search fetches 20 initial candidates from
+\texttt{page\_segment\_long}.  The cross-encoder reranker chooses five
+passages supplied to the LLM.  We store the vector rank, cosine distance,
+final rank, reranker score, text and URL for every final passage.
+
+Retrieval relevance is scored manually on a three-point scale:
+\texttt{0} (not informative), \texttt{1} (partially informative), and
+\texttt{2} (directly supports answering the question).  For each answer we
+also assess answer quality, groundedness in the visible passages, and whether
+the evidence makes the result diagnosable.
+
+\subsection{Failure Categories}
+Failures are separated into four types: irrelevant retrieval, insufficient
+corpus coverage, ambiguous query, and generation hallucination.  This
+distinction prevents attributing an incorrect answer to the generator when
+the index never contained suitable evidence.
+
+\section{Evaluation Query Set}
+Table~\ref{tab:queries} lists the nine controlled evaluation questions.  The
+first three good queries preserve PA2 comparability.  The additional topics
+were selected only after they were observed in stored PA2 extracted content
+or PA2 retrieval outputs.  The three adverse cases are retained from PA2
+because they expose ambiguity and corpus-boundary failures.
+
+\begin{table*}[t]
+\centering
+\small
+\caption{PA3 controlled query set and intended diagnostic role}
+\label{tab:queries}
+\begin{tabular}{p{2.2cm}p{6.0cm}p{7.0cm}}
+\toprule
+\textbf{Type} & \textbf{Query} & \textbf{Coverage basis / expected behavior} \\
+\midrule
+Good & Kateri so simptomi visokega krvnega tlaka in zakaj je merjenje pomembno? &
+PA2 reranking surfaced a direct hypertension-management article. \\
+Good & Kako zdrav življenjski slog pomaga pri sladkorni bolezni tipa 2? &
+PA2 surfaced a diabetes and cardiometabolic lifestyle article. \\
+Good & Kako izboljšati spanec in zakaj je reden spanec pomemben? &
+PA2 retrieval and validation content contain sleep-focused articles. \\
+Good & Kateri so značilni simptomi Parkinsonove bolezni in kako pomaga gibanje? &
+The extracted PA2 validation sample contains a Parkinson disease article. \\
+Good & Kateri znaki lahko kažejo na pomanjkanje vitamina B12? &
+The extracted PA2 validation sample contains a vitamin B12 article. \\
+Good & Zakaj so beljakovine pomembne pri ohranjanju mišične mase? &
+A saved PA2 retrieval run contains protein and muscle-preservation passages. \\
+\midrule
+Bad & Boli me &
+Underspecified symptom; retrieval cannot establish the user's intended pain. \\
+Bad & Kakšne so pravne posledice neplačila prometne kazni v Sloveniji? &
+Legal question outside the medical corpus; RAG should decline evidence-based answering. \\
+Bad & ATM &
+Unspecified acronym; PA2 already showed unrelated retrievals and very low reranker scores. \\
+\bottomrule
+\end{tabular}
+\end{table*}
+
+\section{Evaluation Results Workflow}
+The executable evaluation runner writes a JSON record for each question with:
+the top-five reranked chunks, both generated answers, exact model and
+retrieval parameters, and manual assessment fields.  This design avoids
+silently selecting only favorable answers and makes the comparison
+reproducible.
+
+At the time this report artifact was built, generation results were not
+fabricated: the local verification environment did not provide a running
+Ollama service or active PA2 database.  Before submission, the fixed
+experiment is run with:
+
+\begin{verbatim}
+python pa3/rag/evaluate.py
+\end{verbatim}
+
+The generated \texttt{pa3/rag/runs/<timestamp>\_evaluation.json} is then the
+source of truth for the final comparison table and manual scores.  Table
+\ref{tab:result-fields} specifies the values recorded for each row, ensuring
+that completing the report is mechanical rather than subjective
+reimplementation of the experiment.
+
+\begin{table}[h]
+\centering
+\small
+\caption{Per-query evidence recorded by the evaluation runner}
+\label{tab:result-fields}
+\begin{tabular}{p{2.6cm}p{4.7cm}}
+\toprule
+\textbf{Field} & \textbf{Purpose} \\
+\midrule
+Retrieved context & Inspect evidence and URLs presented to RAG. \\
+RAG answer & Determine grounding and explicit citation use. \\
+LLM-only answer & Compare fluency and unsupported specificity. \\
+Relevance (0--2) & Judge retrieval success. \\
+Quality (0--2) & Compare both answer modes. \\
+Failure type & Locate retrieval, coverage, ambiguity, or hallucination error. \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\section{Expected Analysis and Limitations}
+Based on the PA2 evidence, well-specified medical questions should benefit
+from RAG because relevant Slovenian chunks are available and citations let a
+reader inspect the basis of an answer.  In contrast, the legal query cannot be
+answered from this corpus.  A correct RAG behavior is therefore a transparent
+refusal to infer legal consequences from irrelevant medical evidence, even if
+the LLM-only response sounds plausible.
+
+The ``Boli me'' and ``ATM'' cases test a different limitation: the corpus may
+contain health content, but the question does not identify a useful intent.
+Reranking can reorder candidates, but it cannot resolve missing user context.
+The prompt is therefore designed to favor an insufficiency statement over a
+confident unsupported answer.
+
+The primary experimental limitation is qualitative assessment: nine questions
+provide interpretable case analysis rather than a statistically representative
+benchmark.  This is appropriate to the assignment's focus on transparency,
+but it should not be interpreted as clinical performance evaluation.
+
+\section{Conclusion}
+PA3 extends the strong PA2 retrieval system without disrupting its documented
+choices.  It adds a local Ollama generation layer, an evidence-restricted RAG
+prompt, an LLM-only comparison mode, and complete retrieval traces for
+evaluation.  The central explainability benefit is concrete: every RAG
+answer can be checked against the passages that shaped it, and failures can
+be classified as missing evidence, poor retrieval, ambiguous input, or model
+generation error.
+
+\begin{thebibliography}{1}
+\bibitem{ollamagemma}
+Ollama, ``gemma3 model library,'' \url{https://ollama.com/library/gemma3},
+accessed May 25, 2026.
+\end{thebibliography}
+
+\end{document}

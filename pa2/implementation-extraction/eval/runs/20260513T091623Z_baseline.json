@@ -1,0 +1,242 @@
+{
+  "timestamp": "2026-05-13T09:16:22.197087Z",
+  "embedding_model": "sentence-transformers/LaBSE",
+  "metric": "cosine",
+  "table": "page_segment_long",
+  "top_k": 5,
+  "rerank": false,
+  "rerank_model": null,
+  "rerank_candidates": null,
+  "intent_filter": "all",
+  "corpus_fingerprint": null,
+  "queries": [
+    {
+      "label": "good_1_blood_pressure",
+      "query": "Kateri so simptomi visokega krvnega tlaka?",
+      "expected": "Articles about hypertension symptoms (glavobol, vrtoglavica, krvavitve iz nosu).",
+      "initial": [
+        {
+          "page_id": 1,
+          "url": "https://medover.zurnal24.si/ti-dve-pogosti-navadi-podvojita-tveganje-za-srcno-in-mozgansko-kap/",
+          "score": 0.6222945974889631,
+          "preview": "Pomanjkanje rednega spanca lahko vodi do številnih telesnih in duševnih težav; vpliva tudi na zdravje srca. Slabo spanje vpliva na cirkadiani ritem, ki pomaga uravnavati krvni tlak in srčni utrip. Če…"
+        },
+        {
+          "page_id": 1,
+          "url": "https://medover.zurnal24.si/ti-dve-pogosti-navadi-podvojita-tveganje-za-srcno-in-mozgansko-kap/",
+          "score": 0.6375831499596656,
+          "preview": "udeleženci, ki so imeli bolj dosleden urnik spanja. Podobno povečano tveganje za srčno-žilni dogodek so raziskovalci v študiji opazili tudi pri ljudeh z zelo neredno sredino časa spanja. Sredina časa…"
+        },
+        {
+          "page_id": 3,
+          "url": "https://medover.zurnal24.si/izgorelost-pri-zenskah-znaki-simptomi/",
+          "score": 0.639045400733304,
+          "preview": "prekrivajo s simptomi anksiozno-depresivnih duševnih motenj, tako da se le-te lahko ob bolj pomembno izraženih simptomih sopojavljajo ali nasledijo. Med spoloma se določeni simptomi izgorelosti različ…"
+        },
+        {
+          "page_id": 1,
+          "url": "https://medover.zurnal24.si/ti-dve-pogosti-navadi-podvojita-tveganje-za-srcno-in-mozgansko-kap/",
+          "score": 0.6703879433639077,
+          "preview": "Ti dve pogosti navadi podvojita tveganje za srčno in možgansko kap Ste vedeli, da lahko dve pogosti navadi vašega vsakdana podvojita tveganje za srčni infarkt in možgansko kap? Spanje je pomemben steb…"
+        },
+        {
+          "page_id": 3,
+          "url": "https://medover.zurnal24.si/izgorelost-pri-zenskah-znaki-simptomi/",
+          "score": 0.6861136742762516,
+          "preview": "z anamnezo in psihološkimi testi opredelijo osebnostno naravnanost, nato pa z usmeritvami ali psihoterapevtskimi intervencijami pomagajo pri bolj učinkovitem spopadanju z izgorelostjo. Pri pomembno iz…"
+        }
+      ],
+      "rerank": []
+    },
+    {
+      "label": "good_2_diabetes_diet",
+      "query": "Kakšna prehrana je primerna pri sladkorni bolezni tipa 2?",
+      "expected": "Articles on diabetes diet, low glycemic index foods, sugar substitutes.",
+      "initial": [
+        {
+          "page_id": 2,
+          "url": "https://medover.zurnal24.si/pomanjkanje-vitamina-b12-simptomi-vzroki-resitve/",
+          "score": 0.595004308074841,
+          "preview": "dobre prehranske vire vitamina B12 izpostavlja: Ker so najpomembnejši viri vitamina B12 živila živalskega izvora, rastlinska živila pa ga vsebujejo le če so fermentirana, se veganom priporoča dodajanj…"
+        },
+        {
+          "page_id": 2,
+          "url": "https://medover.zurnal24.si/pomanjkanje-vitamina-b12-simptomi-vzroki-resitve/",
+          "score": 0.6008109926210623,
+          "preview": "100 grami lososa ali dvema jajcema. Med nosečnostjo in v času dojenja so potrebe po vitaminu B12 nekoliko povečane, saj se ga nekaj prenese na plod, oziroma v mleko. Do pomanjkanja vitamina B12 pa pog…"
+        },
+        {
+          "page_id": 2,
+          "url": "https://medover.zurnal24.si/pomanjkanje-vitamina-b12-simptomi-vzroki-resitve/",
+          "score": 0.645472866836442,
+          "preview": "Ko telesu primanjkuje vitamina B12: simptomi, vzroki in rešitve Vitamin B12 sodeluje pri številnih pomembnih procesih v telesu – od nastajanja krvi do delovanja živčnega sistema, njegovo pomanjkanje p…"
+        },
+        {
+          "page_id": 1,
+          "url": "https://medover.zurnal24.si/ti-dve-pogosti-navadi-podvojita-tveganje-za-srcno-in-mozgansko-kap/",
+          "score": 0.6687662601470947,
+          "preview": "Pomanjkanje rednega spanca lahko vodi do številnih telesnih in duševnih težav; vpliva tudi na zdravje srca. Slabo spanje vpliva na cirkadiani ritem, ki pomaga uravnavati krvni tlak in srčni utrip. Če…"
+        },
+        {
+          "page_id": 1,
+          "url": "https://medover.zurnal24.si/ti-dve-pogosti-navadi-podvojita-tveganje-za-srcno-in-mozgansko-kap/",
+          "score": 0.6705020368099213,
+          "preview": "Ti dve pogosti navadi podvojita tveganje za srčno in možgansko kap Ste vedeli, da lahko dve pogosti navadi vašega vsakdana podvojita tveganje za srčni infarkt in možgansko kap? Spanje je pomemben steb…"
+        }
+      ],
+      "rerank": []
+    },
+    {
+      "label": "good_3_insomnia_help",
+      "query": "Kako naravno premagati nespečnost in izboljšati spanec?",
+      "expected": "Sleep hygiene, melatonin, herbal remedies, relaxation tips.",
+      "initial": [
+        {
+          "page_id": 3,
+          "url": "https://medover.zurnal24.si/izgorelost-pri-zenskah-znaki-simptomi/",
+          "score": 0.6125074990098172,
+          "preview": "razmejijo, koliko so pripravljeni investirati v delovno uspešnost na eni strani in na drugi strani prosti čas in na ta način lovijo boljše ravnotežje za regeneracijo. Partner in drugi družinski člani…"
+        },
+        {
+          "page_id": 3,
+          "url": "https://medover.zurnal24.si/izgorelost-pri-zenskah-znaki-simptomi/",
+          "score": 0.6175676514167987,
+          "preview": "pride po razbremenitvi v relativno kratkem času do izboljšanja: denimo zadostuje lahko pomoč sodelavca v službi ali drugega družinskega člana pri obveznostih doma, ali pa prost vikend oziroma nekaj dn…"
+        },
+        {
+          "page_id": 3,
+          "url": "https://medover.zurnal24.si/izgorelost-pri-zenskah-znaki-simptomi/",
+          "score": 0.6254191175352994,
+          "preview": "za izgorelost je pomembno kako visoka pričakovanja si posameznik postavi, da morajo biti izpolnjenja, da je zadovoljen in koliko je vrednotena delavnost ali storilnost. To pomeni, da so bolj tvegani z…"
+        },
+        {
+          "page_id": 1,
+          "url": "https://medover.zurnal24.si/ti-dve-pogosti-navadi-podvojita-tveganje-za-srcno-in-mozgansko-kap/",
+          "score": 0.6332665085792542,
+          "preview": "Ti dve pogosti navadi podvojita tveganje za srčno in možgansko kap Ste vedeli, da lahko dve pogosti navadi vašega vsakdana podvojita tveganje za srčni infarkt in možgansko kap? Spanje je pomemben steb…"
+        },
+        {
+          "page_id": 1,
+          "url": "https://medover.zurnal24.si/ti-dve-pogosti-navadi-podvojita-tveganje-za-srcno-in-mozgansko-kap/",
+          "score": 0.6335567235946655,
+          "preview": "Pomanjkanje rednega spanca lahko vodi do številnih telesnih in duševnih težav; vpliva tudi na zdravje srca. Slabo spanje vpliva na cirkadiani ritem, ki pomaga uravnavati krvni tlak in srčni utrip. Če…"
+        }
+      ],
+      "rerank": []
+    },
+    {
+      "label": "bad_1_ambiguous_pain",
+      "query": "Boli me",
+      "expected": "Too short and ambiguous; expected to return generic medical chatter.",
+      "initial": [
+        {
+          "page_id": 3,
+          "url": "https://medover.zurnal24.si/izgorelost-pri-zenskah-znaki-simptomi/",
+          "score": 0.7761513128190446,
+          "preview": "pride po razbremenitvi v relativno kratkem času do izboljšanja: denimo zadostuje lahko pomoč sodelavca v službi ali drugega družinskega člana pri obveznostih doma, ali pa prost vikend oziroma nekaj dn…"
+        },
+        {
+          "page_id": 3,
+          "url": "https://medover.zurnal24.si/izgorelost-pri-zenskah-znaki-simptomi/",
+          "score": 0.8023139505199219,
+          "preview": "prekrivajo s simptomi anksiozno-depresivnih duševnih motenj, tako da se le-te lahko ob bolj pomembno izraženih simptomih sopojavljajo ali nasledijo. Med spoloma se določeni simptomi izgorelosti različ…"
+        },
+        {
+          "page_id": 3,
+          "url": "https://medover.zurnal24.si/izgorelost-pri-zenskah-znaki-simptomi/",
+          "score": 0.8053120076656342,
+          "preview": "Izgorelost žensk: Zakaj dopust ni dovolj in kdaj je čas za strokovno pomoč? V svetu, ki od žensk pričakuje usklajevanje kariere, materinstva in gospodinjstva, se meja med kronično utrujenostjo in neva…"
+        },
+        {
+          "page_id": 3,
+          "url": "https://medover.zurnal24.si/izgorelost-pri-zenskah-znaki-simptomi/",
+          "score": 0.8158590440708113,
+          "preview": "z Oddelka za psihiatrijo UKC Maribor . Kot opozarja, za izgorelost ni čudežne tablete, je pa pot do okrevanja mogoča s pravilno podporo in pravočasnim ukrepanjem. Pomembno je tudi, da specialisti medi…"
+        },
+        {
+          "page_id": 3,
+          "url": "https://medover.zurnal24.si/izgorelost-pri-zenskah-znaki-simptomi/",
+          "score": 0.8230068236589432,
+          "preview": "z anamnezo in psihološkimi testi opredelijo osebnostno naravnanost, nato pa z usmeritvami ali psihoterapevtskimi intervencijami pomagajo pri bolj učinkovitem spopadanju z izgorelostjo. Pri pomembno iz…"
+        }
+      ],
+      "rerank": []
+    },
+    {
+      "label": "bad_2_out_of_domain_legal",
+      "query": "Kakšne so pravne posledice neplačila prometne kazni v Sloveniji?",
+      "expected": "Out-of-domain (legal). Expected to return loosely related civic/administrative content if any.",
+      "initial": [
+        {
+          "page_id": 3,
+          "url": "https://medover.zurnal24.si/izgorelost-pri-zenskah-znaki-simptomi/",
+          "score": 0.7703408828479313,
+          "preview": "Izgorelost žensk: Zakaj dopust ni dovolj in kdaj je čas za strokovno pomoč? V svetu, ki od žensk pričakuje usklajevanje kariere, materinstva in gospodinjstva, se meja med kronično utrujenostjo in neva…"
+        },
+        {
+          "page_id": 1,
+          "url": "https://medover.zurnal24.si/ti-dve-pogosti-navadi-podvojita-tveganje-za-srcno-in-mozgansko-kap/",
+          "score": 0.7824533814922983,
+          "preview": "Pomanjkanje rednega spanca lahko vodi do številnih telesnih in duševnih težav; vpliva tudi na zdravje srca. Slabo spanje vpliva na cirkadiani ritem, ki pomaga uravnavati krvni tlak in srčni utrip. Če…"
+        },
+        {
+          "page_id": 3,
+          "url": "https://medover.zurnal24.si/izgorelost-pri-zenskah-znaki-simptomi/",
+          "score": 0.7939649285684539,
+          "preview": "pride po razbremenitvi v relativno kratkem času do izboljšanja: denimo zadostuje lahko pomoč sodelavca v službi ali drugega družinskega člana pri obveznostih doma, ali pa prost vikend oziroma nekaj dn…"
+        },
+        {
+          "page_id": 1,
+          "url": "https://medover.zurnal24.si/ti-dve-pogosti-navadi-podvojita-tveganje-za-srcno-in-mozgansko-kap/",
+          "score": 0.8146663997967958,
+          "preview": "Ti dve pogosti navadi podvojita tveganje za srčno in možgansko kap Ste vedeli, da lahko dve pogosti navadi vašega vsakdana podvojita tveganje za srčni infarkt in možgansko kap? Spanje je pomemben steb…"
+        },
+        {
+          "page_id": 2,
+          "url": "https://medover.zurnal24.si/pomanjkanje-vitamina-b12-simptomi-vzroki-resitve/",
+          "score": 0.8152528272343114,
+          "preview": "Ko telesu primanjkuje vitamina B12: simptomi, vzroki in rešitve Vitamin B12 sodeluje pri številnih pomembnih procesih v telesu – od nastajanja krvi do delovanja živčnega sistema, njegovo pomanjkanje p…"
+        }
+      ],
+      "rerank": []
+    },
+    {
+      "label": "bad_3_acronym_no_context",
+      "query": "ATM",
+      "expected": "Acronym with multiple meanings (medicine + finance). Expected to surface unrelated content; reranker should at least prefer medical interpretations if any segment matches.",
+      "initial": [
+        {
+          "page_id": 2,
+          "url": "https://medover.zurnal24.si/pomanjkanje-vitamina-b12-simptomi-vzroki-resitve/",
+          "score": 0.8742575459846054,
+          "preview": "Ko telesu primanjkuje vitamina B12: simptomi, vzroki in rešitve Vitamin B12 sodeluje pri številnih pomembnih procesih v telesu – od nastajanja krvi do delovanja živčnega sistema, njegovo pomanjkanje p…"
+        },
+        {
+          "page_id": 3,
+          "url": "https://medover.zurnal24.si/izgorelost-pri-zenskah-znaki-simptomi/",
+          "score": 0.8776727653243309,
+          "preview": "prekrivajo s simptomi anksiozno-depresivnih duševnih motenj, tako da se le-te lahko ob bolj pomembno izraženih simptomih sopojavljajo ali nasledijo. Med spoloma se določeni simptomi izgorelosti različ…"
+        },
+        {
+          "page_id": 2,
+          "url": "https://medover.zurnal24.si/pomanjkanje-vitamina-b12-simptomi-vzroki-resitve/",
+          "score": 0.8817485574930046,
+          "preview": "dobre prehranske vire vitamina B12 izpostavlja: Ker so najpomembnejši viri vitamina B12 živila živalskega izvora, rastlinska živila pa ga vsebujejo le če so fermentirana, se veganom priporoča dodajanj…"
+        },
+        {
+          "page_id": 1,
+          "url": "https://medover.zurnal24.si/ti-dve-pogosti-navadi-podvojita-tveganje-za-srcno-in-mozgansko-kap/",
+          "score": 0.8990366428803397,
+          "preview": "Pomanjkanje rednega spanca lahko vodi do številnih telesnih in duševnih težav; vpliva tudi na zdravje srca. Slabo spanje vpliva na cirkadiani ritem, ki pomaga uravnavati krvni tlak in srčni utrip. Če…"
+        },
+        {
+          "page_id": 1,
+          "url": "https://medover.zurnal24.si/ti-dve-pogosti-navadi-podvojita-tveganje-za-srcno-in-mozgansko-kap/",
+          "score": 0.9051933036802203,
+          "preview": "Ti dve pogosti navadi podvojita tveganje za srčno in možgansko kap Ste vedeli, da lahko dve pogosti navadi vašega vsakdana podvojita tveganje za srčni infarkt in možgansko kap? Spanje je pomemben steb…"
+        }
+      ],
+      "rerank": []
+    }
+  ]
+}
