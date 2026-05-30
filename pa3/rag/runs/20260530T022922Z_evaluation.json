@@ -1,0 +1,607 @@
+{
+  "timestamp": "2026-05-30T02:23:15.127268+00:00",
+  "description": "PA3 comparison of RAG (with context) and Ollama-only answers.",
+  "retrieval": {
+    "embedding_model": "sentence-transformers/LaBSE",
+    "table": "page_segment_long",
+    "metric": "cosine",
+    "top_k": 5,
+    "rerank": true,
+    "reranker_model": "BAAI/bge-reranker-v2-m3",
+    "rerank_candidates": 20,
+    "ivfflat_probes": 10
+  },
+  "generation": {
+    "provider": "ollama",
+    "model": "gemma3:4b",
+    "temperature": 0.0,
+    "base_url": "http://localhost:11434"
+  },
+  "queries": [
+    {
+      "label": "good_1_blood_pressure",
+      "query": "Kateri so simptomi visokega krvnega tlaka in zakaj je merjenje pomembno?",
+      "intent": "good",
+      "expected_evidence": "Articles about hypertension symptoms, risks and blood-pressure monitoring.",
+      "coverage_basis": "PA2 reranked run retrieved a directly relevant blood-pressure management article.",
+      "manual_evaluation": {
+        "retrieval_relevance_0_to_2": 2,
+        "rag_answer_quality_0_to_2": 2,
+        "llm_only_answer_quality_0_to_2": 1,
+        "groundedness_comment": "RAG odgovor je oprt na zadetke o asimptomatski hipertenziji, tveganjih in merjenju tlaka.",
+        "transparency_comment": "Citati in URL-ji jasno pokažejo, zakaj je merjenje pomembno; LLM-only poda delno pravilen, a jezikovno in vsebinsko slabši odgovor.",
+        "failure_type": null,
+        "comment": "Retrieval bistveno izboljša odgovor z dokazom, da hipertenzija pogosto nima simptomov."
+      },
+      "retrieved_context": [
+        {
+          "page_id": 140,
+          "url": "https://medover.zurnal24.si/6-kljucnih-nasvetov-za-lazje-obvladovanje-krvnega-tlaka/",
+          "segment_text": ", ki prikazuje pritisk v arterijah, ko srce počiva med utripoma in se polni s krvjo. Na spletni strani klinike Mayo Clinic pojasnjujejo, da strokovnjaki krvni tlak razvrščajo v štiri različne skupine: Če je krvni tlak višji od 180/120 mm Hg, gre za nujno stanje, ki zahteva takojšnjo zdravstveno pomoč. Večina ljudi z visokim krvnim tlakom nima nobenih simptomov, tudi če vrednosti tlaka dosežejo nevarno visoke ravni. Pri nekaterih posameznikih z visokim krvnim tlakom se sicer lahko pojavijo glavoboli, težko dihanje ali krvavitve iz nosu, a gre za nespecifične simptome, ki običajno pokažejo šele, ko je tlak že močno povišan. Merjenje krvnega tlaka je zato pomemben del preventive. Pogostost merjenja je odvisna od zdravstvenega stanja posameznika, zato je priporočljivo spremljati dejavnike, ki povečujejo tveganje za povišan krvni tlak. Med njimi so: Visok krvni tlak lahko resno škoduje našemu zdravju. Višji kot je krvni tlak in dlje časa kot ostaja nenadzorovan, hujše so posledice. Ker obremenjuje naše srce in poškoduje žile, krvni tlak povečuje tveganje za bolezni, kot so srčni infarkt, možganska kap in srčno popuščanje. Poleg tega lahko prizadene tudi druge organe, na primer ledvice, povzroča težave z očmi, lahko vpliva na naše kognitivne sposobnosti in povečuje tveganje za demenco. Prav zaradi možnih zapletov je ključno, da visok krvni tlak pravočasno prepoznamo ter ga z ustreznim načinom življenja in po potrebi z zdravili tudi nadzorujemo.",
+          "cosine_distance": 0.45638844110896737,
+          "rerank_score": 0.9977703094482422,
+          "vector_rank": 3,
+          "final_rank": 1
+        },
+        {
+          "page_id": 1537,
+          "url": "https://medover.zurnal24.si/99-kapi-bi-lahko-preprecili-preverite-ali-ste-med-ogrozenimi/",
+          "segment_text": "več kot 95 odstotkov oseb iz Južne Koreje in več kot 93 odstotkov oseb iz ZDA. “To je pomemben podatek, ker je visok krvni tlak dokaj lahko izmeriti, vendar je “asimptomatski”, zato ga pogosto spregledamo,” je komentiral profesor Greenfield. “Naše ugotovitve potrjujejo, da je pomembno, da ga prepoznamo in zdravimo.” Raziskovalci so poročali tudi, da je imelo več kot 95 odstotkov udeleženk, mlajših od 60 let, za katere na splošno velja, da jih srčno-žilne bolezni manj ogrožajo, pred možgansko kapjo ali srčnim popuščanjem vsaj en dejavnik tveganja. “Kot vemo že vrsto let, obstaja majhno število spremenljivih dejavnikov tveganja za bolezni srca, pri čemer je vsaj eden, pogosto pa več kot eden, prisoten v ozadju, ki vodi do srčnega infarkta, srčnega popuščanja ali kapi. Te štiri dejavnike je treba ocenjevati ob vsakem pregledu pri zdravniku, in če so vsaj malo povišani, si je treba prizadevati za zdravljenje, da bi preprečili srčno in možgansko kap ali srčno popuščanje,” je sklenil Philip Greenland. Vir: Medical News Today, 99% of heart attack, stroke, heart failure cases linked to preventable risk factors. Dostopno na: https://www.medicalnewstoday.com/articles/heart-attack-stroke-heart-failure-linked-to-preventable-risk-factors . Zadnji dostop: Oktober 2025",
+          "cosine_distance": 0.5338441610793017,
+          "rerank_score": 0.827476978302002,
+          "vector_rank": 19,
+          "final_rank": 2
+        },
+        {
+          "page_id": 1533,
+          "url": "https://medover.zurnal24.si/kako-in-kdaj-si-meriti-krvni-tlak/",
+          "segment_text": "Pogoste napake pri merjenju krvnega tlaka Zvišan krvni tlak (hipertenzija) ne povzroča bolečin, vendar dolgoročno povzroča resne zdravstvene zaplete, zato ga pogosto imenujemo tihi ubijalec. V Sloveniji ima hipertenzijo skoraj polovica odraslih. Mnogi se svojega povišanega krvnega tlaka sploh ne zavedajo, nekateri pa stanja ne jemljejo dovolj resno, s čimer se izpostavljajo škodljivim posledicam. Za učinkovito delovanje vitalnih organov – srca, možganov in ledvic – je izjemno pomembno, da krvni tlak ne presega vrednosti 140/90 mm Hg. Vrednosti krvnega tlaka, izmerjene doma, so običajno nekoliko nižje kot tiste, izmerjene v ambulanti. Normalno povprečje meritev pri domačem spremljanju krvnega tlaka znaša manj kot 135/85 mm Hg, optimalne vrednosti pa so pod 120/80 mm Hg. Če je povprečje domačih meritev višje od 135/85 mm Hg, se je treba o nadaljnjih ukrepih posvetovati z osebnim zdravnikom. Tudi če je krvni tlak trenutno normalen, to še ne pomeni, da bo tudi ostal. S staranjem žile postajajo vse bolj toge, s tem pa se povečuje tveganje za razvoj hipertenzije. Priporočljivo je, da si krvni tlak izmerimo vsaj enkrat letno, še pogosteje pa v primeru, da so bile v preteklosti že zabeležene povišane vrednosti. Zaradi teh napak je izmerjeni krvni tlak lahko višji. Za zanesljiv rezultat sta vedno potrebni vsaj dve meritvi. Če se izmerjeni vrednosti razlikujeta za več kot 5 mm Hg, je priporočljiva še dodatna meritev. Med posameznimi meritvami naj mine približno ena minuta.",
+          "cosine_distance": 0.48903572559356323,
+          "rerank_score": 0.6300198435783386,
+          "vector_rank": 4,
+          "final_rank": 3
+        },
+        {
+          "page_id": 5415,
+          "url": "https://medover.zurnal24.si/forum/tema/samoplacnisko-ali-na-napotnico-22340763/",
+          "segment_text": "poveča tveganje za strjevanje krvi pri ekstremno visokih vrednostih. Simptomi, ki bi zahtevali nujno pozornost so glavobol, vrtoglavica, rdeča koža, zamegljen vid, slabost, povečana utrujenost ali nenadna bolečina v prsih. Kaj lahko storite? Povečajte vnos tekočine pred in med meritvami krvi, da se izključi dehidracija. ponovi krvni test, idealno po nekaj dneh počitka od intenzivnega treninga in dobro hidriran, opazujte simptome – če se pojavi utrujenost, omotica ali težave s srcem, poiščite zdravnika. Če ostane povišano, se lahko posvetujete z internistom ali hematologom za dodatne preiskave, vključno z Željezo, ferritin, EPO (eritropoetin), ocenitev pljučne funkcije, če obstaja sum na sekundarno policitemijo Vaša povišanja so najverjetneje fiziološka in športno pogojena, še posebej ker ste mlad, zdrav in rekreativni kolesar. Ni nujno nevarno, a je smiselno ponoviti test v mirnejšem stanju in dobro hidriran. LP",
+          "cosine_distance": 0.5048620107687709,
+          "rerank_score": 0.522803783416748,
+          "vector_rank": 7,
+          "final_rank": 4
+        },
+        {
+          "page_id": 1531,
+          "url": "https://medover.zurnal24.si/mozganska-kap-dejavniki-tveganja-preprecevanje-mozganske-kapi/",
+          "segment_text": "hitreje kot pri starejših. “Vse več kapi se pojavlja pri ljudeh, mlajših od 55 let, menimo, da so vzroki predvsem povezani z življenjskim slogom. “ Visok krvni tlak je eden najpomembnejših dejavnikov tveganja za možgansko kap in je po podatkih Združenja za možgansko kap povezan s približno polovico vseh primerov. Kolodziejeva pojasnjuje, da visok krvni tlak povečuje pritisk na žile po vsem telesu, še posebej v možganih, kjer lahko povzroči krvavitev. “Če pride do razpoka krvne žile, govorimo o hemoragični možganski kapi. Oslabljen pretok krvi in zožene arterije pa lahko povečajo možnost nastanka krvnih strdkov. Če ti strdki potujejo v možgane in tam zamašijo žilo, pride do ishemične možganske kapi. “ Nikoli ni prezgodaj, da začnete spremljati svoj krvni tlak. Gibanje je pomembno, ker spodbuja zdrav pretok krvi. Zdrav pretok krvi ohranja žile prožne, zmanjšuje nastanek strdkov in možnost, da bi žile počile. Pomaga lahko že preprosta telesna aktivnost, kot je hoja. “Ljudje pogosto mislijo, da morajo biti izjemno telesno aktivni, da bi zmanjšali tveganje za možgansko kap, vendar to ne drži, ” pravi Kolodziejeva. “Že kratek sprehod okoli doma ali delo na vrtu lahko pomembno prispevata k zmanjšanju tveganja. “ Sol zvišuje krvni tlak, zato je pomembno, da ste pozorni na to, koliko jo zaužijete. Zlasti bodite pozorni na vsebnost soli v predelanih živilih – tam jo je lahko zelo veliko.",
+          "cosine_distance": 0.5344158133516193,
+          "rerank_score": 0.40852653980255127,
+          "vector_rank": 20,
+          "final_rank": 5
+        }
+      ],
+      "answer_with_context": "Visoki krvni tlak se kaže s simptomi, ki so sicer nespecifični, vendar so ključni za zgodnje zaznavanje. Med njih spadajo glavoboli, težko dihanje in krvavitve iz nosu, ki se pojavijo, ko je tlak že močno povišan [1]. Vendar pa je pomembno poudariti, da veliko ljudi z visokim krvnim tlakom nima nobenih simptomov, zato je merjenje krvnega tlaka ključnega pomena za njegovo zgodnje zaznavanje in preprečevanje zapletov [1].\n\nMerjenje krvnega tlaka je pomembno zaradi možnosti, da visok krvni tlak resno škoduje zdravju. Povišan tlak lahko povzroči srčni infarkt, možganško kap in srčno popuščanje, ter vpliva na ledvice, oči in kognitivne funkcije [1].  Zato je ključno, da ga pravočasno prepoznamo in nadzorujemo [1].\n\nMerjenje krvnega tlaka je še posebej pomembno, ker je visok krvni tlak pogosto \"asimptomatski\", kar pomeni, da ga lahko spregledujemo [2].  Zato je priporočljivo, da ga merimo redno, še posebej, če imamo dejavnike tveganja za povišan tlak, kot so staranje, nezdrava prehrana (z veliko soli) ali pomanjkanje telesne aktivnosti [3, 5].  Zlasti je visok krvni tlak pri mlajših ljudeh (pod 55 let) dejavnik tveganja za možgansko kapo [2, 5].\n\nUporabljeni viri: [1], [2], [3], [4], [5]",
+      "answer_without_context": "Simptomi visokega krvnega tlaka so pogosto brez simptomov, vendar lahko včasih povzroči glavečo, zamehčano vidu, bolečine v grlu ali hrbtu.\n\nMerjenje je pomembno, ker visok pritisk pogosto ni simptomski, lahko pa povzroči resne zdravstvene zaplete, kot so možinski cviček, srčni infarkt in ledvični odpadi."
+    },
+    {
+      "label": "good_2_diabetes_lifestyle",
+      "query": "Kako zdrav življenjski slog pomaga pri sladkorni bolezni tipa 2?",
+      "intent": "good",
+      "expected_evidence": "Articles about type 2 diabetes, diet, activity and glucose management.",
+      "coverage_basis": "PA2 reranked run retrieved the cardiometabolic factors article.",
+      "manual_evaluation": {
+        "retrieval_relevance_0_to_2": 2,
+        "rag_answer_quality_0_to_2": 1,
+        "llm_only_answer_quality_0_to_2": 1,
+        "groundedness_comment": "Prvi zadetki neposredno podpirajo življenjski slog, glukozo, zaplete, telesno maso in remisijo.",
+        "transparency_comment": "RAG je bolj konkreten od LLM-only, vendar ima eno nerodno oziroma slabo utemeljeno poved o rednem jemanju.",
+        "failure_type": "generation hallucination",
+        "comment": "Retrieval je uspel, generiranje pa doda manj zanesljiv zaključek, zato kakovost ni najvišja."
+      },
+      "retrieved_context": [
+        {
+          "page_id": 2021,
+          "url": "https://medover.zurnal24.si/kardiometabolni-dejavniki-kaj-so-in-kako-vplivajo-na-zdravje/",
+          "segment_text": "pa vplivamo na svojo telesno maso, obseg pasu, prehranjevalne navade, telesno aktivnost, kajenje in druge škodljive razvade. Zdrav življenjski slog pri osebah z mejno bazalno glikemijo (mejno zvišanje glukoze v krvi od 6.1 do 6.9 mmol/l) in moteno toleranco za glukozo lahko prepreči oziroma odloži razvoj sladkorne bolezni tipa 2. Pri vseh, ki že imajo postavljeno diagnozo sladkorne bolezni, pa zdrav življenjski slog ugodno vpliva na urejenost glukoze v krvi in pridružene dejavnike tveganja. “Moderen pristop k zdravljenju sladkorne bolezni ni več osredotočen le na glukozo v krvi, enako pomembno je treba naslavljati tudi maščobe v krvi, telesno težo, krvni tlak in zdravljenje z zdravili, ki ugodno vplivajo na delovanje srca in ledvic,” uvodoma poudari doc. dr. Janić. “Temelj je seveda zdrav življenjski slog, kamor spadajo zdrav način prehranjevanja, nekajenje, primerna telesna masa in telesna dejavnost.” Ob diagnozi o zdravi in uravnoteženi prehrani ter telesni aktivnosti svetuje usposobljen strokovnjak. Za bolj urejeno glukozo diabetologi svetujejo vsaj 150 minut oziroma 300 minut zmerno intenzivne telesne vadbe na teden, seveda le, če splošno zdravstveno stanje osebe to dovoljuje.",
+          "cosine_distance": 0.3761274218559265,
+          "rerank_score": 0.9988724589347839,
+          "vector_rank": 1,
+          "final_rank": 1
+        },
+        {
+          "page_id": 2022,
+          "url": "https://medover.zurnal24.si/cuker-ne-moremo-je-pozdraviti-lahko-pa-jo-zazdravimo-in-to-brez-zdravil/",
+          "segment_text": "zmanjša tveganje za zaplete. Raziskave so pokazale, da je izguba 15 odstotkov ali več telesne teže s spremembami življenjskega sloga, kot sta zdrava prehrana in pogostejša telesna dejavnosti, najučinkovitejši način za dosego remisije. Takšna izguba telesne mase (‘teže’) pomaga telesu učinkoviteje uporabljati inzulin, kar vodi do boljšega nadzora krvnega sladkorja. “Čeprav vse osebe s SB2 ne dosežejo remisije, pomembne raziskave kažejo, da je to za mnoge mogoče. Dosledne spremembe življenjskega sloga zgodaj po postavitvi diagnoze povečajo možnosti za doseg remisije. Vendar pa je ključnega pomena, da se s svojim zdravnikom pogovorite o individualnih lastnostih svoje sladkorne bolezni in ciljih zdravljenja, da ugotovite, ali je to za vas realna možnost,” svetuje Špela Volčanšek. Dodaja, da je ključnega pomena za ohranjanje remisije vzdrževanje zdrave telesne mase in življenjskega sloga. Doseganje in vzdrževanje remisije zahteva čas in predanost. Strokovna podpora je dragocena: sodelovanje z zdravnikom, sestro edukatorko s specialnimi znanji in drugimi zdravstvenimi delavci lahko bistveno poveča uspeh. Nekaj najučinkovitejših strategij za preprečevanje tveganja za nastanek sladkorne bolezni: “Dejavniki tveganja za sladkorno bolezen tipa 2 so v veliki meri del zdravega življenjskega sloga, na katerega lahko vplivamo, in preostali, ki so prirojeni,” pravi Špela Volčanšek. Poudarja, da z zdravim življenjskim slogom lahko zmanjšamo tveganje, da bomo zboleli. Preostali dejavniki tveganja so nespremenljivi in na njih nimamo vpliva: Psihiater dr. Željko Ćurić osvetljuje, kako ohraniti smisel in kakovost življenja, ko se soočamo s kronično boleznijo, ki za vedno spremni naš vsakdan?",
+          "cosine_distance": 0.5086413323879242,
+          "rerank_score": 0.9948322772979736,
+          "vector_rank": 15,
+          "final_rank": 2
+        },
+        {
+          "page_id": 2015,
+          "url": "https://medover.zurnal24.si/mali-koraki-za-cloveka-z-velikim-vplivom-na-zdravje/",
+          "segment_text": "Drobne spremembe, s katerimi zmanjšamo tveganje za sladkorno bolezen Z drobnimi spremembami v vsakodnevnih rutinah lahko dosežemo veliko za svoje zdravje, brez da popolnoma spremenimo življenjski slog. Ne le, da se z življenjskim slogom lahko pomembno zmanjšamo tveganje, da zbolimo za sladkorno boleznijo tipa 2 (SB2), tudi nekatere osebe, ki so že zbolele, lahko brez zdravljenja z zdravili pridejo do zazdravitve (remisije) . Špela Volčanšek, dr. med., spec. interne medicine s KO za endokrinologijo, diabetes in presnovne bolezni UKC Ljubljana, je pripravila nasvete, kakšne drobne spremembe lahko vnesemo v svoje vsakodnevne rutine, da bomo zmanjšali tveganje, da bi zboleli za SB2: Pomembno je tudi ohranjati užitek pri hranjenju s sporočanjem pozitivnih sporočil o izbiri hrane in omejevati le tisto izbiro, za katero imamo trdne znanstvene dokaze o njeni škodljivosti. Če se udeležimo delavnic o prehrani v CKZ, nas bodo zdravstveni strokovnjaki kot posameznika opremili s praktičnimi orodji za dnevno načrtovanje obrokov. Prvo vodilo naj bo, da je uspeh že, če znižamo telesno maso za 5-10 odstotkov, in nato, da jo uspešno vzdržujemo in ne pridobimo nazaj izgubljenih kilogramov. Takšno znižanje telesne mase izboljša krvni sladkor, krvni tlak, lipide, mobilnost in kakovost življenja ter zmanjša potrebo po zdravilih za metabolne bolezni Ključna je doslednost! Začnimo z majhnim, slavimo svoj napredek in se ne bojmo prilagoditi pristopa, ko je to potrebno. Psihiater dr. Željko Ćurić osvetljuje, kako ohraniti smisel in kakovost življenja, ko se soočamo s kronično boleznijo, ki za vedno spremni naš vsakdan?",
+          "cosine_distance": 0.45180670773406917,
+          "rerank_score": 0.9479352831840515,
+          "vector_rank": 3,
+          "final_rank": 3
+        },
+        {
+          "page_id": 2021,
+          "url": "https://medover.zurnal24.si/kardiometabolni-dejavniki-kaj-so-in-kako-vplivajo-na-zdravje/",
+          "segment_text": "zdrav način prehranjevanja, nekajenje, primerna telesna masa in telesna dejavnost.” Ob diagnozi o zdravi in uravnoteženi prehrani ter telesni aktivnosti svetuje usposobljen strokovnjak. Za bolj urejeno glukozo diabetologi svetujejo vsaj 150 minut oziroma 300 minut zmerno intenzivne telesne vadbe na teden, seveda le, če splošno zdravstveno stanje osebe to dovoljuje. Za marsikoga je spremeniti življenjski slog najtežje, zato so medicinske sestre edukatorice s Kliničnega oddelka za endokrinologijo, diabetes in presnovne bolezni UKC Ljubljana razvile program TABLETKA , namenjen osebam s sladkorno boleznijo tipa 2, ki jemljejo neinzulinska zdravila. “To je interaktiven program, ki naslavlja vse vidike življenjskega sloga, s posebnimi didaktičnimi pripomočki pa skuša iz udeležencev zvabiti čim večjo aktivnost. Da bi udeležence motivirali, jim na zelo plastičen način pokažejo, kaj se dogaja z glukozo v krvi. S tovrstnim pristopom ne prepovedujemo, temveč pojasnjujemo, npr. koliko vrečk sladkorja (kakršnega dobimo ob kavi in običajno vsebuje pet gramov sladkorja) se skriva v njihovem kosilu. Ne postavljamo omejitev, ker želimo, da bi osebe s sladkorno boleznijo živele normalno in kakovostno, ob predpostavki, da razumejo, kaj je optimalna količina zaužitih kalorij,” nam program predstavi sogovornik. “Vsak, ki sem ga napotil na program, je rekel, da je spremenil svoj pogled na glukozo in bolezen.” V programu boste izvedeli, zakaj ni enako, če spijete pomarančni sok ali pojeste pomarančo, koliko gramov sladkorja se skriva v jedeh, ki niso sladice, recimo v lepinji in čevapčičih, pa tudi zakaj bi se bilo pametno po obilnem kosilu odreči kremni rezini.",
+          "cosine_distance": 0.5117785320545958,
+          "rerank_score": 0.9446897506713867,
+          "vector_rank": 18,
+          "final_rank": 4
+        },
+        {
+          "page_id": 1574,
+          "url": "https://medover.zurnal24.si/ko-bolezen-postane-navdih-ki-ti-spremenijo-zivljenje/",
+          "segment_text": "tudi debelost. Za tip 1 vemo, da gre za avtoimunsko bolezen, za tip 2 pa še vedno prevladuje stigma, da so ljudje krivi sami. Tu se mora zgoditi premik. Pri gibanju pa se mu zdi najpomembnejši zgled – če bomo aktivni mi sami, bodo aktivni tudi naši zanamci, je menil. Asist. dr. Aleš Skvarča, dr. med., je poudaril, da so ukrepi zdravega življenjskega sloga neki kontinuum, proces, ki se nikoli ne konča, mejnike postavljamo mi sami. Kot je dejal, naj bo zmernost v vsem naše vodilo, zdrav življenjski slog pa prav tako zaveza vseh nas. Tako so opozorili zdravniki. “Redno jemanje je ultimativna možnost zdravljenja vseh kroničnih bolezni,” je dejala diabetologinja in predstojnica Oddelka za endokrinologijo in diabetes UKC Maribor Urška Kšela, dr. med . “Če zdravila proti sladkorni bolezni predpišemo dovolj zgodaj, lahko celo spremenijo potek bolezni, nekako zazdravijo bolezen, ki preide v prediabetes, posameznik je lahko celo povsem brez težav. ” Poudarila je tudi, da lahko z redno terapijo preprečimo napredovanje sladkorne bolezni in njene zaplete. “Vsak bolnik je svoja zgodba in mi imamo vsak dan izziv opolnomočiti jih, da razumejo pomen zdravljenja, tako z zdravili kot samo ukrepi življenjskega sloga. “ Diabetologinja iz ZD Idrija Ana Ogrič Lapajne, dr. med., pa je poudarila pomen odnosa z osebo, ki ima sladkorno bolezen. “Bolnik mi mora zaupati, zato je ključnega pomena individualni posvet in razumevanje, zakaj nekdo ne želi jemati zdravil. Razlogov je lahko veliko in prav je, da zdravnik razišče, v čem je težava. “",
+          "cosine_distance": 0.4962122290197677,
+          "rerank_score": 0.9350603818893433,
+          "vector_rank": 12,
+          "final_rank": 5
+        }
+      ],
+      "answer_with_context": "Zdrav življenjski slog igra ključno vlogo pri zdravljenju sladkorne bolezni tipa 2. Sposoben preprečiti razvoj bolezni pri osebah z mejno glikemijo in moteno toleranco za glukozo [1]. Pri osebah, ki že živijo z diagnozo sladkorne bolezni, zdrav življenjski slog ugodno vpliva na urejenost glukoze v krvi in zmanjšuje tveganje za zaplete [1, 2].\n\nKljučni elementi zdrav življenjskega sloga so: zdrav način prehranjevanja, redna telesna aktivnost, ohranjanje zdrave telesne mase in preprečevanje kajenja [1, 3, 4].  Spremembe v življenjskem slogu, kot so izguba 15 odstotkov telesne mase, lahko vodijo do remisije bolezni [2].  Drobne spremembe v vsakodnevnih rutinah, kot so ohranjanje užitka pri prehrani in omejevanje škodljive hrane, lahko zmanjšajo tveganje za sladkorno bolezen tipa 2 [3].  Doslednost in prilagajanje pristopa so ključne za dosego in vzdrževanje zdravja [3]. Redno jemanje je ultimativna možnost zdravljenja kroničnih bolezni, še posebej, če se kombinira z ukrepi življenjskega sloga [5].\n\nUporabljeni viri: [1], [2], [3], [4], [5]",
+      "answer_without_context": "Zdravstveni življenjski slog, vključujoč zdravo prehrano in redno gibanje, lahko izboljšuje občutljivost na insulin in pomaga nadzorovati raven sladkorja v krvi pri sladkorni bolezni tipa 2. Splošni odgovor ne nadomesti zdravstvene obravnave."
+    },
+    {
+      "label": "good_3_sleep",
+      "query": "Kako izboljšati spanec in zakaj je reden spanec pomemben?",
+      "intent": "good",
+      "expected_evidence": "Sleep hygiene or sleep-risk articles.",
+      "coverage_basis": "PA2 query evaluation and extracted validation articles contain sleep-focused content.",
+      "manual_evaluation": {
+        "retrieval_relevance_0_to_2": 2,
+        "rag_answer_quality_0_to_2": 2,
+        "llm_only_answer_quality_0_to_2": 1,
+        "groundedness_comment": "Retrieved chunks pokrijejo reden urnik spanja, kakovost spanja in zdravstvene posledice pomanjkanja spanja.",
+        "transparency_comment": "RAG pokaže, iz katerih člankov prihajajo razlogi; LLM-only ostane splošen in jezikovno slabši.",
+        "failure_type": null,
+        "comment": "Dober primer, kjer RAG doda razloge in diagnostično sledljivost."
+      },
+      "retrieved_context": [
+        {
+          "page_id": 1950,
+          "url": "https://medover.zurnal24.si/zakaj-je-zdravje-in-pocutje-tako-pomemben-dosleden-urnik-spanja/",
+          "segment_text": "Majhna sprememba, ki lahko povsem preobrazi vaš spanec Prebujanje je samo po sebi težko. Vstajanje ob natanko isti uri vsak dan – tudi ob koncu tedna, ko bi se lahko še uro (ali tri) razvajali pod odejo – pa se morda sliši že skoraj nerazumno. Vendar je dosleden urnik spanja sedem dni v tednu eden najučinkovitejših načinov za izboljšanje kakovosti spanca in posledično vašega splošnega počutja. Preverite, kako lahko z eno majhno spremembo ponastavite svoj spanec. Strokovnjaki za spanje so se v preteklosti osredotočali predvsem na to, koliko časa ljudje spijo in kolikokrat se ponoči zbudijo. Danes pa se pozornost preusmerja k temu, čemur klinični strokovnjaki pravijo ‘rednost spanja’ oziroma ohranjanje stalnega urnika prebujanja . “Doslednost pri urniku spanja je eden najnovejših vidikov, ki jih začenjamo preučevati na področju spanja, ” je za The Time povedala Helen Burgess iz Univerze v Michiganu . “V preteklosti temu nismo namenjali dovolj pozornosti, čeprav je izjemno pomembno. “ Zgodnje raziskave kažejo, da ljudje z nerednim urnikom spanja pogosteje poročajo o depresiji, slabšem spancu in slabšem splošnem počutju – pojavijo se lahko celo znaki presnovnih motenj, kot je zmanjšana občutljivost na inzulin. Razlog, zakaj je doslednost tako pomembna, se skriva v cirkadianem ritmu : notranji uri, ki deluje v 24-urnem ciklu. “Ko se zjutraj zbudimo in odpremo oči, zaznamo svetlobo. Ta jutranja svetloba je zelo pomemben signal za našo notranjo (cirkadiano) uro, ” pojasnjuje Burgessova. Ta ura dejansko uravnava cirkadiane ritme, ki so temelj vsakega vidika našega telesnega in duševnega zdravja .",
+          "cosine_distance": 0.4744304418563805,
+          "rerank_score": 0.9395347833633423,
+          "vector_rank": 9,
+          "final_rank": 1
+        },
+        {
+          "page_id": 1466,
+          "url": "https://medover.zurnal24.si/6-zdravih-navad-za-boljsi-vsakdan/",
+          "segment_text": "dialog.” Na portalu spletne klinike Cleveland Clinic pa svetujejo, da se vsak dan vprašamo, kako se počutimo in kaj potrebujemo . “Ko smo prijazni do drugih, se v naših možganih sproščajo hormoni sreče, kot so oksitocin, serotonin in dopamin,” pojasnjuje Jan Cowin , strokovnjakinja za psihološko dobrobit iz Living Well. Reden urnik spanja, pri katerem vsak dan vstajamo in hodimo spat ob isti uri, je osnova za dober spanec in boljše počutje. Po priporočilih NIJZ pa sta prav tako pomembna tudi zadostna dolžina spanja (pri odraslih med 7 in 9 ur) in njegova kakovost. “Posamezniki, ki dobro spijo, so običajno bolj uspešni v poklicnem življenju, hkrati pa imajo manj težav z zdravjem in se splošno bolje počutijo,” je za The Independent opozoril Joshua Piper , specialist za spanje pri podjetju ResMed , nekdanji višji klinični psiholog pri NHS . Sposobnost sprostitve je izjemnega pomena za naše telesno in duševno zdravje. V svojo vsakodnevno rutino poskusite vključiti izvajanje sprostitvenih tehnik, kot so meditacija , globoko dihanje ali postopno mišično sproščanje. Ključno je, da spremljajte svoje prihodke in odhodke, saj to zmanjšuje stres, povezan s financami. Pri tem si lahko pomagate z različnimi aplikacijami. 6. Vzemite si čas za stvari, ki vas veselijo Ukvarjanje z dejavnostmi, ki nas veselijo, je odličen način za sprostitev in izboljšanje razpoloženja, saj spodbuja ustvarjalnost in nam omogoča, da odmislimo vsakdanje skrbi. Že 15 do 30 minut dnevno je dovolj.",
+          "cosine_distance": 0.4787468444180645,
+          "rerank_score": 0.7257593274116516,
+          "vector_rank": 11,
+          "final_rank": 2
+        },
+        {
+          "page_id": 2037,
+          "url": "https://medover.zurnal24.si/kaksna-je-minimalna-kolicina-spanca-ki-jo-potrebujemo/",
+          "segment_text": "je še posebej pomembno za tiste, ki imajo težave z nespečnostjo.” Posledice kroničnega pomanjkanja spanja, ki traja več tednov, mesecev ali let, so lahko številni zdravstveni zapleti oziroma težave, denimo: povečana odpornost na inzulin, povečano vnetje v telesu, povišan krvni tlak, celo povečano tveganje za srčni infarkt ali možgansko kap. Za dobro spanje je kakovost enako pomembna kot količina. Koliko časa potrebujemo, da zaspimo, kako pogosto se ponoči zbujamo in kako spočiti se zjutraj zbudimo, so pokazatelji tega, ali spimo kakovostno. Če spimo osem ur, vendar slabo, to ni dobro za telo. Pri tem je predvsem pomembna kontinuiteta: kako spimo večino noči. Nekdanji ameriški predsednik Barack Obama naj bi v času svojega predsednikovanja spal le po približno pet ur na noč. Dwayne “The Rock” Johnson je tudi trdil, da spi le od tri do pet ur na noč. “Mislim, da to ni nekaj, na kar bi moral biti kdo ponosen,” pravi Joe Dzierzewski.",
+          "cosine_distance": 0.49180969547091014,
+          "rerank_score": 0.44995084404945374,
+          "vector_rank": 15,
+          "final_rank": 3
+        },
+        {
+          "page_id": 1647,
+          "url": "https://medover.zurnal24.si/ko-spimo-mozgani-delajo-zakaj-je-spanec-temelj-zdravja/",
+          "segment_text": "tudi: pojdi spat pred polnočjo . Spanje v prvem delu noči ima posebno obnovitveno vrednost. Motnje dihanja v spanju, zlasti obstruktivne apneje, so pogoste in pogosto spregledane. Zanje so značilni: Pri sumu na motnje spanja je ključna pravočasna diagnostika in zdravljenje – pogosto že ustrezna terapija bistveno izboljša kakovost življenja. Pri sumu na obstruktivno spalno apnejo si lahko pomagamo tudi s preprostim presejalnim vprašalnikom STOP-BANG, ki ga uporabljajo zdravstveni delavci po vsem svetu. Ne postavlja diagnoze, lahko pa pomaga prepoznati povečano tveganje. Če ste na več vprašanj odgovorili z »da«, je smiselno, da se o tem pogovorite z izbranim zdravnikom ali specialistom za motnje spanja. Spanec ni izgubljen čas. Je aktivna naložba v zdravje možganov, srca, imunskega sistema in duševnega ravnovesja. Ko spanje zanemarjamo, telo in možgani prej ali slej plačajo ceno. Skrb za spanec ni razvajanje – je osnovna skrb zase. vir: https://zasrce.si/clanek/predavanje-motnje-spanja-in-srcni-dogodki-med-spanjem/ , zadnji dostop: februar 2026",
+          "cosine_distance": 0.4979867486345839,
+          "rerank_score": 0.31166785955429077,
+          "vector_rank": 19,
+          "final_rank": 4
+        },
+        {
+          "page_id": 4338,
+          "url": "https://medover.zurnal24.si/forum/tema/hude-tezave-s-spanjem-22326995/",
+          "segment_text": "ki pri meni ne pusti nobenih slabih efektov, ko se zbudim. Spanec je tudi dokaj kvaliteten, tudi sanjam veliko (ampak to je odvisno tudi od drugih dejavnikov, ne samo tablet). Hočem pa povedat naslednje: seveda, ko je človek neprespan, ko je ritem spanja zelo porušen in človek funkcionira samo na periferiji, na ‘rezervnem’ načinu delovanja, kjer ni sproščenosti (ta je sploh največji problem!), finih občutkov, zbranosti itd., ampak je bolj golo preživetje, prebijanje čez dan – takrat je seveda NUJNO najprej urediti oz. doseči, da bomo spali, na kakršen koli način. Nekaj je treba narediti, da spet ‘padeš v komo’, da ugasneš možgane in nenehno vrtenje v tesnobnih mislih, plavanje v napetem, zakrčenem počutju v celem telesu. Nekaj je treba najti, da bomo dosegli odklop oz. izklop možganov. Bolj kot telesni počitek je pomemben umski odklop in regeneracija, ki jo spanje prinaša. Če nekaj dni ne spiš in ti uspe zaspati samo za 2 uri, je že to zlata vredno, ker vsaj malce resetira psiho in telo, in se poveča možnost, da se boš lahko uspel vsaj malo sprostiti. In ponavadi nobena naravna metoda ne deluje (saj pri meni ni), meni so pomagale omenjene tablete. Treba je torej najti zunanjo pomoč, da se spet vzpostavi neko za silo normalno delovanje spanja.",
+          "cosine_distance": 0.47385215759276966,
+          "rerank_score": 0.24016638100147247,
+          "vector_rank": 7,
+          "final_rank": 5
+        }
+      ],
+      "answer_with_context": "Izboljšava spanja in reden spanec sta pomembna za splošno zdravje in počutje. Reden urnik spanja, kjer se vsak dan vstaša in hodi spat ob istem času, je ključnega pomena za izboljšanje kakovosti spanca [1, 2]. To je povezano z cirkadijanim ritmom, notranjo uro, ki uravnoteži različne telesne funkcije [1, 4].\n\nPomanjkanje reda v urniku spanja lahko povzroči različne težave, kot so depresija, slabši spanec, motnje prebave in povečano tveganje za bolezni [1]. Kronično pomanjkanje spanja lahko ima resne posledice za zdravje, vključno z povečano odpornostjo na inzulin, vnetjem v telesu, povišanim krvnim tlakom in povečanim tveganjem za srčni infarkt ali možgansko kap [3, 4].\n\nKakovost spanca je tako pomembna kot količina. Za dobro spanje je pomembna kontinuiteta, torej kako spimo večino noči [3]. Poleg tega je pomembno, da se posamezniki posvetijo umskemu odklopu in regeneraciji, ki jo spanje prinaša, saj je to ključnega pomena za telesni počitek [5].  Če spimo osem ur, vendar slabo, to ni dobro za telo [3].\n\nUporabljeni viri: [1], [2], [3], [4], [5]",
+      "answer_without_context": "Reden spanec je pomemben za splošno dobro počutje, koncentracijo in zdravje. Za izboljšanje spanja poskušajte:\n\n*   Ustanavljati si redno uro.\n*   Ustvariti mirno in temno okolje.\n*   Izbiti se od ekrana pred sproščanjem.\n*   Upoštevati prehrano in vodo.\n\n**Pomembno:** Splošni odgovor ne nadomestuje zdravstvene obravnave. Če imate težave s spanjem, se posvetujte s specialistom."
+    },
+    {
+      "label": "good_4_parkinson",
+      "query": "Kateri so značilni simptomi Parkinsonove bolezni in kako pomaga gibanje?",
+      "intent": "good",
+      "expected_evidence": "Article about Parkinson disease symptoms and physical activity.",
+      "coverage_basis": "Extracted PA2 corpus sample contains a Parkinson disease article with both topics.",
+      "manual_evaluation": {
+        "retrieval_relevance_0_to_2": 2,
+        "rag_answer_quality_0_to_2": 1,
+        "llm_only_answer_quality_0_to_2": 1,
+        "groundedness_comment": "Vsi glavni zadetki prihajajo iz relevantnega članka o Parkinsonovi bolezni in gibanju.",
+        "transparency_comment": "RAG dobro pokaže vir za vadbo, boks in ravnotežje, vendar odgovor vsebuje nekaj terminološko nerodnih formulacij.",
+        "failure_type": "generation hallucination",
+        "comment": "Retrieval je ustrezen, kakovost odgovora znižajo jezikovne napake in nepopolna terminologija."
+      },
+      "retrieved_context": [
+        {
+          "page_id": 1664,
+          "url": "https://medover.zurnal24.si/parkinsonova-bolezen-simptomi-zdravljenje-in-izzivi-obravnave/",
+          "segment_text": "različica vprašalnika za samooceno Parkinsonove bolezni. Gre za kratek pripomoček, ki posameznika usmeri k razmisleku o počutju, simptomih in jemanju zdravil (dostopen na: https://www.mypdcare.eu/ ). “Če bolnik s pomočjo vprašalnika prepozna znake napredovanja, lahko lažje odpre pogovor s svojim nevrologom tudi o nadaljnjih možnostih zdravljenja,” poudarja prof. dr. Maja Trošt. Pomembno je tudi, da bolnik v svoji bolezni ni sam. Parkinsonova bolezen namreč ne vpliva le na gibanje, temveč tudi na razpoloženje, spanje in koncentracijo, zato so opazovanja in povratne informacije svojcev za nevrologa zelo dragoceni. “Velik del delovanja možganov je odvisen od prekrvavitve. Ko se gibamo, v možgane pride več krvi. Že preprost sprehod lahko spodbuja nastajanje novih možganskih celic in krepi obstoječe. Ob tem se med gibanjem sproščajo tudi biokemični prenašalci – dopamin, katerega pomanjkanje je povezano s Parkinsonovo boleznijo, pa tudi serotonin in adrenalin. Vse to vpliva na potek bolezni,” poudarja prof. dr. Zvezdan Pirtošek in dodaja “Gibanje je ena najpomembnejših nefarmakoloških oblik zdravljenja.” Tina Štrumelj , dipl. fizioterapevtka s specialnimi znanji, ki na Nevrološki kliniki UKC Ljubljana skrbi za aktivacijo bolnikov, pojasni, da je cilj vadbe izboljšati ravnotežje, kontrolo gibanja in zmanjšati tveganje za padce. Pri tem je pomembno poudariti, da vadba ne vpliva le na motoriko, temveč tudi na kognitivne sposobnosti bolnika. “Gre za celostno, kompleksno aktivnost, pri kateri ima pomembno vlogo tudi socialna komponenta,” poudarja.",
+          "cosine_distance": 0.4546811905693289,
+          "rerank_score": 0.7005204558372498,
+          "vector_rank": 1,
+          "final_rank": 1
+        },
+        {
+          "page_id": 1664,
+          "url": "https://medover.zurnal24.si/parkinsonova-bolezen-simptomi-zdravljenje-in-izzivi-obravnave/",
+          "segment_text": "skrbi za aktivacijo bolnikov, pojasni, da je cilj vadbe izboljšati ravnotežje, kontrolo gibanja in zmanjšati tveganje za padce. Pri tem je pomembno poudariti, da vadba ne vpliva le na motoriko, temveč tudi na kognitivne sposobnosti bolnika. “Gre za celostno, kompleksno aktivnost, pri kateri ima pomembno vlogo tudi socialna komponenta,” poudarja. “Med najbolj priljubljenimi aktivnostmi, ki izboljšujejo usklajevanje gibanja rok, nog in oči ter krepijo kognitivne sposobnosti, je namizni tenis. Na voljo pa so tudi druge oblike vadbe, kot so tai chi, igranje na bobne in številni pohodi,” poudarja predsednik društva prof. dr. Zvezdan Pirtošek. Kot izjemno učinkovita vadba za bolnike s Parkinsonovo boleznijo se je izkazal tudi boks. “Gre za aktivnost, ki na celosten način izboljšuje ravnotežje in stabilnost telesa. Hkrati od posameznika zahteva, da razmišlja o levi in desni strani telesa, ohranja pozornost in izvaja gibe, ki postajajo vse hitrejši,” pojasnjuje prof. dr. Pirtošek. “Boks pogosto dojemamo kot nekaj agresivnega, v resnici pa gre za usklajeno, ritmično gibanje,” razlaga Tina Štrumelj, ki izvaja študijo o vplivu boksa na ravnotežje in fizične zmogljivosti bolnikov s Parkinsonovo boleznijo.",
+          "cosine_distance": 0.5447915521139823,
+          "rerank_score": 0.21018272638320923,
+          "vector_rank": 10,
+          "final_rank": 2
+        },
+        {
+          "page_id": 1664,
+          "url": "https://medover.zurnal24.si/parkinsonova-bolezen-simptomi-zdravljenje-in-izzivi-obravnave/",
+          "segment_text": "levi in desni strani telesa, ohranja pozornost in izvaja gibe, ki postajajo vse hitrejši,” pojasnjuje prof. dr. Pirtošek. “Boks pogosto dojemamo kot nekaj agresivnega, v resnici pa gre za usklajeno, ritmično gibanje,” razlaga Tina Štrumelj, ki izvaja študijo o vplivu boksa na ravnotežje in fizične zmogljivosti bolnikov s Parkinsonovo boleznijo. Pomembno vlogo pri ozaveščanju, izobraževanju in spodbujanju gibanja imajo tudi tabori, ki jih v okviru društva Trepetlika že dvajset let organizira Lidija Ocepek , dipl. medicinska sestra, specializirana za področje Parkinsonove bolezni. “Pri kronični bolezni bolniki pogosto težko razumejo njen potek, zato jim s takšnimi srečanji pomagamo, da bolezen bolje spoznajo. Na začetku so udeleženci običajno bolj zadržani, kasneje pa se zelo odprejo. Zaradi dostopa do informacij so danes dobro informirani, njihova vprašanja pa pogosto zelo kompleksna. Prav zato je dragoceno, da se poleg strokovnih vsebin pogovarjamo tudi o konkretnih, osebnih situacijah,« poudarja . »Ko z njimi preživim več dni, jih vidim z druge perspektive. Po nekaj dneh so bolj sproščeni, povezani in zadovoljni. Socialni vidik je pri tej bolezni izjemno pomemben, zato je zelo dobrodošlo, da na tabor z bolnikom pride tudi kdo od svojcev. Ko bolezen napreduje, je ključno, da jo razumejo tudi oni in znajo pomagati,” še pove Lidija Ocepek.",
+          "cosine_distance": 0.5630217232121056,
+          "rerank_score": 0.19604897499084473,
+          "vector_rank": 20,
+          "final_rank": 3
+        },
+        {
+          "page_id": 1664,
+          "url": "https://medover.zurnal24.si/parkinsonova-bolezen-simptomi-zdravljenje-in-izzivi-obravnave/",
+          "segment_text": "bolnikom s Parkinsonovo boleznijo. “Ob tem si želim, da bi nam prisluhnila tudi širša družba in odločevalci. Tudi če čakalnih dob ne moremo takoj skrajšati, lahko veliko naredimo na področju lajšanja simptomov in izboljšanja kakovosti življenja, tudi z večjo podporo aktivnostim, ki jih izvaja društvo,” še poudarja prof. dr. Pirtošek. Epidemiološke študije v Sloveniji ni, vendar je odstotek bolnikov primerljiv z drugimi podobno razvitimi državami. V Sloveniji je bolnikov s Parkinsonovo boleznijo in drugimi parkinsonizmi okrog 10.000, gre za najhitreje rastočo nevrodegenarativno bolezen.",
+          "cosine_distance": 0.5265700503247939,
+          "rerank_score": 0.03130781650543213,
+          "vector_rank": 4,
+          "final_rank": 4
+        },
+        {
+          "page_id": 343,
+          "url": "https://medover.zurnal24.si/forum/tema/bownova-terapija-2-1506994/",
+          "segment_text": "parkinsonovi bolezni, multipli sklerozi, sindromu kronične utrujenosti, depresiji in anksioznosti (kot komplementarna terapija), neplodnosti (ne pri fizičnih blokadah v reprodukcijskem sistemu). Kaj loči bownovo terapijo od drugih manualnih metod zdravljenja? Nežen dostop do telesa in pri aplikaciji bownovih posegov. Zaupanje in vzpodbuda bistvene lastnosti telesa , da lahko pod pravilnimi pogoji vzpostavi porušeno ravnotežje, se normalizira in tudi ozdravi. Pri sami terapiji stimuliramo mehka tkiva telesa z specifičnimi in nežnimi potezami, ki tvorijo osnovni del vseh bownovih posegov. Med serijami bownovih potez so kratki časovni premori. Med posegi se telesa ne dotikamo, temveč mu nudimo možnost da se v tem času odzove na vnešene dražljaje. Terapijo lahko uporabimo takoj po rojstvu ter pri vseh starostnih grupah in somatičnih motnjah. Resultati so običajno hitri in trajni ter so izraziti na fizični in pogosto tudi na emocionalni ravni. V večini primerov je potrebno relativno nizko število zdravljen (1-4), da dosežemo znatno izboljšanje. Terapija je varna in z samo manjšim številom kontraindikacij ter varnostnih ukrepov pri izvajanju posegov. lp",
+          "cosine_distance": 0.5314293503761292,
+          "rerank_score": 0.01471182331442833,
+          "vector_rank": 5,
+          "final_rank": 5
+        }
+      ],
+      "answer_with_context": "Simptomi Parkinsonove bolezni so zelo različni in vplivajo na gibalne in ne samo gibalne funkcije. Med značilne simptome spadajo zamujenost gibanja, težko začetje gibov, tremor (drhtavost), okrček mišic (neprijetno čutno občutek v nogah ali rokah) in težava z ravnotežjem [1, 2, 3].\n\nGibanje, vključno z različnimi tipi vadbe, je pomemben del zdravljenja Parkinsonove bolezni. Gibanje spodbuja nastajanje novih možganskih celic in krepi obstoječe, hkrati pa sproža biokemične prenašalce, kot so dopamin, serotonin in adrenalin, ki vplivajo na potek bolezni [1].\n\nRazlične oblike gibanja so lahko koristne, na primer sprehodi, tai chi, igranje na bobne, namizni tenis ali boks [1, 2, 3]. Boks je posebej zanimiv, saj zahteva razmišljanje o levi in desni strani telesa, ohranja pozornost in izvaja gibe, ki postajajo vse hitrejši [1, 3]. Gibanje izboljšuje ravnotežje, kontrolo gibanja in zmanjšuje tveganje za padce [1, 2].\n\nPoleg gibanja je pomembna tudi socialna komponenta vadbe in aktivnost, ki jo organizira Društvo Trepetlika, kjer bolniki dobijo informacij in se sprostijo [3].\n\nUporabljeni viri: [1], [2], [3]",
+      "answer_without_context": "Značilni simptomi Parkinsonove bolezni so zamujenost gibanja, tremor, krčiti mišic in težava z ravnotežjem. Gibalne terapije pomagajo ohranjati gibalne zmogljivosti in izboljšati kakovost življenja."
+    },
+    {
+      "label": "good_5_vitamin_b12",
+      "query": "Kateri znaki lahko kažejo na pomanjkanje vitamina B12?",
+      "intent": "good",
+      "expected_evidence": "Article about vitamin B12 symptoms, risk groups and food sources.",
+      "coverage_basis": "Extracted PA2 corpus sample contains a vitamin B12 article.",
+      "manual_evaluation": {
+        "retrieval_relevance_0_to_2": 2,
+        "rag_answer_quality_0_to_2": 2,
+        "llm_only_answer_quality_0_to_2": 1,
+        "groundedness_comment": "Zadetki neposredno pokrijejo B12, ustne znake, mravljinčenje in nevrološke težave.",
+        "transparency_comment": "RAG jasno naveže znake na vire; LLM-only je splošen in vsebuje jezikovne napake.",
+        "failure_type": null,
+        "comment": "RAG izboljša natančnost in doda preverljive vire."
+      },
+      "retrieved_context": [
+        {
+          "page_id": 1767,
+          "url": "https://medover.zurnal24.si/znaki-v-ustih-pomanjkanje-vitaminov-mineralov/",
+          "segment_text": "postane nenavadno gladek, sijoč ali celo otekel, je to lahko znak pomanjkanja folata (B9), niacina (B3) in vitamina B12. Na Mayo Clinic pozarjajo, da se ob pomanjkanju vitamina B12 pogosto pojavita boleč in otekel jezik, kar lahko oteži hranjenje in govor. Ta subtilna sprememba je eden značilnejših znakov hranilne pomanjkljivosti. Čeprav krvavitev dlesni pogosto povezujemo s premočnim ščetkanjem ali slabo higieno, je lahko tudi znak pomanjkanja vitamina C. Kot izpostavljajo na Mayo Clinic, je ta vitamin ključen za ohranjanje zdravih žil in vezivnih tkiv. Ko ga telesu primanjkuje, oslabljena struktura dlesni postane bolj občutljiva in dovzetna za okužbe. Zato lahko nenadna, nepojasnjena krvavitev dlesni služi kot zgodnje opozorilo. Nadloga, imenovana afte (rekurentne aftozne razjede), se običajno pojavi ob stresu ali padcu odpornosti. A ponavljajoče se razjede, ki se celijo več tednov, so lahko opozorilo, da telesu primanjkuje železa, folata ter vitaminov B6 in B12. Na Cleveland Clinic pojasnjujejo, da te hranilne snovi sodelujejo pri tvorbi krvi in obnovi celic. Njihovo pomanjkanje oslabi sluznico v ustih in poveča tveganje za nastanek teh neprijetnih razjed. Pekoč jezik, mravljinčenje ali celo otrplost (glossodinia, parestezije) so nenavadni občutki, ki jih pogosto spregledamo, a so lahko posledica pomanjkanja železa ali vitaminov skupine B. Po podatkih Mayo Clinic lahko pomanjkanje vitamina B12 in folata povzroči nevrološke težave, kar se lahko kaže kot pekoč občutek v ustih, ki ni povezan s hrano. Ta simptom je sicer manj očiten kot razpoke, a je prav tako pomemben za pravočasno prepoznavanje težave.",
+          "cosine_distance": 0.4360954761505127,
+          "rerank_score": 0.9956087470054626,
+          "vector_rank": 3,
+          "final_rank": 1
+        },
+        {
+          "page_id": 39,
+          "url": "https://medover.zurnal24.si/pomanjkanje-vitamina-b12-simptomi-vzroki-resitve/",
+          "segment_text": "Ko telesu primanjkuje vitamina B12: simptomi, vzroki in rešitve Vitamin B12 sodeluje pri številnih pomembnih procesih v telesu – od nastajanja krvi do delovanja živčnega sistema, njegovo pomanjkanje pa lahko močno vpliva na naše zdravje in počutje. Utrujenost, prebavne težave, slabša koncentracija, mravljinčenje … Takšne težave pogosto pripisujemo spomladanski utrujenosti, preobremenjenosti ali blagi bolezni. Vendar pa se lahko za temi simptomi skriva tudi manj očiten vzrok – pomanjkanje vitamina B12. Vitamin B12 oziroma kobalamin je skupno ime za več sorodnih spojin in velja za enega od ključnih vitaminov za normalno delovanje našega telesa, saj sodeluje pri številnih pomembnih procesih. B12 je tako pomemben, ker hkrati vpliva na kri, možgane in živčevje . V okviru projekta Spar Slovenija Več vem, bolje jem je Mojca Cepuš , certificirana nutricistka in ustanoviteljica podjetja Befit, ki deluje na področju prehranskega svetovanja in zdravega življenjskega sloga, v članku izpostavila ključne vloge vitamina B12: Na portalu Prehrana.si , nacionalnemu viru preverjenih informacij o hrani in prehrani, poročajo da je priporočen vnos vitamina B12 za odraslega človeka 2,5 µg dnevno. Večina ljudi te potrebe zadosti že s pestro, uravnoteženo prehrano. Za primer – dovolj vitamina B12 v telo vnesemo že s 100 grami lososa ali dvema jajcema. Med nosečnostjo in v času dojenja so potrebe po vitaminu B12 nekoliko povečane, saj se ga nekaj prenese na plod, oziroma v mleko. Do pomanjkanja vitamina B12 pa pogosto pride pri starejših, vegetarijancih in veganih ter pri posameznikih z boleznimi prebavil ali slabšo absorpcijo.",
+          "cosine_distance": 0.3620557353430065,
+          "rerank_score": 0.9935594797134399,
+          "vector_rank": 1,
+          "final_rank": 2
+        },
+        {
+          "page_id": 39,
+          "url": "https://medover.zurnal24.si/pomanjkanje-vitamina-b12-simptomi-vzroki-resitve/",
+          "segment_text": "dobre prehranske vire vitamina B12 izpostavlja: Ker so najpomembnejši viri vitamina B12 živila živalskega izvora, rastlinska živila pa ga vsebujejo le če so fermentirana, se veganom priporoča dodajanje vitamina B12 v obliki prehranskih dopolnil. Tudi pri uravnoteženi prehrani lahko pride do pomanjkanja vitamina B12, saj je proces absorpcije zelo kompleksen. “B12 je v hrani vezan na beljakovine, zato se mora v želodcu najprej sprostiti, nato pa se začasno veže na haptokorin, zaščitno beljakovino, ki ga varuje v kislem okolju. V dvanajstniku se od haptokorina odlepi in se veže na intrinzični faktor, beljakovino iz želodca, ki je nujna, da se B12 v zadnjem delu tankega črevesa sploh lahko vsrka. Po vsrkanju ga po krvi do tkiv prenaša transkobalamin II,” proces opisuje Cepuševa. Kadar je katerikoli del te absorpcijske poti moten, lahko pride do pomanjkanja, zato je pogosto potrebno dodajanje vitamina B12 v obliki dopolnil, pri hudi motnji absorpcije pa je potrebno tudi dodajanje z injekcijami. Simptomi pomanjkanja vitamina B12 se pojavijo postopoma in so pogosto nespecifični, zato jih mnogi sprva pripišejo drugim vzrokom. Med najpogostejše znake pomanjkanja spadajo:",
+          "cosine_distance": 0.42066482963159146,
+          "rerank_score": 0.9834908843040466,
+          "vector_rank": 2,
+          "final_rank": 3
+        },
+        {
+          "page_id": 1767,
+          "url": "https://medover.zurnal24.si/znaki-v-ustih-pomanjkanje-vitaminov-mineralov/",
+          "segment_text": "Kaj pomenijo razjede v ustih? To vam sporoča telo! Usta so pogosto prvo ogledalo našega zdravja. Še preden se pojavijo resne bolezni, se v ustni votlini pokažejo tihi, a pomembni znaki, da telesu nekaj primanjkuje. Razpoke v kotičkih , krvaveče dlesni , gladek jezik ali ponavljajoče se afte niso zgolj nadležna težava, temveč lahko opozarjajo na pomanjkanje vitaminov in mineralov , ki so ključni za dobro počutje. A kako jih prepoznati in kaj lahko storimo, da preprečimo resnejše težave? Če vas pogosto mučijo majhne, boleče razpoke v kotičkih ust (kotni heilitis, angular cheilitis ), to ni le posledica mraza ali preveč vlaženja ustnic. To lahko kaže na pomanjkanje železa, cinka in vitaminov skupine B. Na Cleveland Clinic pojasnjujejo, da je stanje pogosto povezano z nizkimi ravnmi riboflavina (B2) in vitamina B12. Te težave se pogosto ponavljajo, če ne odpravite vzroka, zato je ob ponavljajočih se razpokah smiselno preveriti krvno sliko. Običajen jezik je prekrit z drobnimi izboklinami, imenovanimi papile. Ko te izginejo in jezik postane nenavadno gladek, sijoč ali celo otekel, je to lahko znak pomanjkanja folata (B9), niacina (B3) in vitamina B12. Na Mayo Clinic pozarjajo, da se ob pomanjkanju vitamina B12 pogosto pojavita boleč in otekel jezik, kar lahko oteži hranjenje in govor. Ta subtilna sprememba je eden značilnejših znakov hranilne pomanjkljivosti.",
+          "cosine_distance": 0.5487363040447235,
+          "rerank_score": 0.9781614542007446,
+          "vector_rank": 16,
+          "final_rank": 4
+        },
+        {
+          "page_id": 1767,
+          "url": "https://medover.zurnal24.si/znaki-v-ustih-pomanjkanje-vitaminov-mineralov/",
+          "segment_text": "pomanjkanja železa ali vitaminov skupine B. Po podatkih Mayo Clinic lahko pomanjkanje vitamina B12 in folata povzroči nevrološke težave, kar se lahko kaže kot pekoč občutek v ustih, ki ni povezan s hrano. Ta simptom je sicer manj očiten kot razpoke, a je prav tako pomemben za pravočasno prepoznavanje težave. Če se kljub dobri ustni higieni pogosto pojavlja zobni karies, je to lahko znak pomanjkanja kalcija, vitamina D in fosforja. Ti minerali in vitamini so ključni za mineralizacijo zob in krepitev sklenine. Njihovo pomanjkanje oslabi naravno zaščito zob in jih naredi bolj dovzetne za kariesne okvare. Najboljša zaščita pred temi simptomi je uravnotežena in raznolika prehrana, bogata s sadjem, zelenjavo, polnozrnatimi živili, stročnicami in zdravimi maščobami. Če pa težave kljub temu vztrajajo, je priporočljivo opraviti krvne preiskave in se posvetovati z zdravnikom. Herpes na ustnici (herpes simplex) ni neposredno posledica pomanjkanja vitaminov, vendar pa pogosto izbruhne v času, ko je telo oslabljeno. Stres, utrujenost, okužbe ali pomanjkanje ključnih hranil (npr. vitaminov skupine B in cinka) lahko oslabijo imunski sistem in sprožijo pojav herpesa. Zato je ponavljajoč se herpes lahko dodatno opozorilo, da telesu nekaj manjka in da potrebuje okrepitev odpornosti.",
+          "cosine_distance": 0.45449824224396507,
+          "rerank_score": 0.9662358164787292,
+          "vector_rank": 4,
+          "final_rank": 5
+        }
+      ],
+      "answer_with_context": "Pomanjkanje vitamina B12 lahko povzroči več znakov, ki se pogosto kažejo v ustni votlini. Med njih spadajo:\n\n*   **Nenavadno gladek, sijoč ali otekel jezik** [1, 4].\n*   **Boleč in otekel jezik**, kar lahko oteži hranjenje in govor [1].\n*   **Ponavljajoče se razjede** v kotičkih ust (angular cheilitis), ki so lahko znak pomanjkanja železa, cinka in vitaminov skupine B [1, 4].\n*   **Krvaveče dlesni** [1, 4].\n*   **Pečujoč občutek v usteh** (glossodinia), ki ni povezan s hrano [1, 4].\n\nPoleg tega lahko pomanjkanje vitamina B12 povzroči tudi **mravljinčenje ali otrplost (parestezije)** [1].  Pomanjkanje vitamina B12 in folata lahko povzroči tudi **nevrološke težave**, ki se lahko kažejo kot pekoč občutek v ustih [1].\n\nUporabljeni viri: [1], [2], [3], [4], [5]",
+      "answer_without_context": "Pomanjkanje vitamina B12 lahko kaže na naslednje znake:\n\n*   Ugotavljajoča utrujenost\n*   Slabost\n*   Motnje hoje\n*   Nezguba čutov\n*   Problemi z živčnimi funkcijami\n*   Anemija\n\n**Pomembno:** Ta seznam ni popoln in splošni odgovor ne nadomestuje zdravstvene obravnave."
+    },
+    {
+      "label": "good_6_protein",
+      "query": "Zakaj so beljakovine pomembne pri ohranjanju mišične mase?",
+      "intent": "good",
+      "expected_evidence": "Nutrition articles discussing protein and muscle preservation.",
+      "coverage_basis": "A PA2 reranking run for 'proteini' retrieved relevant muscle-loss and protein segments.",
+      "manual_evaluation": {
+        "retrieval_relevance_0_to_2": 2,
+        "rag_answer_quality_0_to_2": 2,
+        "llm_only_answer_quality_0_to_2": 1,
+        "groundedness_comment": "Zadetki podpirajo vlogo beljakovin, aminokislin, hujšanja in vadbe za moč.",
+        "transparency_comment": "RAG pokaže pomemben pogoj, da beljakovine same brez vadbe niso dovolj; LLM-only ostane preveč kratek.",
+        "failure_type": null,
+        "comment": "Evidence doda bistveno nianso o vadbi za moč in kaloričnem deficitu."
+      },
+      "retrieved_context": [
+        {
+          "page_id": 1977,
+          "url": "https://medover.zurnal24.si/beljakovine-perimenopavza-menopavza-koliko-potrebujemo/",
+          "segment_text": "vadbe za moč! Ena najpogostejših situacij v tem obdobju je hujšanje. In tukaj imajo beljakovine jasen smisel: pomagajo ohranjati mišično maso med kaloričnim deficitom, povečajo sitost in olajšajo vztrajanje pri dieti. Priporočila so tedaj višja – pogosto 1,6 grama ali več. A spet: brez vadbe za moč učinek ni popoln. Veliko žensk v tem obdobju skuša rešiti stvari zgolj s prehrano – več beljakovin, bolj “čista” hrana, več kontrole nad jedilnikom. Brez gibanja, zlasti brez vadbe za moč, to za dolgoročno ohranjanje mišic in presnove ne zadostuje. Beljakovine so pomembne. Niso pa čarobna rešitev. Največjo razliko naredi kombinacija: dovolj beljakovin in redna vadba za moč. In morda najpomembnejše sporočilo: ni treba slediti ekstremom z družbenih omrežij. Že majhne, a dosledne spremembe – malo več beljakovin in nekaj rednega treninga – lahko naredijo ogromno razliko. Doroteja Riahi je svetovalka za prehrano, vadbo in osebno rast ter ustanoviteljica projekta Fit Meal Slovenija . Pri svojem delu ženskam pomaga razumeti, zakaj diete, ekstremi in kratkoročni izzivi pogosto ne prinesejo trajnih rezultatov. Najdete jo na Facebook profilu FIT MEAL by Doroteja Riahi, vprašanje pa ji lahko zastavite tudi na našem forumu GIBANJE, OBLIKOVANJE IN KREPITEV TELESA. Za ženske v perimenopavzi in menopavzi Riahijeva priporoča:",
+          "cosine_distance": 0.5199209725950988,
+          "rerank_score": 0.9738606810569763,
+          "vector_rank": 12,
+          "final_rank": 1
+        },
+        {
+          "page_id": 1977,
+          "url": "https://medover.zurnal24.si/beljakovine-perimenopavza-menopavza-koliko-potrebujemo/",
+          "segment_text": "dobi razlog za to. In ta razlog ni višji vnos beljakovin – temveč vadba za moč. “Brez tega signala telo mišic preprosto ne potrebuje in jih bo postopoma izgubljalo – ne glede na to, koliko beljakovin zaužijemo,” poudarja Riahijeva. Zato samo povečanje vnosa beljakovin brez ustrezne vadbe prinese omejen učinek. Pri ženskah brez treninga je smiseln vnos okoli 1,2 do 1,4 grama na kilogram telesne mase. Visok vnos, denimo 1,8 do 2,2 grama, pri zdravih posameznikih sicer ni škodljiv – a brez vadbe ne bo naredil tistega, kar pričakujemo. Priporočila 1,6 do 2,2 grama izhajajo iz sveta športne prehrane in fitnes industrije, ki dela z ljudmi, ki redno trenirajo in imajo konkretne cilje. “ Problem nastane, ko se ta priporočila brez konteksta prenesejo na splošno populacijo,” opozarja Riahijeva. Večji učinek kot dodatnih 20 gramov beljakovin na dan ima uvedba vadbe za moč! Ena najpogostejših situacij v tem obdobju je hujšanje. In tukaj imajo beljakovine jasen smisel: pomagajo ohranjati mišično maso med kaloričnim deficitom, povečajo sitost in olajšajo vztrajanje pri dieti. Priporočila so tedaj višja – pogosto 1,6 grama ali več. A spet: brez vadbe za moč učinek ni popoln.",
+          "cosine_distance": 0.5096672458051591,
+          "rerank_score": 0.9489763379096985,
+          "vector_rank": 8,
+          "final_rank": 2
+        },
+        {
+          "page_id": 1987,
+          "url": "https://medover.zurnal24.si/kako-pri-hujsanju-zmanjsati-izgubo-misic/",
+          "segment_text": "ustrezno prehransko podporo, pri čemer imajo eno pomembnejših vlog beljakovine. Telo prehranske beljakovine razgradi v aminokisline, ki jih uporablja za izgradnjo mišic. “Priporočljivo je, da dnevnega vnosa beljakovin ne zaužijemo v enem samem obroku, temveč ga razporedimo čez ves dan in beljakovine vključimo v vsak obrok, ” poudarja dr. Apovianova. Ko zdravniki predpišejo zdravila za hujšanje, običajno začnejo z nižjim odmerkom predvsem zato, da zmanjšajo stranske učinke. Hkrati pa to pomaga preprečevati prehitro izgubo telesne teže, ki lahko pospeši razgradnjo mišičnih beljakovin namesto maščobe. Ob počasnem hujšanju — približno 0,5 do 1 kg na teden — lahko ob redni vadbi za moč in ustreznem vnosu beljakovin mišično maso ohranimo ali celo povečamo. Odrasel človek potrebuje med 0,8 in 1,9 g beljakovin na kilogram telesne mase. Vnos beljakovin naj bi predstavljal približno 10–15 % skupnega energijskega vnosa,",
+          "cosine_distance": 0.4320924959072475,
+          "rerank_score": 0.9418632388114929,
+          "vector_rank": 1,
+          "final_rank": 3
+        },
+        {
+          "page_id": 1987,
+          "url": "https://medover.zurnal24.si/kako-pri-hujsanju-zmanjsati-izgubo-misic/",
+          "segment_text": "začne za energijo porabljati maščobo, hkrati pa — zlasti kot hiter vir zaloge — pretvarja tudi mišične beljakovine v glukozo. To vodi v izgubo mišične mase. Za preprečevanje prekomerne izgube mišične mase med hujšanjem se svetuje ‘trostopenjski pristop’: vadba za moč , zadosten vnos beljakovin in počasnejše zmanjševanje telesne mase. Vadba za moč pomeni izvajanje vaj, pri katerih premagujemo upor, bodisi z utežmi, elastičnimi trakovi ali lastno telesno težo. Redno izvajanje vadbe za moč spodbuja rast mišic, postopno povečevanje intenzivnosti in zahtevnosti vaj pa dodatno spodbuja mišično prilagoditev in krepitev moči. Povečanje mišične mase z vadbo za moč pomaga tudi pri hujšanju. Med samo vadbo porabljamo kalorije, poleg tega pa mišice porabljajo energijo tudi v času mirovanja in regeneracije. Smernice za zdravo odraslo populacijo priporočajo izvajanje vsaj dveh vadb za moč na teden, poleg tega pa še 150 minut zmerno intenzivne aerobne telesne dejavnosti. Mišice za rast potrebujejo tudi ustrezno prehransko podporo, pri čemer imajo eno pomembnejših vlog beljakovine. Telo prehranske beljakovine razgradi v aminokisline, ki jih uporablja za izgradnjo mišic. “Priporočljivo je, da dnevnega vnosa beljakovin ne zaužijemo v enem samem obroku, temveč ga razporedimo čez ves dan in beljakovine vključimo v vsak obrok, ” poudarja dr. Apovianova.",
+          "cosine_distance": 0.46559062805231544,
+          "rerank_score": 0.8468586206436157,
+          "vector_rank": 2,
+          "final_rank": 4
+        },
+        {
+          "page_id": 1977,
+          "url": "https://medover.zurnal24.si/beljakovine-perimenopavza-menopavza-koliko-potrebujemo/",
+          "segment_text": "Jeste več beljakovin, pa se telo ne spremeni? Po 40. to ni naključje! Jeste več beljakovin, pa se telo ne spremeni? Kar je delovalo pri 30, pri 45 pogosto ne deluje več – in razlog ni v tem, da se ne trudite dovolj. Več beljakovin, boljše telo. Na družbenih omrežjih je recept jasen – a za ženske v perimenopavzi in menopavzi pogosto ne drži. Doroteja Riahi , svetovalka za prehrano, vadbo in osebno rast ter ustanoviteljica projekta Fit Meal Slovenija , opozarja: “ Brez pravega konteksta so ta priporočila pogosto zavajajoča!” S padcem estrogena v perimenopavzi in menopavzi se telo ne odziva enako kot prej. Mišična masa se hitreje izgublja, regeneracija je počasnejša, mišice pa na beljakovine reagirajo slabše. Strokovnjaki temu pojavu pravijo anabolna rezistenca. “To pomeni, da telo za ohranjanje mišic potrebuje več spodbude kot prej,” pojasnjuje Riahijeva. A ključno vprašanje je: kaj sploh je ta spodbuda? Tukaj tiči zmota, ki jo dela veliko žensk. Beljakovine so gradniki. Telo jih bo uporabilo za obnovo mišic le, če dobi razlog za to. In ta razlog ni višji vnos beljakovin – temveč vadba za moč. “Brez tega signala telo mišic preprosto ne potrebuje in jih bo postopoma izgubljalo – ne glede na to, koliko beljakovin zaužijemo,” poudarja Riahijeva. Zato samo povečanje vnosa beljakovin brez ustrezne vadbe prinese omejen učinek.",
+          "cosine_distance": 0.5225917385463862,
+          "rerank_score": 0.7898205518722534,
+          "vector_rank": 14,
+          "final_rank": 5
+        }
+      ],
+      "answer_with_context": "Beljakovine so pomembne za ohranjanje mišične mase, ker telo potrebuje spodbudo za izgradnjo in ohranjanje mišic. [1, 2, 4]  Samo povečanje vnosa beljakovin brez vadbe za moč ali drugih oblik telesne dejavnosti ne prinese pričakovani razlike. [1, 2]  Med hujšanjem, ko telo pretvarja mišične beljakovine v glukozo, je ključna prehranska podpora, ki jo zagotavljajo beljakovine. [3, 4]  Vadba za moč, ki spodbuja rast mišic in krepi moč, je zato ključna za ohranjanje ali celo povečanje mišične mase. [2, 4]  V obdobju perimenopavze in menopavze, ko se telo ne odziva na beljakovine tako kot prej, je vadba za moč še posebej pomembna zaradi anabolne resistence. [5]\n\nUporabljeni viri: [1], [2], [3], [4], [5]",
+      "answer_without_context": "Beljakovine so pomembne za ohranjanje mišične mase, ker so gradbeni elementi mišic in pomagajo pri njihovem rasti in popravljanju."
+    },
+    {
+      "label": "bad_1_ambiguous_pain",
+      "query": "Boli me",
+      "intent": "bad",
+      "expected_evidence": "Ambiguous matches about unrelated types of pain.",
+      "coverage_basis": "Retained PA2 ambiguity failure case.",
+      "manual_evaluation": {
+        "retrieval_relevance_0_to_2": 1,
+        "rag_answer_quality_0_to_2": 1,
+        "llm_only_answer_quality_0_to_2": 1,
+        "groundedness_comment": "Zadetki so povezani z bolečino, vendar vprašanje nima lokacije, trajanja ali simptoma za zanesljiv odgovor.",
+        "transparency_comment": "RAG pokaže, da sistem pobira različne forum primerjave; to razkrije dvoumnost namesto stabilnega dokaza.",
+        "failure_type": "ambiguous query",
+        "comment": "Slab primer zaradi prekratkega vprašanja; retrieval ne more ugotoviti uporabnikovega namena."
+      },
+      "retrieved_context": [
+        {
+          "page_id": 7125,
+          "url": "https://medover.zurnal24.si/forum/tema/vprasanje-2978226/",
+          "segment_text": "me še bolj moti,ker imam ves čas sklonjen trebuh,imam pa grozne bolečine v ledvenem delu in kot bi imela neko bulo na ledvenem delu,ki boli ves predel,včasih peče od bolečine. …zanima me kam na pregled,katere napotnice rabim in kako bi pomagala elektromagnetna terapija …bila sem na klasični masaži in je bolelo kot hudič a pomagalo 1 mesec ….ali je možno da moje tegobe izvirajo iz hrbtenice(mož me včasih masira in vedno opozarja na držo-grozno(mislim da bom kupila opornico) ….najbolj me moti bolečina v vratu in zadnjem delu glave(na masaži je tako pokalo v vratu a glavobol je pojenjal in občutek sem imela da sem kot nova,neprecenljivo,kot da ni moja glava,in bula na ledvenem delu in konstantne bolečine ….tole je mal dolgo a ne vem kaj storiti in ali so to vzroki za moje počutje ..najlepša hvala za odgovor in mnenje lp anja ..aja pa še to že po prvem porodu sem vse težje tekla zdaj po drugem pa sploh ne gre,grozna bolečina v ledvenem delu in odneham,pa se zram jezim ali je tudi to od hrbtenice? hvala",
+          "cosine_distance": 0.5645647048950195,
+          "rerank_score": 0.6954976916313171,
+          "vector_rank": 4,
+          "final_rank": 1
+        },
+        {
+          "page_id": 6466,
+          "url": "https://medover.zurnal24.si/forum/tema/vse-v-glavi-ali-pa-ne-22305502/",
+          "segment_text": "vem KAJ JE ZDRAVO, res ne), ne jem dodatkov (poplava informacij – komu sploh zaupati?!), imam cca 8kg preveč, pa vseeno – verjetno to ne odraža mojega slabega telesnega počutja. Včeraj me je ŠE noro bolel palec na nogi, 2 dni NORO, danes je bp. Občutek kot bi se zaskočil. Že 14 dni me boli podplat – lok na desni nogi (ignoriram in hodim v hribe, vse delam normalno), ampak zvečer mi kar utripa. Mož mi zmasira, že dotik me boli… Tolažim se, da bo minilo. Kot bi bil trn v peti – samo ni v peti in gre za zelo bolečo bolečino. Pred tem me je bolelo pa zgolj pri nožnih prstih, kot bi mi z elastiko udarjal na nek živec, občutila mravlince (sum na mortonov nevrom). Boli me desna rama – včasih se komaj oblečem, boli me že hm, vsaj 2 leti, večinoma konstantno, je pa na trenutke tako slabo, da roke ne premaknem. Potem mine … večinoma boli konstantno, stopnjuje pa se do res hude bolečine in nazaj. Slikala – rama je bp, ortoped povedal, da gre bolečina iz vratu – obraba. Pomoči ni, operacija ni smiselna ker je že preveč obrabljeno… (haloo, mlada sem!!).",
+          "cosine_distance": 0.5854707956314087,
+          "rerank_score": 0.5537062287330627,
+          "vector_rank": 7,
+          "final_rank": 2
+        },
+        {
+          "page_id": 6518,
+          "url": "https://medover.zurnal24.si/forum/tema/trzanje-misic-2-3492440/",
+          "segment_text": "so me zaceli mravljinci po nogah in stopalih, pri obeh nogah na stopalih cutim ze 1 teden 24 ur mravljince, bolj ko jih gibam, slabse je, tako da ne vem. Imam tudi tezave s prebavo, kar pa pravijo, da je vse v redu, le da je to odvecna kislina, in pa tezave z nerednimi srcnimi utripi, kar pa naj bi bilo tudi vse v redu… Vendar mene najbolj moti to trzanje misic in krci ter pokanje sklepov in bolecine misic, Tako zdaj razmisljam, da bi sel na emg zaradi teh mravljincev v stopalih, da vidim, kaj bo ….",
+          "cosine_distance": 0.5962007286428963,
+          "rerank_score": 0.3991203010082245,
+          "vector_rank": 12,
+          "final_rank": 3
+        },
+        {
+          "page_id": 6518,
+          "url": "https://medover.zurnal24.si/forum/tema/trzanje-misic-2-3492440/",
+          "segment_text": "vendar ko imam konstantno to trzanje, je tezko…. Med hojo in tekom ali pa med jogo trzljajev NE CUTIM, cutim jih najbolj, ko se sprostim, na primer, ko lezim …. Po teku so bolj izraziti, ampak samo ko lezim … Nekako imam obcutek, da imam sibke misice, kajti ko lezim in se naenkrat raztegujem, telo mocnooo takoj ko sprostim misice, mi zacne neka misica potem trzati za kake 3 sekunde … Ko delam vaje za jogo, ce delam malo tezje vaje, me naslednji dan tista misica zacne boleti na dotik, da se komaj dotikam …. Imam tudi pokanje po sklepih, ki se mi je zacelo istocasno s temi trzljaji in krci, kakor tudi bolecine po kosti in pa skripanje, kakor da bi rable kosti “olje za mazat” … ne znam drugace opisati, zelo cuden zvok spuscajo … Trenutno so me zaceli mravljinci po nogah in stopalih, pri obeh nogah na stopalih cutim ze 1 teden 24 ur mravljince, bolj ko jih gibam, slabse je, tako da ne vem.",
+          "cosine_distance": 0.5629725456237793,
+          "rerank_score": 0.19794271886348724,
+          "vector_rank": 3,
+          "final_rank": 4
+        },
+        {
+          "page_id": 755,
+          "url": "https://medover.zurnal24.si/forum/tema/methotrexat-in-revmatoidni-artritis-2087396/",
+          "segment_text": "Reply 7 | sladkorcek | 22.01.2008 ob 12:01 Tudi jaz se oglašam, ker tudi pri meni še ni nič potrjeno….začelo se je z bolečinami hrbtenice, pet…..sedaj pa prednjačijo prsti na nogah in rokah, kolena…..zjutraj se mi zdi da so prsti zelo otekli, ker ne morem stisniti pesti, je zelo boleče….kri mi še ni pokazala kaj posebnega, razne anemičnosti….je možno da je začetek artritisa….prsti so mi zadebeljeni v predelu členka, na sredini prstov……grozno je, kako čuden občutek, okorelo, boleče….oteklo….je tudi pri vas tako…Tablet še nisem dobila, ker čakajo da kri kaj pokaže….konec februarja sem naročena v kliniki…ne v Slo…živim zunaj, v FR. Pišite kako se počutite in kako vas boli….? A katero kaj pete, boki, komolci bolijo? Ni ravno za umret bolečina, a je tako datežko stojim na nogah….ker iamm še drugih težav od prej….operirano hrbtenico (2x)….sedaj se mi pa tole vleče….a zdi se mi d aje to šele začetek….Pa še nekaj, zanima me ali katero srbi koža…jaz imam nekakšne fleke v obliki herpesov….drug dan se to zasuši in je huje ko sem v stiku z vodo….srbi me tudi obraz, oči….? Se mi meša?",
+          "cosine_distance": 0.5435117943141397,
+          "rerank_score": 0.171438068151474,
+          "vector_rank": 1,
+          "final_rank": 5
+        }
+      ],
+      "answer_with_context": "Na podlagu predanih informacij je težko natančno diagnosticirati vaše težnje. Uporabniki foruma so opisali različne simptome, ki lahko imajo različne vzroke.\n\nNekateri uporabniki so poročali o bolečinah v ledvenem delu, vratu in glavi, pogosto v povezavi z držo in težavami s hrbtenico [1]. Drugi so poročali o trzanjih misic, mravljincih v nogah in stopalih, bolečinah v mišicah in sklepih ter pokanju sklepov [3, 4]. Nekatere osebe so imele tudi simptome, kot so otekline prstov, bolečine v hrbtenici in druge težave, ki so se začele s podobnimi simptomi [5].\n\nBolečina v ledvenem delu in vratu, skupaj z bolečino v predelu glave in občutkom \"bule\" na ledvenem delu, je lahko povezana z boleznimi hrbtenice, vendar je potrebna dodatna diagnostika za potrditev diagnoze [1].\n\nUporabljeni viri: [1], [3], [4], [5]",
+      "answer_without_context": "Žal mi je, da te boli. To je res neprijetno. Pri zdravstvenih težavah je pomembno, da se posavetuješ z zdravnikom ali drugim izkušenim zdravstvenim delavcem."
+    },
+    {
+      "label": "bad_2_out_of_domain_legal",
+      "query": "Kakšne so pravne posledice neplačila prometne kazni v Sloveniji?",
+      "intent": "bad",
+      "expected_evidence": "No relevant medical-corpus evidence; the RAG answer should decline to infer a legal answer.",
+      "coverage_basis": "Retained PA2 out-of-domain failure case.",
+      "manual_evaluation": {
+        "retrieval_relevance_0_to_2": 0,
+        "rag_answer_quality_0_to_2": 2,
+        "llm_only_answer_quality_0_to_2": 0,
+        "groundedness_comment": "Retrieved context je večinoma zunaj domene in ne podpira pravnega odgovora o prometni kazni.",
+        "transparency_comment": "RAG pravilno zavrne sklepanje iz neustreznih virov; LLM-only poda samozavestne, nepreverjene pravne trditve.",
+        "failure_type": "insufficient corpus coverage",
+        "comment": "Najboljši RAG rezultat je transparentna zavrnitev, ker medicinski korpus ne pokriva pravnega vprašanja."
+      },
+      "retrieved_context": [
+        {
+          "page_id": 8396,
+          "url": "https://medover.zurnal24.si/forum/tema/umetna-oploditev-samskih-3012522/",
+          "segment_text": "Reply 3 | E391 | 10.06.2012 ob 11:42 V Sloveniji zakonodaja to prepoveduje. Pa na Češkem tudi. So pa države, kjer je to možno. Mislim, da je ena možnost Makedonija.",
+          "cosine_distance": 0.5616816057779319,
+          "rerank_score": 0.001959872664883733,
+          "vector_rank": 5,
+          "final_rank": 1
+        },
+        {
+          "page_id": 4026,
+          "url": "https://medover.zurnal24.si/forum/tema/prekrski-2-1230725/",
+          "segment_text": "Opening post | Čongor | 06.12.2006 ob 15:12 Spoštovani! Vpravu sem bolj laik in me neki zanima: v letu 2004 sem pomladi in poleti napravil nekaj prekrškov, predvsem kot voznik, sem bil pri sodniku za prekrške in ko sem dobil odločbe, sem na vsako napisal pritožbo na višje sodišče, od koder sem že tud dobil novo odločbo. Sankcionira sem po starem zakonu, torej po 2 letih zastara primer. Mene pa zanima pri teh 2 letih kateri datum se upošteva? Datum prekrška ali izdaje prve odločbe, ali druge ali kako? Torej če sem 2004 napravil prekrške, sta že 2 leti mimo in so mi zastarali primeri? Kdaj pa dobim o tem novo odločbo oz. obvestilo…ali pa se ne dobi? Zakaj pa se dogajajao taki primeri, ponavadi kazniva dejanja, da se na sodišče pojavi spet po 8-10 letih? Ali bom moral tud jaz šečakati, da dobim kaj od kazni, saj nisem nič plačal! Hvala, lp",
+          "cosine_distance": 0.5713812666308056,
+          "rerank_score": 0.0015637842006981373,
+          "vector_rank": 11,
+          "final_rank": 2
+        },
+        {
+          "page_id": 3070,
+          "url": "https://medover.zurnal24.si/forum/tema/sirotisnica-2-1938381/",
+          "segment_text": "Reply 9 | Bida Be | 23.12.2009 ob 13:33 Vem za tujo državljanko – srednješolko, ki je v reji pri slovenski rejnici…še kar gre po rejniških “pravilih”, le štipendije ne more dobiti, ker ni naša državljanka…pa še kaj drugega verjetno tudi ne…",
+          "cosine_distance": 0.5834093938225802,
+          "rerank_score": 0.00010790602391352877,
+          "vector_rank": 18,
+          "final_rank": 3
+        },
+        {
+          "page_id": 5350,
+          "url": "https://medover.zurnal24.si/forum/tema/upokojitev-v-tujini-vrnitev-domov_11786979-22380989/",
+          "segment_text": "Reply 18 | anonimni uporabnik | 16.07.2017 ob 19:29 Torej, ce prav razumem. Ce se upokojenec za stalno priseli v Slovenijo in postane slovenski davcni rezident, ne placa nobene dohodnine, ce mu ze drzava, ki je vir dohodka in kjer je bil prej davcni rezident, obracuna 25% dohodnine? Kaj pa, ce ima tak upokojenec nato dodadtne dohodke v Sloveniji?",
+          "cosine_distance": 0.5000593662332733,
+          "rerank_score": 0.00010526140249567106,
+          "vector_rank": 2,
+          "final_rank": 4
+        },
+        {
+          "page_id": 5350,
+          "url": "https://medover.zurnal24.si/forum/tema/upokojitev-v-tujini-vrnitev-domov_11786979-22380989/",
+          "segment_text": "Reply 16 | anonimni uporabnik | 16.07.2017 ob 19:13 Hvala vsem za trud in odgovore… Če prav razumem??? Mogoče tudi ne :(( Je razlika 5%; DE 20% davka, SLO 25% davka od prejete pokojnine…??? V kolikor ni tako, prosim za dodatno razlago… In ja, pokojnina se zmanjša, ker je SLO cenejša država od DE…",
+          "cosine_distance": 0.566632721819443,
+          "rerank_score": 9.748394222697243e-05,
+          "vector_rank": 8,
+          "final_rank": 5
+        }
+      ],
+      "answer_with_context": "Na podlagi priloženih virov ne morem določiti pravnih posledic neplačila prometne kazni v Sloveniji. Viri govorijo o različnih temah, kot so umetna oploditev, zastaranje prekrškov, državljanstvo in davčno urejanje, vendar ne vsebujejo informacij o tem, kako se ukrajujejo neplačane prometne kazni. [1], [2], [3], [4], [5]\n\nUporabljeni viri: [1], [2], [3], [4], [5]",
+      "answer_without_context": "Neplačana prometna kazn je še vedno veljavna in lahko povzroči naslednje posledice:\n\n*   **Povečanje kazni:** Kazen se lahko poveča za 20 %.\n*   **Ukrepi policije:** Policija lahko izvede prekršajni ukrep, kot je blokada vozila.\n*   **Vložitev tožbe v sodišče:** Policija ali državno tožilstvo lahko vložita tožbo v sodišče za izdanje sodbe o prekršku.\n*   **Zabeležena negativna informacija:** Neplačana kazen se lahko zabeleži v javnem kazenskem evidentnem sistemu.\n\n**Pomembno:** Ta odgovor ne nadomešča pravnega nasveta. Za podrobnejše informacije se obrnite na pravno službo policije ali na odvetnika."
+    },
+    {
+      "label": "bad_3_acronym_no_context",
+      "query": "ATM",
+      "intent": "bad",
+      "expected_evidence": "No reliable evidence because the acronym is underspecified.",
+      "coverage_basis": "Retained PA2 acronym ambiguity failure case.",
+      "manual_evaluation": {
+        "retrieval_relevance_0_to_2": 0,
+        "rag_answer_quality_0_to_2": 2,
+        "llm_only_answer_quality_0_to_2": 0,
+        "groundedness_comment": "Zadetki so finančni/spam oziroma nepovezani forum izseki; kratica ATM ni dovolj določena.",
+        "transparency_comment": "RAG razkrije nepovezane vire in zavrne odgovor; LLM-only halucinira napačno slovensko razlago kratice.",
+        "failure_type": "ambiguous query",
+        "comment": "Dvoumna kratica povzroči nerelevanten retrieval; prompt prepreči neutemeljeno razlago."
+      },
+      "retrieved_context": [
+        {
+          "page_id": 9849,
+          "url": "https://medover.zurnal24.si/forum/tema/ponujajo-posojila-med-zlasti-3361287/page/3/",
+          "segment_text": "Reply 8 | THOMAS GEN | 23.11.2025 ob 01:25 Ich möchte über die im Darknet angebotenen Blanko-Bankkarten berichten, mit denen man weltweit an jedem Geldautomaten Geld abheben kann. Früher war ich sehr arm und arbeitslos. Ich habe viele Berichte darüber gelesen, wie Hacker im Darknet ihnen diese Blanko-Bankkarten zugeschickt haben, damit sie an jedem Geldautomaten Geld abheben und reich werden konnten. E-Mail: rickatmcardoffer@gmail.com Auch ich habe so eine Blanko-Bankkarte erhalten. Ich habe damit 90.000 Euro abgehoben und kann täglich maximal 5.000 Euro abheben. Im Darknet werden diese Karten angeblich verteilt, um Armen zu helfen. Hacken Sie Geldautomaten und heben Sie mit einer programmierten Karte, die automatisch funktioniert, direkt Geld aus dem Tresorraum ab. Schreiben Sie mir so schnell wie möglich, wenn Sie sich bewerben möchten. Mit freundlichen Grüßen",
+          "cosine_distance": 0.6238970012787552,
+          "rerank_score": 0.06975434720516205,
+          "vector_rank": 1,
+          "final_rank": 1
+        },
+        {
+          "page_id": 448,
+          "url": "https://medover.zurnal24.si/forum/tema/kako-ste-se-postavile-na-noge-3147606/",
+          "segment_text": "vedno ko pa potrebuje denar, molze njo. Zanimivo, do oceta je spostljiv. Skoraj prepricana sem, da ima MOM, narcisticno usmerjen. Hkrati je alkoholik, sam seveda ne vidi tezav, pri nicemer. Pije ker mu pase, zali, ker ga drugi ne cenijo, spostujejo. Ker vidim, da bodo stvari vedno iste, da lezem v se vecje dolgove, ker me izolira od vseh, financno nadzoruje, hkrati je postal fizicno nasilen, sem koncala. On je reagiral z ignoranco, kod da me ni bilo nikoli bilo v njegovem zivljenju. Kar me seveda boli, sem v dolgovih, brez prijateljev, druzine..on pa gre mirno naprej, brez vesti. Dovolj o njem, zanima me, kako ste se pobrale. Ker verjetno imam tudi sama tezave ker sem si dovolila v to godljo. Rada bi kak nasvet, napotek, kako preboleti.",
+          "cosine_distance": 0.6789581967021059,
+          "rerank_score": 0.0012205505045130849,
+          "vector_rank": 6,
+          "final_rank": 2
+        },
+        {
+          "page_id": 4086,
+          "url": "https://medover.zurnal24.si/forum/tema/ah-ta-denar-1232939/",
+          "segment_text": "Reply 5 | mouse | 07.02.2007 ob 08:38 Jooooj, pa res!!! A lahko kdo še meni da nasvet, čeprav je malo drugačen problem … Jaz sem si enkrat sposodila denar od prijateljice, ko mi je crknil disk in sem morala kupiti novega. Šlo je za 20.000 SIT. Disk sem kupila in vgradila in vse je bilo ok. Potem je prišla plača (dogovorjeni sva bili, da ji vrnem 2x po 10.000) in sem dvignila prvih 10 in ji odnesla. Ko sem ji naslednji mesec hotela vrniti drugih 10 se je pa zataknilo – rekla je, če ji denar vrnem, da ga bo ziher zapravila in naj ga imam raje jaz pri sebi (kot nekakšna hranilnica, hehe) in ko bo rabila, bo prišla iskat. Ta denar sem varno spravila in – šitpanovavaluta!! – sem ga pozabila zamenjati v evre. Pravzaprav sem čisto pozabila na ta denar do trenutka, ko sem prebrala tale post. Hmmm … Kje v MBju še vzamejo SITe in ti dajo evre?? 😮",
+          "cosine_distance": 0.670939186699485,
+          "rerank_score": 0.0010762996971607208,
+          "vector_rank": 2,
+          "final_rank": 3
+        },
+        {
+          "page_id": 496,
+          "url": "https://medover.zurnal24.si/forum/tema/odvisnost-od-alkohola-22584573/",
+          "segment_text": "ve, da mora iti k zdravniku. Nekje sem zasledila, da obstaja zelišni čaj, kateri sproži pri odvisniku od alkohola odpor do alkohola. Torej z drugo besedo se mu alkohol zagabi. Zelo me je strah za njega, ker je ob ultrazvoku abdomna pokazalo, da ima povečane jetre in zelo zamaščene, ter zelo visoki pritisk. Dobil je tablete za znižanje pritiska in tablete za srce, da bi mu znižalo pritisk. Pravtako sem nekje zasledila,da povečane jetre, z zamaščenostjo, če se ne pozdravijo in delaš naprej enako kot si do zdaj, lahko pripelje o ciroze. Vzroki za zamaščenost so stres, alkohol, zdravila itd… Očima in mamo je zelo spoštoval, včasih imam občutek, glede na to, da se joče vsakič naskrivaj, če se samo spomni na njiju, kot da bi imel mamo za partnerko in ne za mamo. Ker od kar je ni, včasih izjavi, da mu ni več do življenja, da bi zelo rad šel k njej. Mama je to pravila, ko ji je mož umrl. Že pri njej sem to težko razumela, vendar vseeno sem lazje sprejela, zato ker je bila sama, brez opore, razen najudva je imela. Partner pa ni sam. Ima mene. Pa vseeno je obupal nad življenjem. Ne vem, kako naj mu pomagam, da zmanjša ali pa neha piti alkohol in da dobi voljo do življenja nazaj.",
+          "cosine_distance": 0.6792810750436091,
+          "rerank_score": 0.0008926380542106926,
+          "vector_rank": 8,
+          "final_rank": 4
+        },
+        {
+          "page_id": 5611,
+          "url": "https://medover.zurnal24.si/forum/tema/kateri-slusni-aparat-1739913/page/6/",
+          "segment_text": "ali pa celo še bolj. Sploh desni, ki ga zdaj niti nimam več doma, glede na to, da nisem bila pripravljena plačati tistih novih 80 evrov za njegovo ponovno popravilo. Enostavno se mi ni zdelo smiselno ponovno dajati denarja za nekaj, kar mi ni služilo ves ta čas in kar so stalno popravljali, popravili pa nikoli. Žal mi je samo za nekaj in sicer za to, da nisem naredila kot nek gospod, ki je baje en cel teden hodil vsak dan dol v poslovalnico, dokler mu končno direktor ni odobril izdelave novih aparatov. Od takrat naprej je namreč bilo vse ok. Očitno bi bila morala tako narediti tudi sama, čeprav dvomim, da bi kaj uspela, glede na to, da so se težave z mojima SA začele nekje po 3-4 mesecih, ko sem jih dobila. Upam, da je to preteklost in da bom od zdaj naprej končno imela aparate, ki bodo končno služili svojemu namenu. Kar pa se tiče branja iz ustnic, to počnem že zdaj, kadar le lahko, saj marsikdo od mojih znancev govori tako potiho, da ga včasih niti z aparati ne razumem dovolj dobro. Je pa res, da nekateri ljudje ne govorijo dovolj razločno in s takimi, vsaj pri meni, branje z ustnic odpade.",
+          "cosine_distance": 0.6739142135432779,
+          "rerank_score": 0.0008917633094824851,
+          "vector_rank": 4,
+          "final_rank": 5
+        }
+      ],
+      "answer_with_context": "Na podlagi predanih dokumentov ni mogoče odgovoriti na vprašanje o \"ATM\". Dokumenti govorijo o različnih temah, vključno z:\n\n*   Ponudbo posojil iz Darkneta in prodajo blanko-bankic [1].\n*   Problemi v intimnih odnosih in finančnih težavah [2], [4].\n*   Zamenjavo valut in težavah pri upravljanju denarja [3].\n*   Odvisnosti od alkohola in težavah v družini [4].\n*   Problemi s poslušalkami in njihovo uporabo [5].\n\nNi v nobenem od dokumentov informacij o ATM-jih ali njihovem delovanju.\n\nUporabljeni viri: [1], [2], [3], [4], [5]",
+      "answer_without_context": "ATM (avtomatizirano poslovanje) je posiljevalnik, ki omogoča iztečanje gotovine in opravljanje drugih finančnih operacij."
+    }
+  ]
+}

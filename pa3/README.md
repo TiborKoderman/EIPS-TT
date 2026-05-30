@@ -144,6 +144,15 @@ odgovor brez dokumentov, parametre eksperimenta ter rubriko
 - tip napake: `irrelevant retrieval`, `insufficient corpus coverage`,
   `ambiguous query` ali `generation hallucination`.
 
+Končni evalvacijski zagon za oddajo je shranjen v:
+
+```text
+pa3/rag/runs/20260530T022922Z_evaluation.json
+```
+
+V tem zagonu je obnovljena PA2 baza vsebovala `36,816` dolgih segmentov z
+embeddingi. Vseh devet primerov ima izpolnjene ročne ocene in komentarje.
+
 Za preverjanje pričakovanega neuspeha zunaj domene:
 
 ```powershell
@@ -165,9 +174,9 @@ latexmk -pdf -output-directory=pa3/report pa3/report/report.tex
 Copy-Item pa3/report/report.pdf pa3/report.pdf -Force
 ```
 
-Poročilo je pripravljeno za vstavljanje dejanskih odgovorov in ročnih ocen
-iz JSON evalvacijskega zagona. Odgovorov ni smiselno vnašati pred dejanskim
-zagonom istega modela in istih retrieval parametrov.
+Poročilo vsebuje dejanske rezultate končnega evalvacijskega zagona,
+primerjalno tabelo za vseh devet vprašanj ter razpravo o uspešnih in
+neuspešnih primerih retrievala.
 
 ## Omejitev uporabe
 

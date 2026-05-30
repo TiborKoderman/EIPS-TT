@@ -152,60 +152,111 @@ Unspecified acronym; PA2 already showed unrelated retrievals and very low rerank
 \end{tabular}
 \end{table*}
 
-\section{Evaluation Results Workflow}
-The executable evaluation runner writes a JSON record for each question with:
-the top-five reranked chunks, both generated answers, exact model and
-retrieval parameters, and manual assessment fields.  This design avoids
-silently selecting only favorable answers and makes the comparison
-reproducible.
+\section{Evaluation Results}
+The final run was executed on May 30, 2026, with the fixed retrieval and
+generation configuration described above.  The restored PA2 evaluation
+database contained 36,816 long segments with embeddings.  The complete trace,
+including all retrieved chunks and full generated answers, is stored in
+\texttt{pa3/rag/runs/20260530T022922Z\_evaluation.json}.
 
-At the time this report artifact was built, generation results were not
-fabricated: the local verification environment did not provide a running
-Ollama service or active PA2 database.  Before submission, the fixed
-experiment is run with:
+Table~\ref{tab:results} summarizes the generated answers and manual scores.
+The score order is retrieval relevance / RAG answer quality / LLM-only answer
+quality.  In the six good cases, retrieval relevance reached the maximum score
+of 12/12.  RAG answer quality reached 10/12, while LLM-only answers reached
+6/12.  Across all nine cases, RAG answer quality was 15/18 and LLM-only answer
+quality was 7/18.
 
-\begin{verbatim}
-python pa3/rag/evaluate.py
-\end{verbatim}
-
-The generated \texttt{pa3/rag/runs/<timestamp>\_evaluation.json} is then the
-source of truth for the final comparison table and manual scores.  Table
-\ref{tab:result-fields} specifies the values recorded for each row, ensuring
-that completing the report is mechanical rather than subjective
-reimplementation of the experiment.
-
-\begin{table}[h]
+\begin{table*}[t]
 \centering
-\small
-\caption{Per-query evidence recorded by the evaluation runner}
-\label{tab:result-fields}
-\begin{tabular}{p{2.6cm}p{4.7cm}}
+\scriptsize
+\caption{Comparison of RAG and LLM-only answers in the final PA3 evaluation}
+\label{tab:results}
+\setlength{\tabcolsep}{2pt}
+\begin{tabular}{p{1.3cm}p{3.0cm}p{4.4cm}p{3.9cm}p{1.4cm}p{2.3cm}}
 \toprule
-\textbf{Field} & \textbf{Purpose} \\
+\textbf{Type} & \textbf{Query} & \textbf{RAG answer summary} &
+\textbf{LLM-only answer summary} & \textbf{Score} & \textbf{Comment} \\
 \midrule
-Retrieved context & Inspect evidence and URLs presented to RAG. \\
-RAG answer & Determine grounding and explicit citation use. \\
-LLM-only answer & Compare fluency and unsupported specificity. \\
-Relevance (0--2) & Judge retrieval success. \\
-Quality (0--2) & Compare both answer modes. \\
-Failure type & Locate retrieval, coverage, ambiguity, or hallucination error. \\
+Good & Blood pressure symptoms and measurement &
+Correctly explains that hypertension is often asymptomatic, lists severe
+warning symptoms, and ties measurement to prevention of stroke, heart and
+kidney complications. &
+Mentions asymptomatic pressure and complications, but contains incorrect or
+very poor wording. &
+2/2/1 & Retrieval adds direct evidence for why measurement matters. \\
+
+Good & Type 2 diabetes and lifestyle &
+Uses relevant evidence about diet, physical activity, weight loss, glucose
+control and possible remission. &
+Gives a short generic answer about diet, activity and insulin sensitivity. &
+2/1/1 & Retrieval succeeds; one generated sentence about regular treatment is
+poorly grounded. \\
+
+Good & Sleep quality and regular sleep &
+Grounds the answer in consistent sleep schedule, circadian rhythm, sleep
+quality and health risks of chronic sleep deprivation. &
+Lists general sleep-hygiene advice with weak Slovenian phrasing. &
+2/2/1 & RAG adds concrete reasons and visible sources. \\
+
+Good & Parkinson symptoms and exercise &
+Finds the Parkinson article and explains movement, balance, boxing and social
+exercise support. &
+Provides only a brief generic description of symptoms and movement therapy. &
+2/1/1 & Evidence is relevant, but generated terminology is sometimes awkward. \\
+
+Good & Vitamin B12 deficiency signs &
+Uses B12-specific passages about tongue changes, mouth symptoms,
+paresthesias and neurological issues. &
+Lists common signs, but remains generic and has language errors. &
+2/2/1 & RAG improves precision and source traceability. \\
+
+Good & Protein and muscle mass &
+Explains amino acids, muscle preservation during weight loss and the need to
+combine protein intake with strength training. &
+States only that proteins are building blocks for muscle growth and repair. &
+2/2/1 & Retrieval adds the key nuance that protein alone is not enough. \\
+
+Bad & Boli me &
+Shows several unrelated pain forum cases and cautiously states that diagnosis
+is not possible from the evidence. &
+Responds empathetically and advises medical help, but gives no explanation. &
+1/1/1 & Query is too ambiguous for reliable retrieval. \\
+
+Bad & Legal consequences of unpaid traffic fine &
+Correctly refuses to infer a legal answer because retrieved sources do not
+cover the question. &
+Gives confident legal claims without evidence. &
+0/2/0 & Medical corpus has insufficient legal coverage; refusal is correct. \\
+
+Bad & ATM &
+Shows unrelated financial/spam forum chunks and refuses to answer the
+underspecified acronym. &
+Hallucinates an incorrect Slovenian expansion and description. &
+0/2/0 & Ambiguous acronym produces irrelevant retrieval; RAG remains
+diagnosable. \\
 \bottomrule
 \end{tabular}
-\end{table}
+\end{table*}
 
-\section{Expected Analysis and Limitations}
-Based on the PA2 evidence, well-specified medical questions should benefit
-from RAG because relevant Slovenian chunks are available and citations let a
-reader inspect the basis of an answer.  In contrast, the legal query cannot be
-answered from this corpus.  A correct RAG behavior is therefore a transparent
-refusal to infer legal consequences from irrelevant medical evidence, even if
-the LLM-only response sounds plausible.
+\section{Discussion and Limitations}
+The results show the intended trade-off clearly.  When the query matches the
+medical corpus, RAG improves answer quality by adding concrete Slovenian
+evidence and making each claim inspectable.  The blood-pressure, sleep,
+vitamin B12 and protein queries are the strongest examples: the LLM-only
+answers are fluent enough to sound plausible, but they are shorter, less
+specific, and sometimes linguistically unreliable.
 
-The ``Boli me'' and ``ATM'' cases test a different limitation: the corpus may
-contain health content, but the question does not identify a useful intent.
-Reranking can reorder candidates, but it cannot resolve missing user context.
-The prompt is therefore designed to favor an insufficiency statement over a
-confident unsupported answer.
+Retrieval fails in two different ways.  First, a query can be underspecified:
+``Boli me'' and ``ATM'' do not provide enough intent, so reranking cannot
+recover a stable answer from the corpus.  Second, the corpus can be out of
+domain: the traffic-fine query retrieves weak legal/forum fragments from a
+medical site, but not enough evidence for a legal answer.  In those cases, the
+best RAG behavior is not a better answer, but a transparent refusal.
+
+Generation errors still occur after good retrieval.  In the diabetes and
+Parkinson cases, relevant chunks were retrieved, but the model introduced
+awkward or weakly grounded wording.  This confirms that retrieval quality
+constrains the answer, but does not fully guarantee generation quality.
 
 The primary experimental limitation is qualitative assessment: nine questions
 provide interpretable case analysis rather than a statistically representative

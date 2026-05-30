@@ -11,7 +11,7 @@ Legenda:
 - [x] Pripravljen je `pa3/report.pdf`.
 - [x] Pripravljen je `pa3/README.md`.
 - [x] Pripravljena je implementacija v `pa3/rag/`.
-- [ ] Pred oddajo mora biti končna struktura:
+- [x] Pred oddajo mora biti končna struktura:
 
 ```text
 pa3/
@@ -32,7 +32,7 @@ pa3/
 - [x] Retrieval uporablja vektorsko podobnost nad `crawldb.page_segment_long`.
 - [x] Po vector retrievalu se izvede reranking z `BAAI/bge-reranker-v2-m3`.
 - [x] Pridobljeni segmenti so vidni za pregled: besedilo, URL in ocene/rangi.
-- [ ] Na delujoči PA2 bazi preveri, da retrieval dejansko vrne relevantne segmente.
+- [x] Na delujoči PA2 bazi preveri, da retrieval dejansko vrne relevantne segmente.
 
 ### Prompt Construction
 
@@ -42,13 +42,13 @@ pa3/
 ### Answer Generation
 
 - [x] Oba načina uporabljata Ollama model `gemma3:4b`.
-- [ ] Zaženi Ollamo ali mogoče spet Gams? in prenesi model:
+- [x] Zaženi Ollamo in preveri model:
 
 ```powershell
 ollama pull gemma3:4b
 ```
 
-- [ ] Preveri, da en query uspešno vrne:
+- [x] Preveri, da en query uspešno vrne:
   - retrieved kontekst,
   - odgovor z dokumenti,
   - odgovor brez dokumentov.
@@ -64,20 +64,20 @@ python pa3/rag/rag_pipeline.py `
 - [x] Pripravljenih je najmanj `6` dobrih RAG vprašanj.
 - [x] Pripravljena so najmanj `3` slaba, dvoumna ali zavajajoča RAG vprašanja.
 - [x] Evaluacijska skripta za vsako vprašanje generira odgovor z dokumenti in brez dokumentov.
-- [ ] Zaženi evalvacijo vseh `9` vprašanj:
+- [x] Zaženi evalvacijo vseh `9` vprašanj:
 
 ```powershell
 python pa3/rag/evaluate.py
 ```
 
-- [ ] Preveri, da rezultat vsebuje za vsako vprašanje:
+- [x] Preveri, da rezultat vsebuje za vsako vprašanje:
   - query,
   - retrieved segmente,
   - odgovor **With Context**,
   - odgovor **Without Context**,
   - komentar oziroma oceno relevantnosti in kakovosti.
-- [ ] Ročno oceni vseh `9` primerov.
-- [ ] Pri slabih primerih določi razlog napake, npr. nerelevanten retrieval, nepokritost korpusa, dvoumno vprašanje ali halucinacija modela.
+- [x] Ročno oceni vseh `9` primerov.
+- [x] Pri slabih primerih določi razlog napake, npr. nerelevanten retrieval, nepokritost korpusa, dvoumno vprašanje ali halucinacija modela.
 
 ## 4. Obvezna vsebina poročila
 
@@ -97,17 +97,17 @@ python pa3/rag/evaluate.py
 
 ### Evaluation Results
 
-- [!] Poročilo trenutno še nima zahtevanih dejanskih rezultatov izvedene evalvacije.
-- [ ] Dodaj tabelo za vseh `9` vprašanj, ki vsebuje:
+- [x] Poročilo vsebuje zahtevane dejanske rezultate izvedene evalvacije.
+- [x] Dodaj tabelo za vseh `9` vprašanj, ki vsebuje:
   - vprašanje,
   - odgovor z retrieved kontekstom,
   - odgovor brez retrieved konteksta,
   - komentar oziroma oceno.
-- [ ] V razpravi odgovori:
+- [x] V razpravi odgovori:
   - kdaj retrieval izboljša kakovost odgovora;
   - kdaj retrieval odpove in zakaj;
   - kako dokazi vplivajo na razložljivost, zaupanje in diagnostiko napak.
-- [ ] Po dopolnitvi rezultatov ponovno zgradi končni `PA3/report.pdf`.
+- [x] Po dopolnitvi rezultatov ponovno zgradi končni `pa3/report.pdf`.
 
 ## 5. README zahteve
 
@@ -125,8 +125,8 @@ python pa3/rag/evaluate.py
 
 ## Pred oddajo mora nujno veljati
 
-- [ ] Mapa je `pa3/` in vsebuje `report.pdf`, `README.md` ter `rag/`.
-- [ ] Ollama RAG pipeline uspešno deluje v obeh načinih.
-- [ ] Izvedenih in ročno analiziranih je vseh `6 + 3` vprašanj.
-- [ ] Poročilo vsebuje dejansko tabelo rezultatov in razpravo.
+- [x] Mapa je `pa3/` in vsebuje `report.pdf`, `README.md` ter `rag/`.
+- [x] Ollama RAG pipeline uspešno deluje v obeh načinih.
+- [x] Izvedenih in ročno analiziranih je vseh `6 + 3` vprašanj.
+- [x] Poročilo vsebuje dejansko tabelo rezultatov in razpravo.
 - [ ] GitHub dostop za `opbieps` ter `.txt` povezava sta urejena.
